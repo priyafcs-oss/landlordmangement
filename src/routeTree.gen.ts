@@ -13,6 +13,7 @@ import { Route as RentalRouteImport } from './routes/rental'
 import { Route as PortfolioRouteImport } from './routes/portfolio'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 
 const RentalRoute = RentalRouteImport.update({
   id: '/rental',
@@ -34,18 +35,25 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCopilotRoute = ApiCopilotRouteImport.update({
+  id: '/api/copilot',
+  path: '/api/copilot',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/expenses': typeof ExpensesRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
+  '/api/copilot': typeof ApiCopilotRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/expenses': typeof ExpensesRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
+  '/api/copilot': typeof ApiCopilotRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/expenses': typeof ExpensesRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
+  '/api/copilot': typeof ApiCopilotRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/expenses' | '/portfolio' | '/rental'
+  fullPaths: '/' | '/expenses' | '/portfolio' | '/rental' | '/api/copilot'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/expenses' | '/portfolio' | '/rental'
-  id: '__root__' | '/' | '/expenses' | '/portfolio' | '/rental'
+  to: '/' | '/expenses' | '/portfolio' | '/rental' | '/api/copilot'
+  id: '__root__' | '/' | '/expenses' | '/portfolio' | '/rental' | '/api/copilot'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   ExpensesRoute: typeof ExpensesRoute
   PortfolioRoute: typeof PortfolioRoute
   RentalRoute: typeof RentalRoute
+  ApiCopilotRoute: typeof ApiCopilotRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/copilot': {
+      id: '/api/copilot'
+      path: '/api/copilot'
+      fullPath: '/api/copilot'
+      preLoaderRoute: typeof ApiCopilotRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExpensesRoute: ExpensesRoute,
   PortfolioRoute: PortfolioRoute,
   RentalRoute: RentalRoute,
+  ApiCopilotRoute: ApiCopilotRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
