@@ -17,6 +17,8 @@ export const TEMPLATES: { key: TemplateKey; label: string }[] = [
 
 export function renderTemplate(key: TemplateKey, { tenant, property, outstanding }: TemplateInput): string {
   const addr = property?.address ?? "your rental property";
+  const ref = tenant.bankReference || "your bank reference";
+  const expiry = tenant.leaseExpiry || "the end of your current term (periodic)";
   switch (key) {
     case "arrears":
       return `Dear ${tenant.name},
@@ -25,7 +27,7 @@ We hope you are well. This is a friendly reminder that our records show an outst
         outstanding,
       )} on your account for ${addr}.
 
-To avoid any formal notices, please arrange payment within the next 7 days using your reference code ${tenant.bankReference}.
+To avoid any formal notices, please arrange payment within the next 7 days using your reference code ${ref}.
 
 If you have already made this payment, please disregard this message and reply with a receipt so we can reconcile.
 
@@ -45,7 +47,7 @@ The Landlord`;
     case "renewal":
       return `Dear ${tenant.name},
 
-Your lease at ${addr} is scheduled to expire on ${tenant.leaseExpiry}. We have valued you as a tenant and would like to offer a renewal of your tenancy.
+Your lease at ${addr} is scheduled to expire on ${expiry}. We have valued you as a tenant and would like to offer a renewal of your tenancy.
 
 Current rent: ${fmtCurrency(tenant.rentAmount)} ${tenant.rentFrequency}.
 
