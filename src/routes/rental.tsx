@@ -381,7 +381,7 @@ function BankFeedDialog() {
       if (!amount) continue;
       const lower = line.toLowerCase();
       const tenant = state.tenants.find((t) => {
-        const ref = t.bankReference.toLowerCase();
+        const ref = (t.bankReference ?? "").toLowerCase();
         if (ref && lower.includes(ref)) return true;
         const parts = t.name.toLowerCase().split(/\s+/);
         return parts.some((p) => p.length > 2 && lower.includes(p));

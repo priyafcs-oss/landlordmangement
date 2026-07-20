@@ -55,22 +55,25 @@ export function buildTenantLedger(
   const period = periodDays(tenant.rentFrequency);
   const rows: LedgerRow[] = [];
 
-  // Rent due milestones from lease start to today
+  // Rent due milestones from lease start to today (skip if no lease start)
   const today = todayISO();
-  let cursor = tenant.leaseStart;
-  while (cursor <= today && cursor <= tenant.leaseExpiry) {
-    const end = addDays(cursor, period - 1);
-    const cycleAmount = rate * period;
-    rows.push({
-      id: `due-${tenant.id}-${cursor}`,
-      date: cursor,
-      description: `Rent Due: ${cursor} to ${end}`,
-      debit: Math.round(cycleAmount * 100) / 100,
-      credit: 0,
-      balance: 0,
-      isDue: true,
-    });
-    cursor = addDays(cursor, period);
+  if (tenant.leaseStart) {
+    let cursor: string = tenant.leaseStart;
+    const cap = tenant.leaseExpiry || "9999-12-31";
+    while (cursor <= today && cursor <= cap) {
+      const end = addDays(cursor, period - 1);
+      const cycleAmount = rate * period;
+      rows.push({
+        id: `due-${tenant.id}-${cursor}`,
+        date: cursor,
+        description: `Rent Due: ${cursor} to ${end}`,
+        debit: Math.round(cycleAmount * 100) / 100,
+        credit: 0,
+        balance: 0,
+        isDue: true,
+      });
+      cursor = addDays(cursor, period);
+    }
   }
 
   // Add credit payments (from ledger entries)
@@ -136,12 +139,13 @@ export function tenantArrearsStatus(
 
 export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[]): string {
   const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
-  if (rate <= 0) return tenant.leaseStart;
+  const start = tenant.leaseStart ?? tenant.paidUpToDate;
+  if (rate <= 0) return start;
   const totalPaid = entries
     .filter((e) => e.tenantId === tenant.id && e.type === "Rent Payment")
     .reduce((s, e) => s + e.credit, 0);
   const daysCovered = Math.floor(totalPaid / rate);
-  return addDays(tenant.leaseStart, daysCovered - 1 < 0 ? 0 : daysCovered - 1);
+  return addDays(start, daysCovered - 1 < 0 ? 0 : daysCovered - 1);
 }
 
 export function daysUntil(dateISO: string): number {

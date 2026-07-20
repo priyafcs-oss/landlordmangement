@@ -45,6 +45,7 @@ function DashboardPage() {
   const netCashFlow = rentReceived + invoicesReceived - totalEmis - totalExpenses;
 
   const leaseAlerts = state.tenants.filter((t) => {
+    if (!t.leaseExpiry) return false;
     const d = daysUntil(t.leaseExpiry);
     return d >= 0 && d <= 60;
   });

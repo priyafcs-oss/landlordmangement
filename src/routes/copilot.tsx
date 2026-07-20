@@ -52,8 +52,8 @@ function CopilotPage() {
         name: t.name,
         property: prop?.address,
         rent: `${t.rentAmount} ${t.rentFrequency}`,
-        leaseExpiry: t.leaseExpiry,
-        daysUntilExpiry: daysUntil(t.leaseExpiry),
+        leaseExpiry: t.leaseExpiry || "Periodic",
+        daysUntilExpiry: t.leaseExpiry ? daysUntil(t.leaseExpiry) : null,
         paidUpToDate: t.paidUpToDate,
         totalOwing: total,
         rentArrears: outstandingRent,
@@ -82,7 +82,7 @@ function CopilotPage() {
       .filter((e) => e.hasWarranty && e.warrantyExpiry && daysUntil(e.warrantyExpiry) <= 90 && daysUntil(e.warrantyExpiry) >= 0)
       .map((e) => ({ item: e.itemName, expires: e.warrantyExpiry }));
     const leasesSoon = state.tenants
-      .filter((t) => daysUntil(t.leaseExpiry) <= 60 && daysUntil(t.leaseExpiry) >= 0)
+      .filter((t) => !!t.leaseExpiry && daysUntil(t.leaseExpiry) <= 60 && daysUntil(t.leaseExpiry) >= 0)
       .map((t) => ({ tenant: t.name, expires: t.leaseExpiry }));
     return { tenants: tenantsSummary, properties: propertiesSummary, warrantiesSoon, leasesSoon };
   };
