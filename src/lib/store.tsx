@@ -9,9 +9,11 @@ import type {
   Expense,
   Inspection,
   RentChange,
+  LeaseHistory,
+  MaintenanceRequest,
 } from "./types";
 
-const STORAGE_KEY = "landlord-app-v1";
+const STORAGE_KEY = "landlord-app-v2";
 
 const empty: AppState = {
   properties: [],
@@ -22,6 +24,8 @@ const empty: AppState = {
   expenses: [],
   inspections: [],
   rentChanges: [],
+  leaseHistory: [],
+  maintenanceRequests: [],
 };
 
 function seed(): AppState {
@@ -47,6 +51,7 @@ function seed(): AppState {
         propertyId: p1,
         leaseStart: leaseStart1,
         leaseExpiry: leaseExpiry1,
+        leaseDuration: "6 Months",
         rentAmount: 720,
         rentFrequency: "Weekly",
         bankReference: "REF-SK-2026",
@@ -63,6 +68,7 @@ function seed(): AppState {
         propertyId: p2,
         leaseStart: leaseStart2,
         leaseExpiry: leaseExpiry2,
+        leaseDuration: "12 Months",
         rentAmount: 520,
         rentFrequency: "Weekly",
         bankReference: "REF-MC-2026",
@@ -82,6 +88,8 @@ function seed(): AppState {
     expenses: [],
     inspections: [],
     rentChanges: [],
+    leaseHistory: [],
+    maintenanceRequests: [],
   };
 }
 
@@ -89,7 +97,11 @@ function load(): AppState {
   if (typeof window === "undefined") return empty;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // ensure new keys exist for older stored states
+      return { ...empty, ...parsed };
+    }
   } catch {}
   const s = seed();
   try {
@@ -103,42 +115,44 @@ interface StoreCtx {
   set: (updater: (s: AppState) => AppState) => void;
   reset: () => void;
 
-  // Properties
   addProperty: (p: Omit<Property, "id">) => void;
   updateProperty: (id: string, p: Partial<Property>) => void;
   deleteProperty: (id: string) => void;
 
-  // Tenants
   addTenant: (t: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string }) => void;
   updateTenant: (id: string, t: Partial<Tenant>) => void;
   deleteTenant: (id: string) => void;
 
-  // Ledger
+  renewLease: (
+    tenantId: string,
+    args: { newStart: string; newEnd?: string; newDuration?: Tenant["leaseDuration"]; newRent: number; newFrequency?: Tenant["rentFrequency"] },
+  ) => void;
+
   addLedger: (e: Omit<LedgerEntry, "id">) => void;
   deleteLedger: (id: string) => void;
 
-  // Invoices
   addInvoice: (i: Omit<TenantInvoice, "id">) => void;
   updateInvoice: (id: string, i: Partial<TenantInvoice>) => void;
   deleteInvoice: (id: string) => void;
 
-  // Loans
   addLoan: (l: Omit<Loan, "id">) => void;
   updateLoan: (id: string, l: Partial<Loan>) => void;
   deleteLoan: (id: string) => void;
 
-  // Expenses
   addExpense: (e: Omit<Expense, "id">) => void;
   updateExpense: (id: string, e: Partial<Expense>) => void;
   deleteExpense: (id: string) => void;
 
-  // Inspections
   addInspection: (i: Omit<Inspection, "id">) => void;
   updateInspection: (id: string, i: Partial<Inspection>) => void;
   deleteInspection: (id: string) => void;
 
-  // Rent changes
   addRentChange: (r: Omit<RentChange, "id">) => void;
+  addLeaseHistory: (h: Omit<LeaseHistory, "id">) => void;
+
+  addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => void;
+  updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
+  deleteMaintenanceRequest: (id: string) => void;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -187,9 +201,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addTenant: (t) =>
       set((s) => ({
         ...s,
-        tenants: [...s.tenants, { ...t, paidUpToDate: t.paidUpToDate || t.leaseStart, id: uid("t") }],
+        tenants: [
+          ...s.tenants,
+          { ...t, paidUpToDate: t.paidUpToDate || t.leaseStart || new Date().toISOString().slice(0, 10), id: uid("t") },
+        ],
       })),
-    updateTenant: (id, t) => set((s) => ({ ...s, tenants: s.tenants.map((x) => (x.id === id ? { ...x, ...t } : x)) })),
+    updateTenant: (id, patch) =>
+      set((s) => {
+        const prev = s.tenants.find((x) => x.id === id);
+        const nextTenants = s.tenants.map((x) => (x.id === id ? { ...x, ...patch } : x));
+        let rentChanges = s.rentChanges;
+        // Auto-log rent increase history when rentAmount changes
+        if (prev && patch.rentAmount !== undefined && patch.rentAmount !== prev.rentAmount) {
+          rentChanges = [
+            ...rentChanges,
+            {
+              id: uid("rc"),
+              tenantId: id,
+              changeDate: new Date().toISOString().slice(0, 10),
+              oldRent: prev.rentAmount,
+              newRent: patch.rentAmount,
+            },
+          ];
+        }
+        return { ...s, tenants: nextTenants, rentChanges };
+      }),
     deleteTenant: (id) =>
       set((s) => ({
         ...s,
@@ -197,7 +233,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ledger: s.ledger.filter((e) => e.tenantId !== id),
         invoices: s.invoices.filter((i) => i.tenantId !== id),
         rentChanges: s.rentChanges.filter((r) => r.tenantId !== id),
+        leaseHistory: s.leaseHistory.filter((r) => r.tenantId !== id),
       })),
+
+    renewLease: (tenantId, args) =>
+      set((s) => {
+        const prev = s.tenants.find((t) => t.id === tenantId);
+        if (!prev) return s;
+        const originalStart =
+          s.leaseHistory.find((h) => h.tenantId === tenantId)?.originalStartDate ?? prev.leaseStart ?? args.newStart;
+        const history: LeaseHistory = {
+          id: uid("lh"),
+          tenantId,
+          originalStartDate: originalStart,
+          pastStartDate: prev.leaseStart ?? args.newStart,
+          pastEndDate: prev.leaseExpiry ?? "",
+          pastRent: prev.rentAmount,
+          pastFrequency: prev.rentFrequency,
+        };
+        const rentChanges =
+          args.newRent !== prev.rentAmount
+            ? [
+                ...s.rentChanges,
+                {
+                  id: uid("rc"),
+                  tenantId,
+                  changeDate: new Date().toISOString().slice(0, 10),
+                  oldRent: prev.rentAmount,
+                  newRent: args.newRent,
+                },
+              ]
+            : s.rentChanges;
+        return {
+          ...s,
+          leaseHistory: [...s.leaseHistory, history],
+          rentChanges,
+          tenants: s.tenants.map((t) =>
+            t.id === tenantId
+              ? {
+                  ...t,
+                  leaseStart: args.newStart,
+                  leaseExpiry: args.newEnd || undefined,
+                  leaseDuration: args.newDuration ?? t.leaseDuration,
+                  rentAmount: args.newRent,
+                  rentFrequency: args.newFrequency ?? t.rentFrequency,
+                  lastRentIncreaseDate:
+                    args.newRent !== prev.rentAmount ? new Date().toISOString().slice(0, 10) : t.lastRentIncreaseDate,
+                }
+              : t,
+          ),
+        };
+      }),
 
     addLedger: (e) => set((s) => ({ ...s, ledger: [...s.ledger, { ...e, id: uid("le") }] })),
     deleteLedger: (id) => set((s) => ({ ...s, ledger: s.ledger.filter((e) => e.id !== id) })),
@@ -220,6 +306,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteInspection: (id) => set((s) => ({ ...s, inspections: s.inspections.filter((x) => x.id !== id) })),
 
     addRentChange: (r) => set((s) => ({ ...s, rentChanges: [...s.rentChanges, { ...r, id: uid("rc") }] })),
+    addLeaseHistory: (h) => set((s) => ({ ...s, leaseHistory: [...s.leaseHistory, { ...h, id: uid("lh") }] })),
+
+    addMaintenanceRequest: (m) =>
+      set((s) => ({
+        ...s,
+        maintenanceRequests: [
+          ...s.maintenanceRequests,
+          { ...m, id: uid("mr"), createdAt: new Date().toISOString(), status: "Pending" },
+        ],
+      })),
+    updateMaintenanceRequest: (id, m) =>
+      set((s) => ({
+        ...s,
+        maintenanceRequests: s.maintenanceRequests.map((x) => (x.id === id ? { ...x, ...m } : x)),
+      })),
+    deleteMaintenanceRequest: (id) =>
+      set((s) => ({ ...s, maintenanceRequests: s.maintenanceRequests.filter((x) => x.id !== id) })),
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
