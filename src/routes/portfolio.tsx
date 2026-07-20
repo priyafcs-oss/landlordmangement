@@ -16,9 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Building2, Pencil, Plus, Trash2, User, ShieldCheck } from "lucide-react";
-import { fmtCurrency } from "@/lib/calculations";
-import type { Property, Tenant, RentFrequency } from "@/lib/types";
+import { Building2, Pencil, Plus, Trash2, User, ShieldCheck, RefreshCw, FileText, History } from "lucide-react";
+import { fmtCurrency, addDays } from "@/lib/calculations";
+import type { Property, Tenant, RentFrequency, LeaseDuration } from "@/lib/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/portfolio")({
@@ -247,40 +247,16 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
               </div>
               {tenants.length === 0 && <div className="text-muted-foreground">No tenants linked.</div>}
               {tenants.map((t) => (
-                <div key={t.id} className="mb-2 rounded border p-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {t.leaseStart} → {t.leaseExpiry} • {fmtCurrency(t.rentAmount)}/{t.rentFrequency}
-                      </div>
-                      {t.bondAmount ? (
-                        <Badge variant="secondary" className="mt-2 gap-1">
-                          <ShieldCheck className="h-3 w-3" /> Bond Secured — {fmtCurrency(t.bondAmount)}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <div className="flex gap-1">
-                      <TenantDialog propertyId={prop.id} tenant={t}>
-                        <Button size="icon" variant="ghost">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                      </TenantDialog>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => {
-                          if (confirm("Delete tenant and their ledger history?")) {
-                            deleteTenant(t.id);
-                            toast.success("Tenant removed");
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                <TenantRow
+                  key={t.id}
+                  tenant={t}
+                  onDelete={() => {
+                    if (confirm("Delete tenant and their ledger history?")) {
+                      deleteTenant(t.id);
+                      toast.success("Tenant removed");
+                    }
+                  }}
+                />
               ))}
             </div>
 
@@ -303,6 +279,176 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
   );
 }
 
+function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void }) {
+  const { state } = useStore();
+  const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
+  const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
+  const [showHist, setShowHist] = useState(false);
+
+  return (
+    <div className="mb-2 rounded border p-3">
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="font-medium">{tenant.name}</div>
+          <div className="text-xs text-muted-foreground">
+            {tenant.leaseStart || "—"} → {tenant.leaseExpiry || "Periodic"} •{" "}
+            {fmtCurrency(tenant.rentAmount)}/{tenant.rentFrequency}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {tenant.bondAmount ? (
+              <Badge variant="secondary" className="gap-1">
+                <ShieldCheck className="h-3 w-3" /> Bond Secured — {fmtCurrency(tenant.bondAmount)}
+              </Badge>
+            ) : null}
+            {tenant.leaseDocumentFileName && (
+              <Badge variant="outline" className="gap-1">
+                <FileText className="h-3 w-3" /> Lease PDF
+              </Badge>
+            )}
+            {!tenant.leaseExpiry && <Badge variant="outline">Periodic</Badge>}
+          </div>
+        </div>
+        <div className="flex gap-1">
+          <RenewLeaseDialog tenant={tenant} />
+          <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
+            <Button size="icon" variant="ghost">
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </TenantDialog>
+          <Button size="icon" variant="ghost" onClick={onDelete}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      {(history.length > 0 || rentChanges.length > 0) && (
+        <div className="mt-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={() => setShowHist((v) => !v)}
+          >
+            <History className="h-3 w-3" /> {showHist ? "Hide" : "Show"} lease &amp; rent history (
+            {history.length + rentChanges.length})
+          </Button>
+          {showHist && (
+            <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
+              {history.map((h) => (
+                <div key={h.id}>
+                  Previous lease: {h.pastStartDate} → {h.pastEndDate || "Periodic"} @ {fmtCurrency(h.pastRent)}/
+                  {h.pastFrequency}
+                </div>
+              ))}
+              {rentChanges.map((r) => (
+                <div key={r.id}>
+                  {r.changeDate}: rent {fmtCurrency(r.oldRent)} → {fmtCurrency(r.newRent)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function computeLeaseEnd(start: string, duration: LeaseDuration | ""): string {
+  if (!start || !duration || duration === "Periodic") return "";
+  const months = duration === "6 Months" ? 6 : 12;
+  const d = new Date(start);
+  d.setMonth(d.getMonth() + months);
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
+  const { renewLease } = useStore();
+  const [open, setOpen] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const [start, setStart] = useState(today);
+  const [duration, setDuration] = useState<LeaseDuration | "">((tenant.leaseDuration as LeaseDuration) || "12 Months");
+  const [end, setEnd] = useState<string>(computeLeaseEnd(today, "12 Months"));
+  const [rent, setRent] = useState(tenant.rentAmount.toString());
+  const [frequency, setFrequency] = useState<RentFrequency>(tenant.rentFrequency);
+
+  const onStart = (v: string) => {
+    setStart(v);
+    if (duration && duration !== "Periodic") setEnd(computeLeaseEnd(v, duration));
+  };
+  const onDuration = (v: LeaseDuration) => {
+    setDuration(v);
+    if (v === "Periodic") setEnd("");
+    else setEnd(computeLeaseEnd(start, v));
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="icon" variant="ghost" title="Renew lease">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Renew lease — {tenant.name}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="New start date">
+            <Input type="date" value={start} onChange={(e) => onStart(e.target.value)} />
+          </Field>
+          <Field label="Duration">
+            <Select value={duration || undefined} onValueChange={(v) => onDuration(v as LeaseDuration)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="6 Months">6 Months</SelectItem>
+                <SelectItem value="12 Months">12 Months</SelectItem>
+                <SelectItem value="Periodic">Periodic / Ongoing</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Calculated end date">
+            <Input value={end || "Periodic (no fixed end)"} readOnly className="bg-muted" />
+          </Field>
+          <Field label="New rent (AUD)">
+            <Input type="number" value={rent} onChange={(e) => setRent(e.target.value)} />
+          </Field>
+          <Field label="Frequency">
+            <Select value={frequency} onValueChange={(v) => setFrequency(v as RentFrequency)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Weekly">Weekly</SelectItem>
+                <SelectItem value="Fortnightly">Fortnightly</SelectItem>
+                <SelectItem value="Monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              renewLease(tenant.id, {
+                newStart: start,
+                newEnd: end || undefined,
+                newDuration: (duration as LeaseDuration) || undefined,
+                newRent: parseFloat(rent) || 0,
+                newFrequency: frequency,
+              });
+              setOpen(false);
+              toast.success("Lease renewed. Previous lease archived to history.");
+            }}
+          >
+            Confirm Renewal
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function TenantDialog({
   propertyId,
   tenant,
@@ -312,15 +458,16 @@ export function TenantDialog({
   tenant?: Tenant;
   children?: React.ReactNode;
 }) {
-  const { addTenant, updateTenant, addRentChange, state } = useStore();
+  const { addTenant, updateTenant, state } = useStore();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     name: tenant?.name ?? "",
     email: tenant?.email ?? "",
-    leaseStart: tenant?.leaseStart ?? new Date().toISOString().slice(0, 10),
-    leaseExpiry:
-      tenant?.leaseExpiry ??
-      new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+    phone: tenant?.phone ?? "",
+    leaseStart: tenant?.leaseStart ?? "",
+    leaseExpiry: tenant?.leaseExpiry ?? "",
+    leaseDuration: (tenant?.leaseDuration ?? "") as LeaseDuration | "",
+    lastRentIncreaseDate: tenant?.lastRentIncreaseDate ?? "",
     rentAmount: tenant?.rentAmount?.toString() ?? "",
     rentFrequency: (tenant?.rentFrequency ?? "Weekly") as RentFrequency,
     bankReference: tenant?.bankReference ?? "",
@@ -328,7 +475,32 @@ export function TenantDialog({
     bondAmount: tenant?.bondAmount?.toString() ?? "",
     bondLodgementDate: tenant?.bondLodgementDate ?? "",
     bondReceiptNumber: tenant?.bondReceiptNumber ?? "",
+    leaseDocumentFileName: tenant?.leaseDocumentFileName ?? "",
+    leaseDocumentFileData: tenant?.leaseDocumentFileData ?? "",
   });
+
+  const onStart = (v: string) => {
+    setForm((s) => ({
+      ...s,
+      leaseStart: v,
+      leaseExpiry:
+        s.leaseDuration && s.leaseDuration !== "Periodic" ? computeLeaseEnd(v, s.leaseDuration) : s.leaseExpiry,
+    }));
+  };
+  const onDuration = (v: LeaseDuration) => {
+    setForm((s) => ({
+      ...s,
+      leaseDuration: v,
+      leaseExpiry: v === "Periodic" ? "" : computeLeaseEnd(s.leaseStart, v),
+    }));
+  };
+  const onLeaseFile = (f: File | undefined) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () =>
+      setForm((s) => ({ ...s, leaseDocumentFileName: f.name, leaseDocumentFileData: String(reader.result) }));
+    reader.readAsDataURL(f);
+  };
 
   const check12Months = () => {
     if (!tenant) return true;
@@ -338,7 +510,8 @@ export function TenantDialog({
     const last = state.rentChanges
       .filter((r) => r.tenantId === tenant.id)
       .sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
-    const baseDate = last?.changeDate ?? tenant.leaseStart;
+    const baseDate = last?.changeDate ?? tenant.lastRentIncreaseDate ?? tenant.leaseStart ?? "";
+    if (!baseDate) return true;
     const daysSince = Math.round((Date.now() - new Date(baseDate).getTime()) / 86400000);
     if (daysSince < 365) {
       return confirm(
@@ -351,31 +524,22 @@ export function TenantDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children ?? <Button size="sm">Add Tenant</Button>}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{tenant ? "Edit tenant" : "Onboard tenant"}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Full name">
+          <Field label="Full name *">
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
-          <Field label="Email">
-            <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          </Field>
-          <Field label="Lease start">
-            <Input type="date" value={form.leaseStart} onChange={(e) => setForm({ ...form, leaseStart: e.target.value })} />
-          </Field>
-          <Field label="Lease expiry">
-            <Input type="date" value={form.leaseExpiry} onChange={(e) => setForm({ ...form, leaseExpiry: e.target.value })} />
-          </Field>
-          <Field label="Rent amount">
+          <Field label="Rent amount *">
             <Input
               type="number"
               value={form.rentAmount}
               onChange={(e) => setForm({ ...form, rentAmount: e.target.value })}
             />
           </Field>
-          <Field label="Rent frequency">
+          <Field label="Rent frequency *">
             <Select
               value={form.rentFrequency}
               onValueChange={(v) => setForm({ ...form, rentFrequency: v as RentFrequency })}
@@ -389,6 +553,42 @@ export function TenantDialog({
                 <SelectItem value="Monthly">Monthly</SelectItem>
               </SelectContent>
             </Select>
+          </Field>
+          <Field label="Email">
+            <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
+          <Field label="Phone">
+            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </Field>
+          <Field label="Lease start date">
+            <Input type="date" value={form.leaseStart} onChange={(e) => onStart(e.target.value)} />
+          </Field>
+          <Field label="Lease duration">
+            <Select value={form.leaseDuration || undefined} onValueChange={(v) => onDuration(v as LeaseDuration)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Periodic / Ongoing" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="6 Months">6 Months</SelectItem>
+                <SelectItem value="12 Months">12 Months</SelectItem>
+                <SelectItem value="Periodic">Periodic / Ongoing</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Lease end date (auto)">
+            <Input
+              type="date"
+              value={form.leaseExpiry}
+              onChange={(e) => setForm({ ...form, leaseExpiry: e.target.value })}
+              placeholder="Periodic"
+            />
+          </Field>
+          <Field label="Last rent increase date">
+            <Input
+              type="date"
+              value={form.lastRentIncreaseDate}
+              onChange={(e) => setForm({ ...form, lastRentIncreaseDate: e.target.value })}
+            />
           </Field>
           <Field label="Bank reference code">
             <Input value={form.bankReference} onChange={(e) => setForm({ ...form, bankReference: e.target.value })} />
@@ -419,36 +619,42 @@ export function TenantDialog({
               onChange={(e) => setForm({ ...form, bondReceiptNumber: e.target.value })}
             />
           </Field>
+          <Field label="Lease agreement (PDF)">
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => onLeaseFile(e.target.files?.[0])} />
+            {form.leaseDocumentFileName && (
+              <div className="mt-1 text-xs text-muted-foreground">📎 {form.leaseDocumentFileName}</div>
+            )}
+          </Field>
         </div>
         <DialogFooter>
           <Button
             onClick={() => {
-              if (!form.name) return toast.error("Name required");
+              if (!form.name) return toast.error("Name is required");
+              if (!form.rentAmount) return toast.error("Rent amount is required");
               if (!check12Months()) return;
+              const rentAmount = parseFloat(form.rentAmount) || 0;
               const payload: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string } = {
                 name: form.name,
-                email: form.email,
+                email: form.email || undefined,
+                phone: form.phone || undefined,
                 propertyId,
-                leaseStart: form.leaseStart,
-                leaseExpiry: form.leaseExpiry,
-                rentAmount: parseFloat(form.rentAmount) || 0,
+                leaseStart: form.leaseStart || undefined,
+                leaseExpiry: form.leaseExpiry || undefined,
+                leaseDuration: (form.leaseDuration || undefined) as LeaseDuration | undefined,
+                lastRentIncreaseDate: form.lastRentIncreaseDate || undefined,
+                rentAmount,
                 rentFrequency: form.rentFrequency,
-                bankReference: form.bankReference,
-                bankAccountHolder: form.bankAccountHolder,
+                bankReference: form.bankReference || undefined,
+                bankAccountHolder: form.bankAccountHolder || undefined,
                 bondAmount: form.bondAmount ? parseFloat(form.bondAmount) : undefined,
                 bondLodgementDate: form.bondLodgementDate || undefined,
                 bondReceiptNumber: form.bondReceiptNumber || undefined,
-                paidUpToDate: tenant?.paidUpToDate ?? form.leaseStart,
+                leaseDocumentFileName: form.leaseDocumentFileName || undefined,
+                leaseDocumentFileData: form.leaseDocumentFileData || undefined,
+                paidUpToDate: tenant?.paidUpToDate ?? form.leaseStart ?? new Date().toISOString().slice(0, 10),
               };
               if (tenant) {
-                if (parseFloat(form.rentAmount) !== tenant.rentAmount) {
-                  addRentChange({
-                    tenantId: tenant.id,
-                    changeDate: new Date().toISOString().slice(0, 10),
-                    oldRent: tenant.rentAmount,
-                    newRent: parseFloat(form.rentAmount),
-                  });
-                }
+                // rent-change is auto-logged inside updateTenant
                 updateTenant(tenant.id, payload);
               } else {
                 addTenant(payload);

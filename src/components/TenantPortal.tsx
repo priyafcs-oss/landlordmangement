@@ -38,11 +38,11 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Lease expires</div>
-            <div className="font-medium">{tenant.leaseExpiry}</div>
+            <div className="font-medium">{tenant.leaseExpiry || "Periodic"}</div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Reference</div>
-            <div className="font-medium">{tenant.bankReference}</div>
+            <div className="font-medium">{tenant.bankReference || "—"}</div>
           </div>
         </CardContent>
       </Card>
@@ -83,7 +83,7 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
             <div className="rounded bg-muted p-3 text-xs">
               <div className="font-medium">How to pay</div>
               <div className="mt-1 text-muted-foreground">
-                Bank transfer using reference <b>{tenant.bankReference}</b>. Contact your landlord for full account
+                Bank transfer using reference <b>{tenant.bankReference || "—"}</b>. Contact your landlord for full account
                 details.
               </div>
             </div>

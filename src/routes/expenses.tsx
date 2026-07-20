@@ -26,7 +26,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Trash2, FileText, Download, ClipboardCheck, Wrench } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
-import type { Expense, Inspection } from "@/lib/types";
+import type { Expense, Inspection, ChecklistItem } from "@/lib/types";
+import { INSPECTION_TEMPLATES } from "@/lib/types";
 
 export const Route = createFileRoute("/expenses")({
   head: () => ({
@@ -335,110 +336,11 @@ function ExpenseDialog() {
 }
 
 function InspectionsTab() {
-  const { state, addInspection, deleteInspection } = useStore();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    propertyId: state.properties[0]?.id ?? "",
-    date: todayISO(),
-    type: "Routine" as Inspection["type"],
-    status: "Scheduled" as Inspection["status"],
-    notes: "",
-    fileFileName: "",
-    fileData: "",
-  });
-
-  const handleFile = (f: File | undefined) => {
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setForm((s) => ({ ...s, fileFileName: f.name, fileData: String(reader.result) }));
-    };
-    reader.readAsDataURL(f);
-  };
-
+  const { state, deleteInspection } = useStore();
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" /> Log Inspection
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>New inspection</DialogTitle>
-            </DialogHeader>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Property">
-                <Select value={form.propertyId} onValueChange={(v) => setForm({ ...form, propertyId: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {state.properties.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.address}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Date">
-                <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              </Field>
-              <Field label="Type">
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as any })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Entry">Entry</SelectItem>
-                    <SelectItem value="Routine">Routine</SelectItem>
-                    <SelectItem value="Exit">Exit</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Status">
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as any })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Scheduled">Scheduled</SelectItem>
-                    <SelectItem value="Completed">Completed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Condition report / photos">
-                <Input type="file" onChange={(e) => handleFile(e.target.files?.[0])} />
-              </Field>
-              <Field label="Notes">
-                <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-              </Field>
-            </div>
-            <DialogFooter>
-              <Button
-                onClick={() => {
-                  if (!form.propertyId) return toast.error("Property required");
-                  addInspection({
-                    propertyId: form.propertyId,
-                    date: form.date,
-                    type: form.type,
-                    status: form.status,
-                    notes: form.notes,
-                    fileFileName: form.fileFileName || undefined,
-                    fileData: form.fileData || undefined,
-                  });
-                  setOpen(false);
-                  toast.success("Inspection logged");
-                }}
-              >
-                Save
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <InspectionDialog />
       </div>
       <div className="grid gap-3">
         {state.inspections.length === 0 && (
@@ -450,6 +352,8 @@ function InspectionsTab() {
         )}
         {state.inspections.map((i) => {
           const prop = state.properties.find((p) => p.id === i.propertyId);
+          const passed = (i.checklist ?? []).filter((c) => c.result === "Pass").length;
+          const failed = (i.checklist ?? []).filter((c) => c.result === "Fail").length;
           return (
             <Card key={i.id}>
               <CardContent className="flex flex-wrap items-center justify-between gap-2 p-4">
@@ -458,10 +362,17 @@ function InspectionsTab() {
                     <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">{i.type} Inspection</span>
                     <Badge variant={i.status === "Completed" ? "secondary" : "outline"}>{i.status}</Badge>
+                    {i.checklist && i.checklist.length > 0 && (
+                      <Badge variant="outline">
+                        {passed} pass / {failed} fail
+                      </Badge>
+                    )}
+                    {i.signature && <Badge variant="outline">Signed: {i.signature}</Badge>}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {i.date} • {prop?.address}
                     {i.fileFileName && <> • 📎 {i.fileFileName}</>}
+                    {i.photos && i.photos.length > 0 && <> • {i.photos.length} photo(s)</>}
                   </div>
                   {i.notes && <div className="mt-1 text-xs">{i.notes}</div>}
                 </div>
@@ -481,6 +392,182 @@ function InspectionsTab() {
         })}
       </div>
     </div>
+  );
+}
+
+function InspectionDialog() {
+  const { state, addInspection } = useStore();
+  const [open, setOpen] = useState(false);
+  const [propertyId, setPropertyId] = useState(state.properties[0]?.id ?? "");
+  const [date, setDate] = useState(todayISO());
+  const [type, setType] = useState<Inspection["type"]>("Routine");
+  const [status, setStatus] = useState<Inspection["status"]>("Scheduled");
+  const [notes, setNotes] = useState("");
+  const [signature, setSignature] = useState("");
+  const [fileFileName, setFileFileName] = useState("");
+  const [fileData, setFileData] = useState("");
+  const [photos, setPhotos] = useState<{ name: string; data: string }[]>([]);
+  const [checklist, setChecklist] = useState<ChecklistItem[]>(
+    INSPECTION_TEMPLATES.Routine.map((label) => ({ label, result: undefined, notes: "" })),
+  );
+
+  const onTypeChange = (v: Inspection["type"]) => {
+    setType(v);
+    setChecklist(INSPECTION_TEMPLATES[v].map((label) => ({ label, result: undefined, notes: "" })));
+  };
+
+  const handleFile = (f: File | undefined) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFileFileName(f.name);
+      setFileData(String(reader.result));
+    };
+    reader.readAsDataURL(f);
+  };
+
+  const onPhotos = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach((f) => {
+      const reader = new FileReader();
+      reader.onload = () => setPhotos((ps) => [...ps, { name: f.name, data: String(reader.result) }]);
+      reader.readAsDataURL(f);
+    });
+  };
+
+  const update = (i: number, patch: Partial<ChecklistItem>) => {
+    setChecklist((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button className="gap-2">
+          <Plus className="h-4 w-4" /> Log Inspection
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New inspection</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Property">
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Date">
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Field label="Type (loads template)">
+            <Select value={type} onValueChange={(v) => onTypeChange(v as Inspection["type"])}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Entry">Entry</SelectItem>
+                <SelectItem value="Routine">Routine</SelectItem>
+                <SelectItem value="Exit">Exit</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Status">
+            <Select value={status} onValueChange={(v) => setStatus(v as Inspection["status"])}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Scheduled">Scheduled</SelectItem>
+                <SelectItem value="Completed">Completed</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Condition report PDF">
+            <Input type="file" onChange={(e) => handleFile(e.target.files?.[0])} />
+            {fileFileName && <div className="mt-1 text-xs text-muted-foreground">📎 {fileFileName}</div>}
+          </Field>
+          <Field label="Photos">
+            <Input type="file" accept="image/*" multiple onChange={(e) => onPhotos(e.target.files)} />
+            {photos.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {photos.map((p, i) => (
+                  <img key={i} src={p.data} alt={p.name} className="h-10 w-10 rounded object-cover" />
+                ))}
+              </div>
+            )}
+          </Field>
+          <Field label="Notes">
+            <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+          <Field label="Digital signature (typed name)">
+            <Input placeholder="e.g. Alex Landlord" value={signature} onChange={(e) => setSignature(e.target.value)} />
+          </Field>
+        </div>
+
+        <div className="mt-4 rounded border">
+          <div className="border-b bg-muted/50 px-3 py-2 text-sm font-medium">{type} checklist</div>
+          <div className="divide-y">
+            {checklist.map((c, i) => (
+              <div key={i} className="grid gap-2 p-3 sm:grid-cols-[1fr_auto_1fr]">
+                <div className="text-sm">{c.label}</div>
+                <div className="flex gap-1">
+                  {(["Pass", "Fail", "N/A"] as const).map((r) => (
+                    <Button
+                      key={r}
+                      size="sm"
+                      variant={c.result === r ? "default" : "outline"}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => update(i, { result: r })}
+                    >
+                      {r}
+                    </Button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="Notes"
+                  value={c.notes ?? ""}
+                  onChange={(e) => update(i, { notes: e.target.value })}
+                  className="h-8"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              if (!propertyId) return toast.error("Property required");
+              addInspection({
+                propertyId,
+                date,
+                type,
+                status,
+                notes,
+                fileFileName: fileFileName || undefined,
+                fileData: fileData || undefined,
+                checklist,
+                photos,
+                signature: signature || undefined,
+              });
+              setOpen(false);
+              toast.success("Inspection logged");
+            }}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

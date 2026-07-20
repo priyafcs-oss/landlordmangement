@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as PortfolioRouteImport } from './routes/portfolio'
+import { Route as MaintenanceRouteImport } from './routes/maintenance'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as IndexRouteImport } from './routes/index'
@@ -24,6 +25,11 @@ const RentalRoute = RentalRouteImport.update({
 const PortfolioRoute = PortfolioRouteImport.update({
   id: '/portfolio',
   path: '/portfolio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MaintenanceRoute = MaintenanceRouteImport.update({
+  id: '/maintenance',
+  path: '/maintenance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExpensesRoute = ExpensesRouteImport.update({
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/copilot': typeof CopilotRoute
   '/expenses': typeof ExpensesRoute
+  '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/api/copilot': typeof ApiCopilotRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/copilot': typeof CopilotRoute
   '/expenses': typeof ExpensesRoute
+  '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/api/copilot': typeof ApiCopilotRoute
@@ -68,6 +76,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/copilot': typeof CopilotRoute
   '/expenses': typeof ExpensesRoute
+  '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/api/copilot': typeof ApiCopilotRoute
@@ -78,16 +87,25 @@ export interface FileRouteTypes {
     | '/'
     | '/copilot'
     | '/expenses'
+    | '/maintenance'
     | '/portfolio'
     | '/rental'
     | '/api/copilot'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/copilot' | '/expenses' | '/portfolio' | '/rental' | '/api/copilot'
+  to:
+    | '/'
+    | '/copilot'
+    | '/expenses'
+    | '/maintenance'
+    | '/portfolio'
+    | '/rental'
+    | '/api/copilot'
   id:
     | '__root__'
     | '/'
     | '/copilot'
     | '/expenses'
+    | '/maintenance'
     | '/portfolio'
     | '/rental'
     | '/api/copilot'
@@ -97,6 +115,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CopilotRoute: typeof CopilotRoute
   ExpensesRoute: typeof ExpensesRoute
+  MaintenanceRoute: typeof MaintenanceRoute
   PortfolioRoute: typeof PortfolioRoute
   RentalRoute: typeof RentalRoute
   ApiCopilotRoute: typeof ApiCopilotRoute
@@ -116,6 +135,13 @@ declare module '@tanstack/react-router' {
       path: '/portfolio'
       fullPath: '/portfolio'
       preLoaderRoute: typeof PortfolioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/maintenance': {
+      id: '/maintenance'
+      path: '/maintenance'
+      fullPath: '/maintenance'
+      preLoaderRoute: typeof MaintenanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/expenses': {
@@ -153,6 +179,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CopilotRoute: CopilotRoute,
   ExpensesRoute: ExpensesRoute,
+  MaintenanceRoute: MaintenanceRoute,
   PortfolioRoute: PortfolioRoute,
   RentalRoute: RentalRoute,
   ApiCopilotRoute: ApiCopilotRoute,
@@ -160,13 +187,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

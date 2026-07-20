@@ -3,6 +3,7 @@ import {
   Outlet,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
   Link,
@@ -97,19 +98,32 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const isPublic = pathname.startsWith("/maintenance");
   return (
     <QueryClientProvider client={queryClient}>
       <StoreProvider>
-        <SidebarProvider>
-          <AppSidebar />
-          <SidebarInset className="min-w-0">
-            <AppHeader />
-            <main className="flex-1 overflow-x-hidden">
+        {isPublic ? (
+          <>
+            <main className="min-h-screen bg-background">
               <Outlet />
             </main>
-          </SidebarInset>
-        </SidebarProvider>
-        <Toaster richColors position="top-right" />
+            <Toaster richColors position="top-right" />
+          </>
+        ) : (
+          <>
+            <SidebarProvider>
+              <AppSidebar />
+              <SidebarInset className="min-w-0">
+                <AppHeader />
+                <main className="flex-1 overflow-x-hidden">
+                  <Outlet />
+                </main>
+              </SidebarInset>
+            </SidebarProvider>
+            <Toaster richColors position="top-right" />
+          </>
+        )}
       </StoreProvider>
     </QueryClientProvider>
   );
