@@ -16,9 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Building2, Pencil, Plus, Trash2, User, ShieldCheck } from "lucide-react";
-import { fmtCurrency } from "@/lib/calculations";
-import type { Property, Tenant, RentFrequency } from "@/lib/types";
+import { Building2, Pencil, Plus, Trash2, User, ShieldCheck, RefreshCw, FileText, History } from "lucide-react";
+import { fmtCurrency, addDays } from "@/lib/calculations";
+import type { Property, Tenant, RentFrequency, LeaseDuration } from "@/lib/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/portfolio")({
