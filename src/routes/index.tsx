@@ -10,7 +10,7 @@ import {
   todayISO,
   daysBetween,
 } from "@/lib/calculations";
-import { AlertTriangle, TrendingUp, ShieldCheck, ClipboardCheck, Wallet, Landmark, ArrowRight } from "lucide-react";
+import { AlertTriangle, TrendingUp, ShieldCheck, ClipboardCheck, Wallet, Landmark, ArrowRight, Wrench } from "lucide-react";
 import {
   ChartContainer,
   ChartTooltip,
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/chart";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { Link } from "@tanstack/react-router";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -202,7 +203,82 @@ function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <MaintenanceRequestsWidget />
     </div>
+  );
+}
+
+function MaintenanceRequestsWidget() {
+  const { state, updateMaintenanceRequest, addExpense } = useStore();
+  const pending = state.maintenanceRequests.filter((r) => r.status === "Pending");
+  const convert = (id: string) => {
+    const req = state.maintenanceRequests.find((r) => r.id === id);
+    if (!req) return;
+    addExpense({
+      itemName: `${req.category}: ${req.description.slice(0, 60)}`,
+      cost: 0,
+      date: todayISO(),
+      propertyId: req.propertyId,
+      taxCategory: "Immediate Deduction",
+      hasWarranty: false,
+      rechargeToTenant: false,
+    });
+    updateMaintenanceRequest(id, { status: "Converted" });
+    toast.success("Converted to expense — update cost on the Expenses tab");
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Wrench className="h-4 w-4 text-orange-600" />
+          Tenant maintenance requests ({pending.length})
+          <Button asChild variant="ghost" size="sm" className="ml-auto h-7 px-2 text-xs">
+            <Link to="/maintenance">Open public form</Link>
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {pending.length === 0 && (
+          <div className="text-muted-foreground">No pending requests. Share your /maintenance link with tenants.</div>
+        )}
+        {pending.map((r) => {
+          const prop = state.properties.find((p) => p.id === r.propertyId);
+          return (
+            <div key={r.id} className="flex flex-wrap items-start justify-between gap-3 rounded border p-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{r.category}</Badge>
+                  <span className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</span>
+                  {r.contactName && <span className="text-xs">• {r.contactName}</span>}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">{prop?.address}</div>
+                <div className="mt-1">{r.description}</div>
+                {r.photos && r.photos.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {r.photos.map((p, i) => (
+                      <img key={i} src={p.data} alt={p.name} className="h-14 w-14 rounded object-cover" />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => convert(r.id)}>
+                  Convert to Expense
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => updateMaintenanceRequest(r.id, { status: "Dismissed" })}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
