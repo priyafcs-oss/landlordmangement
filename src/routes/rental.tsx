@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, Plus, Send, Upload, Copy, FileText } from "lucide-react";
+import { Trash2, Plus, Send, Upload, Copy, SlidersHorizontal } from "lucide-react";
 import {
   buildTenantLedger,
   fmtCurrency,
@@ -47,7 +47,32 @@ export const Route = createFileRoute("/rental")({
 
 function RentalHubPage() {
   const { state } = useStore();
-  const [selected, setSelected] = useState<string | "all">("all");
+  // "all" | tenant id
+  const [selectedTenant, setSelectedTenant] = useState<string | "all">("all");
+  // "all" | property id — kept in sync with selectedTenant
+  const [selectedProperty, setSelectedProperty] = useState<string | "all">("all");
+
+  // Bi-directional sync: when a tenant is picked, snap the property dropdown.
+  useEffect(() => {
+    if (selectedTenant === "all") {
+      setSelectedProperty("all");
+      return;
+    }
+    const t = state.tenants.find((x) => x.id === selectedTenant);
+    if (t && t.propertyId !== selectedProperty) setSelectedProperty(t.propertyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTenant]);
+
+  // Bi-directional sync: when a property is picked, snap the tenant to first match.
+  const handleSelectProperty = (pid: string | "all") => {
+    setSelectedProperty(pid);
+    if (pid === "all") {
+      setSelectedTenant("all");
+      return;
+    }
+    const t = state.tenants.find((x) => x.propertyId === pid);
+    setSelectedTenant(t ? t.id : "all");
+  };
 
   const tenantStatuses = useMemo(() => {
     return state.tenants.map((t) => {
@@ -56,14 +81,15 @@ function RentalHubPage() {
     });
   }, [state]);
 
-  const activeTenants = selected === "all" ? state.tenants : state.tenants.filter((t) => t.id === selected);
+  const activeTenants =
+    selectedTenant === "all" ? state.tenants : state.tenants.filter((t) => t.id === selectedTenant);
 
   return (
     <div className="flex min-h-[calc(100vh-3.5rem)]">
       {/* Directory sidebar */}
       <aside className="hidden w-64 shrink-0 border-r bg-muted/30 md:block">
         <div className="border-b p-3">
-          <Button variant="outline" size="sm" className="w-full" onClick={() => setSelected("all")}>
+          <Button variant="outline" size="sm" className="w-full" onClick={() => setSelectedTenant("all")}>
             Show All Tenants
           </Button>
         </div>
@@ -71,10 +97,10 @@ function RentalHubPage() {
           {tenantStatuses.map(({ tenant, arrears }) => (
             <button
               key={tenant.id}
-              onClick={() => setSelected(tenant.id)}
+              onClick={() => setSelectedTenant(tenant.id)}
               className={
                 "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent " +
-                (selected === tenant.id ? "bg-accent" : "")
+                (selectedTenant === tenant.id ? "bg-accent" : "")
               }
             >
               <span
@@ -97,7 +123,20 @@ function RentalHubPage() {
             <h1 className="text-2xl font-semibold tracking-tight">Rental Hub</h1>
             <p className="text-sm text-muted-foreground">Ledgers, arrears and payment reconciliation.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={selectedProperty} onValueChange={(v) => handleSelectProperty(v)}>
+              <SelectTrigger className="h-9 w-[220px]">
+                <SelectValue placeholder="Filter by property" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All properties</SelectItem>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <QuickAddTenant />
             <BankFeedDialog />
           </div>
@@ -105,15 +144,15 @@ function RentalHubPage() {
 
         {/* Mobile filter chips */}
         <div className="flex gap-2 overflow-x-auto md:hidden">
-          <Button variant={selected === "all" ? "default" : "outline"} size="sm" onClick={() => setSelected("all")}>
+          <Button variant={selectedTenant === "all" ? "default" : "outline"} size="sm" onClick={() => setSelectedTenant("all")}>
             All
           </Button>
           {tenantStatuses.map(({ tenant, arrears }) => (
             <Button
               key={tenant.id}
               size="sm"
-              variant={selected === tenant.id ? "default" : "outline"}
-              onClick={() => setSelected(tenant.id)}
+              variant={selectedTenant === tenant.id ? "default" : "outline"}
+              onClick={() => setSelectedTenant(tenant.id)}
               className="gap-1 whitespace-nowrap"
             >
               <span className={"h-2 w-2 rounded-full " + (arrears ? "bg-red-500" : "bg-emerald-500")} />
@@ -231,6 +270,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
                 Edit Tenant Details
               </Button>
             </TenantDialog>
+            <AdjustmentDialog tenant={tenant} />
             <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" variant="outline" className="gap-1">
@@ -304,6 +344,85 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function AdjustmentDialog({ tenant }: { tenant: Tenant }) {
+  const { addLedger } = useStore();
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<"Credit" | "Debit">("Credit");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [date, setDate] = useState(todayISO());
+
+  const post = () => {
+    const val = parseFloat(amount);
+    if (!val || val <= 0) return toast.error("Enter a valid amount");
+    if (!description) return toast.error("Description required");
+    addLedger({
+      tenantId: tenant.id,
+      date,
+      type: kind === "Credit" ? "Adjustment Credit" : "Adjustment Debit",
+      description: `Adjustment: ${description}`,
+      debit: kind === "Debit" ? val : 0,
+      credit: kind === "Credit" ? val : 0,
+      manual: true,
+    });
+    setOpen(false);
+    setAmount("");
+    setDescription("");
+    toast.success(`One-off ${kind.toLowerCase()} adjustment posted`);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="gap-1">
+          <SlidersHorizontal className="h-3 w-3" /> Add Adjustment
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>One-off ledger adjustment</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          Modifies this billing cycle's running balance only. Does not change the tenant's base rent setting.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Type</Label>
+            <Select value={kind} onValueChange={(v) => setKind(v as "Credit" | "Debit")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Credit">Credit (reduce balance owed)</SelectItem>
+                <SelectItem value="Debit">Debit (charge tenant)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Amount (AUD)</Label>
+            <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Date</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label className="text-xs">Description</Label>
+            <Input
+              placeholder="e.g. 1-week rent reduction while hot water repaired"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={post}>Post Adjustment</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
