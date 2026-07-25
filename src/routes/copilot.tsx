@@ -32,7 +32,7 @@ interface Msg {
 }
 
 function CopilotPage() {
-  const { state } = useStore();
+  const { state, consumeAiBudget } = useStore();
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "assistant",
