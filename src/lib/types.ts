@@ -6,6 +6,8 @@ export interface Property {
   address: string;
   purchasePrice: number;
   currentValue: number;
+  /** Optional short unique code tenants type into public maintenance form */
+  tenantCode?: string;
 }
 
 export interface Tenant {
@@ -15,6 +17,9 @@ export interface Tenant {
   rentFrequency: RentFrequency; // required
   email?: string;
   phone?: string;
+  emergencyContact?: string;
+  permanentAddress?: string;
+  noticePeriod?: string; // e.g. "14 days"
   propertyId: string;
   leaseStart?: string;
   leaseExpiry?: string; // empty string / undefined = Periodic
@@ -28,6 +33,10 @@ export interface Tenant {
   bondReceiptNumber?: string;
   leaseDocumentFileName?: string;
   leaseDocumentFileData?: string; // base64 (simulated Supabase Storage)
+  idProofFileName?: string;
+  idProofFileData?: string;
+  bondTransferFileName?: string;
+  bondTransferFileData?: string;
 }
 
 export type LedgerType =
@@ -91,6 +100,13 @@ export interface ChecklistItem {
   label: string;
   result?: "Pass" | "Fail" | "N/A";
   notes?: string;
+  photoData?: string;
+  photoName?: string;
+}
+
+export interface ChecklistRoom {
+  name: string;
+  items: ChecklistItem[];
 }
 
 export interface Inspection {
@@ -102,7 +118,10 @@ export interface Inspection {
   notes?: string;
   fileFileName?: string;
   fileData?: string;
+  /** Legacy flat checklist — kept for backwards compat */
   checklist?: ChecklistItem[];
+  /** New: rooms with items, dynamically added/removed */
+  rooms?: ChecklistRoom[];
   photos?: { name: string; data: string }[];
   signature?: string; // typed-name digital signature
 }
@@ -127,14 +146,27 @@ export interface LeaseHistory {
 
 export interface MaintenanceRequest {
   id: string;
-  propertyId: string;
+  /** Resolved property id if the typed address/code matched an existing property */
+  propertyId?: string;
+  /** Free-text address or tenant code as typed by the reporter */
+  propertyAddressTyped: string;
   category: string;
   description: string;
+  urgency: "Low" | "Medium" | "High";
   photos: { name: string; data: string }[];
+  video?: { name: string; data: string };
   status: "Pending" | "Converted" | "Dismissed";
-  contactName?: string;
-  contactPhone?: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
   createdAt: string;
+}
+
+export interface AiConfig {
+  enabled: boolean;
+  dailyCount: number;
+  countDate: string; // YYYY-MM-DD
+  dailyLimit: number;
 }
 
 export interface AppState {
@@ -148,6 +180,7 @@ export interface AppState {
   rentChanges: RentChange[];
   leaseHistory: LeaseHistory[];
   maintenanceRequests: MaintenanceRequest[];
+  aiConfig: AiConfig;
 }
 
 // Predefined inspection checklist templates
@@ -180,5 +213,25 @@ export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {
     "Smoke alarms",
     "Keys returned",
     "Yard / external",
+  ],
+};
+
+export const DEFAULT_INSPECTION_ROOMS: Record<Inspection["type"], ChecklistRoom[]> = {
+  Entry: [
+    { name: "Entry / Exterior", items: [{ label: "Front door & locks" }, { label: "Yard / external" }] },
+    { name: "Kitchen", items: [{ label: "Appliances" }, { label: "Cabinets & bench" }] },
+    { name: "Bathroom", items: [{ label: "Fixtures" }, { label: "Tiles & grout" }] },
+    { name: "Living areas", items: [{ label: "Walls & paint" }, { label: "Floors & carpet" }, { label: "Windows & screens" }, { label: "Smoke alarms" }] },
+  ],
+  Routine: [
+    { name: "Kitchen", items: [{ label: "Cleanliness" }, { label: "Appliances working" }] },
+    { name: "Bathroom", items: [{ label: "Cleanliness" }, { label: "Leaks / mould" }] },
+    { name: "Living areas", items: [{ label: "Walls" }, { label: "Floors" }, { label: "Smoke alarms" }] },
+  ],
+  Exit: [
+    { name: "Entry / Exterior", items: [{ label: "Front door & locks" }, { label: "Yard / external" }, { label: "Keys returned" }] },
+    { name: "Kitchen", items: [{ label: "Cleanliness" }, { label: "Appliances" }] },
+    { name: "Bathroom", items: [{ label: "Cleanliness" }] },
+    { name: "Living areas", items: [{ label: "Walls (damage)" }, { label: "Floors & carpet" }, { label: "Smoke alarms" }] },
   ],
 };

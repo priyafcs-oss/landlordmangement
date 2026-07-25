@@ -1,15 +1,18 @@
 import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice } from "./types";
 
-export function dailyRentRate(amount: number, freq: RentFrequency): number {
-  if (freq === "Weekly") return amount / 7;
-  if (freq === "Fortnightly") return amount / 14;
-  return (amount * 12) / 365;
-}
-
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;
   if (freq === "Fortnightly") return 14;
-  return 30; // approximate cycle for milestone display
+  return 30; // monthly cycle length used for structural milestone display
+}
+
+export function dailyRentRate(amount: number, freq: RentFrequency): number {
+  // Weekly = amount / 7 (7 days per week — never 6)
+  // Fortnightly = amount / 14
+  // Monthly = amount * 12 / 365 (annualised)
+  if (freq === "Weekly") return amount / 7;
+  if (freq === "Fortnightly") return amount / 14;
+  return (amount * 12) / 365;
 }
 
 export function addDays(iso: string, days: number): string {
@@ -41,32 +44,32 @@ export interface LedgerRow {
 }
 
 /**
- * Build the full running-balance ledger for a tenant by combining:
- * - Structural rent-due milestones from lease start to today
- * - Actual credit payments recorded in ledger table
- * - Outstanding invoice charges
+ * Build the full running-balance ledger for a tenant.
+ * Weekly rent cycles are 7 days; a cycle spans cursor .. cursor+period-1 inclusive
+ * (7 calendar days for weekly, 14 for fortnightly).
  */
 export function buildTenantLedger(
   tenant: Tenant,
   entries: LedgerEntry[],
   invoices: TenantInvoice[],
 ): { rows: LedgerRow[]; outstandingRent: number; outstandingInvoices: number; total: number; nextDue: string } {
-  const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
   const period = periodDays(tenant.rentFrequency);
   const rows: LedgerRow[] = [];
 
-  // Rent due milestones from lease start to today (skip if no lease start)
+  // Rent due milestones from lease start to today
   const today = todayISO();
   if (tenant.leaseStart) {
     let cursor: string = tenant.leaseStart;
     const cap = tenant.leaseExpiry || "9999-12-31";
     while (cursor <= today && cursor <= cap) {
-      const end = addDays(cursor, period - 1);
-      const cycleAmount = rate * period;
+      // Cycle spans `period` calendar days: cursor (day 1) ... cursor+period-1 (day 7 for weekly).
+      const cycleEnd = addDays(cursor, period - 1);
+      // Charge the full nominal rent per cycle (avoids float drift from daily-rate rounding).
+      const cycleAmount = tenant.rentAmount;
       rows.push({
         id: `due-${tenant.id}-${cursor}`,
         date: cursor,
-        description: `Rent Due: ${cursor} to ${end}`,
+        description: `Rent Due: ${cursor} → ${cycleEnd} (${period} days)`,
         debit: Math.round(cycleAmount * 100) / 100,
         credit: 0,
         balance: 0,
@@ -114,8 +117,8 @@ export function buildTenantLedger(
     r.balance = Math.round(running * 100) / 100;
   }
 
-  const outstandingRent = Math.max(0, running - unpaidInvoiceTotal(tenant.id, invoices));
   const outstandingInvoices = unpaidInvoiceTotal(tenant.id, invoices);
+  const outstandingRent = Math.max(0, running - outstandingInvoices);
   const total = Math.round(running * 100) / 100;
   const nextDue = addDays(tenant.paidUpToDate, 1);
 
@@ -144,8 +147,9 @@ export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[])
   const totalPaid = entries
     .filter((e) => e.tenantId === tenant.id && e.type === "Rent Payment")
     .reduce((s, e) => s + e.credit, 0);
+  // Full days covered by paid amount, then advance from lease start.
   const daysCovered = Math.floor(totalPaid / rate);
-  return addDays(start, daysCovered - 1 < 0 ? 0 : daysCovered - 1);
+  return addDays(start, Math.max(0, daysCovered - 1));
 }
 
 export function daysUntil(dateISO: string): number {
@@ -166,4 +170,11 @@ export function ausFinancialYear(dateISO: string): string {
 export function fyRange(fy: string): { start: string; end: string } {
   const [start] = fy.split("-").map((s) => parseInt(s, 10));
   return { start: `${start}-07-01`, end: `${start + 1}-06-30` };
+}
+
+/** Add whole months and return ISO date */
+export function addMonths(iso: string, months: number): string {
+  const d = new Date(iso);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
 }
