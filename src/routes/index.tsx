@@ -215,11 +215,13 @@ function MaintenanceRequestsWidget() {
   const convert = (id: string) => {
     const req = state.maintenanceRequests.find((r) => r.id === id);
     if (!req) return;
+    const propertyId = req.propertyId ?? state.properties[0]?.id;
+    if (!propertyId) return toast.error("Add a property first before converting requests");
     addExpense({
       itemName: `${req.category}: ${req.description.slice(0, 60)}`,
       cost: 0,
       date: todayISO(),
-      propertyId: req.propertyId,
+      propertyId,
       taxCategory: "Immediate Deduction",
       hasWarranty: false,
       rechargeToTenant: false,
