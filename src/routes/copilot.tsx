@@ -89,6 +89,11 @@ function CopilotPage() {
 
   const send = async (text: string) => {
     if (!text.trim() || loading) return;
+    const budget = consumeAiBudget();
+    if (!budget.ok) {
+      toast.error(budget.reason ?? "AI blocked");
+      return;
+    }
     const newMsgs = [...messages, { role: "user" as const, content: text }];
     setMessages(newMsgs);
     setInput("");
