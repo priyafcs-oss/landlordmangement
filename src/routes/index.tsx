@@ -215,11 +215,13 @@ function MaintenanceRequestsWidget() {
   const convert = (id: string) => {
     const req = state.maintenanceRequests.find((r) => r.id === id);
     if (!req) return;
+    const propertyId = req.propertyId ?? state.properties[0]?.id;
+    if (!propertyId) return toast.error("Add a property first before converting requests");
     addExpense({
       itemName: `${req.category}: ${req.description.slice(0, 60)}`,
       cost: 0,
       date: todayISO(),
-      propertyId: req.propertyId,
+      propertyId,
       taxCategory: "Immediate Deduction",
       hasWarranty: false,
       rechargeToTenant: false,
@@ -244,15 +246,26 @@ function MaintenanceRequestsWidget() {
         )}
         {pending.map((r) => {
           const prop = state.properties.find((p) => p.id === r.propertyId);
+          const urgencyBadge =
+            r.urgency === "High"
+              ? "destructive"
+              : r.urgency === "Medium"
+                ? "default"
+                : "secondary";
           return (
             <div key={r.id} className="flex flex-wrap items-start justify-between gap-3 rounded border p-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">{r.category}</Badge>
+                  <Badge variant={urgencyBadge}>{r.urgency}</Badge>
                   <span className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</span>
-                  {r.contactName && <span className="text-xs">• {r.contactName}</span>}
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">{prop?.address}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {prop?.address ?? `Typed: ${r.propertyAddressTyped}`}
+                </div>
+                <div className="mt-1 text-xs">
+                  From <b>{r.contactName}</b> • {r.contactPhone} • {r.contactEmail}
+                </div>
                 <div className="mt-1">{r.description}</div>
                 {r.photos && r.photos.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -260,6 +273,9 @@ function MaintenanceRequestsWidget() {
                       <img key={i} src={p.data} alt={p.name} className="h-14 w-14 rounded object-cover" />
                     ))}
                   </div>
+                )}
+                {r.video && (
+                  <video src={r.video.data} controls className="mt-2 max-h-40 rounded" />
                 )}
               </div>
               <div className="flex gap-2">

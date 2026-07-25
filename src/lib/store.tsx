@@ -11,9 +11,17 @@ import type {
   RentChange,
   LeaseHistory,
   MaintenanceRequest,
+  AiConfig,
 } from "./types";
 
-const STORAGE_KEY = "landlord-app-v2";
+const STORAGE_KEY = "landlord-app-v3";
+
+const defaultAi: AiConfig = {
+  enabled: true,
+  dailyCount: 0,
+  countDate: new Date().toISOString().slice(0, 10),
+  dailyLimit: 10,
+};
 
 const empty: AppState = {
   properties: [],
@@ -26,6 +34,7 @@ const empty: AppState = {
   rentChanges: [],
   leaseHistory: [],
   maintenanceRequests: [],
+  aiConfig: defaultAi,
 };
 
 function seed(): AppState {
@@ -40,8 +49,8 @@ function seed(): AppState {
   const leaseExpiry2 = new Date(today.getTime() + 165 * 86400000).toISOString().slice(0, 10);
   return {
     properties: [
-      { id: p1, address: "12 Rosewood Ave, Bondi NSW 2026", purchasePrice: 890000, currentValue: 1120000 },
-      { id: p2, address: "48 Yarra St, Richmond VIC 3121", purchasePrice: 650000, currentValue: 780000 },
+      { id: p1, address: "12 Rosewood Ave, Bondi NSW 2026", purchasePrice: 890000, currentValue: 1120000, tenantCode: "ROSE12" },
+      { id: p2, address: "48 Yarra St, Richmond VIC 3121", purchasePrice: 650000, currentValue: 780000, tenantCode: "YARRA48" },
     ],
     tenants: [
       {
@@ -90,6 +99,7 @@ function seed(): AppState {
     rentChanges: [],
     leaseHistory: [],
     maintenanceRequests: [],
+    aiConfig: defaultAi,
   };
 }
 
@@ -99,8 +109,7 @@ function load(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // ensure new keys exist for older stored states
-      return { ...empty, ...parsed };
+      return { ...empty, ...parsed, aiConfig: { ...defaultAi, ...(parsed.aiConfig ?? {}) } };
     }
   } catch {}
   const s = seed();
@@ -153,6 +162,12 @@ interface StoreCtx {
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => void;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
+
+  // AI budget firewall
+  setAiEnabled: (v: boolean) => void;
+  /** Returns true and increments if AI request allowed. Returns false when blocked. */
+  consumeAiBudget: () => { ok: boolean; reason?: string };
+  resetAiUsage: () => void;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -184,7 +199,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {}
-      setState(empty);
+      setState({ ...empty, aiConfig: { ...defaultAi } });
     },
     addProperty: (p) => set((s) => ({ ...s, properties: [...s.properties, { ...p, id: uid("p") }] })),
     updateProperty: (id, p) => set((s) => ({ ...s, properties: s.properties.map((x) => (x.id === id ? { ...x, ...p } : x)) })),
@@ -211,7 +226,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const prev = s.tenants.find((x) => x.id === id);
         const nextTenants = s.tenants.map((x) => (x.id === id ? { ...x, ...patch } : x));
         let rentChanges = s.rentChanges;
-        // Auto-log rent increase history when rentAmount changes
         if (prev && patch.rentAmount !== undefined && patch.rentAmount !== prev.rentAmount) {
           rentChanges = [
             ...rentChanges,
@@ -323,6 +337,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       })),
     deleteMaintenanceRequest: (id) =>
       set((s) => ({ ...s, maintenanceRequests: s.maintenanceRequests.filter((x) => x.id !== id) })),
+
+    setAiEnabled: (v) => set((s) => ({ ...s, aiConfig: { ...s.aiConfig, enabled: v } })),
+    resetAiUsage: () =>
+      set((s) => ({
+        ...s,
+        aiConfig: { ...s.aiConfig, dailyCount: 0, countDate: new Date().toISOString().slice(0, 10) },
+      })),
+    consumeAiBudget: () => {
+      const today = new Date().toISOString().slice(0, 10);
+      if (!state.aiConfig.enabled) return { ok: false, reason: "AI Co-Pilot APIs are disabled by Creator Master Panel." };
+      // Reset counter on new day
+      const currentCount = state.aiConfig.countDate === today ? state.aiConfig.dailyCount : 0;
+      if (currentCount >= state.aiConfig.dailyLimit) {
+        return { ok: false, reason: "Daily AI Budget Limit Reached." };
+      }
+      setState((s) => ({
+        ...s,
+        aiConfig: {
+          ...s.aiConfig,
+          countDate: today,
+          dailyCount: (s.aiConfig.countDate === today ? s.aiConfig.dailyCount : 0) + 1,
+        },
+      }));
+      return { ok: true };
+    },
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

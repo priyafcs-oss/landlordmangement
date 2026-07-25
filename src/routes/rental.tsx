@@ -22,12 +22,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, Plus, Send, Upload, Copy, SlidersHorizontal } from "lucide-react";
+import {
+  Trash2,
+  Plus,
+  Send,
+  Upload,
+  Copy,
+  SlidersHorizontal,
+  CalendarClock,
+  FileSignature,
+  Mail,
+} from "lucide-react";
 import {
   buildTenantLedger,
   fmtCurrency,
   todayISO,
   addDays,
+  addMonths,
   dailyRentRate,
 } from "@/lib/calculations";
 import type { Tenant } from "@/lib/types";
@@ -39,7 +50,7 @@ export const Route = createFileRoute("/rental")({
   head: () => ({
     meta: [
       { title: "Rental Hub — Landlord OS" },
-      { name: "description", content: "Daily financial workspace: ledgers, payments and bank reconciliation." },
+      { name: "description", content: "Property-driven daily financial workspace: ledgers, payments and reconciliation." },
     ],
   }),
   component: RentalHubPage,
@@ -47,175 +58,199 @@ export const Route = createFileRoute("/rental")({
 
 function RentalHubPage() {
   const { state } = useStore();
-  // "all" | tenant id
-  const [selectedTenant, setSelectedTenant] = useState<string | "all">("all");
-  // "all" | property id — kept in sync with selectedTenant
-  const [selectedProperty, setSelectedProperty] = useState<string | "all">("all");
+  const [propertyId, setPropertyId] = useState<string>("");
 
-  // Bi-directional sync: when a tenant is picked, snap the property dropdown.
+  // Auto-select first property once state hydrates
   useEffect(() => {
-    if (selectedTenant === "all") {
-      setSelectedProperty("all");
-      return;
-    }
-    const t = state.tenants.find((x) => x.id === selectedTenant);
-    if (t && t.propertyId !== selectedProperty) setSelectedProperty(t.propertyId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTenant]);
+    if (!propertyId && state.properties[0]) setPropertyId(state.properties[0].id);
+  }, [state.properties, propertyId]);
 
-  // Bi-directional sync: when a property is picked, snap the tenant to first match.
-  const handleSelectProperty = (pid: string | "all") => {
-    setSelectedProperty(pid);
-    if (pid === "all") {
-      setSelectedTenant("all");
-      return;
-    }
-    const t = state.tenants.find((x) => x.propertyId === pid);
-    setSelectedTenant(t ? t.id : "all");
-  };
-
-  const tenantStatuses = useMemo(() => {
-    return state.tenants.map((t) => {
-      const { total } = buildTenantLedger(t, state.ledger, state.invoices);
-      return { tenant: t, arrears: total > 0.01, total };
-    });
-  }, [state]);
-
-  const activeTenants =
-    selectedTenant === "all" ? state.tenants : state.tenants.filter((t) => t.id === selectedTenant);
+  const property = state.properties.find((p) => p.id === propertyId);
+  const tenants = useMemo(
+    () => state.tenants.filter((t) => t.propertyId === propertyId),
+    [state.tenants, propertyId],
+  );
 
   return (
-    <div className="flex min-h-[calc(100vh-3.5rem)]">
-      {/* Directory sidebar */}
-      <aside className="hidden w-64 shrink-0 border-r bg-muted/30 md:block">
-        <div className="border-b p-3">
-          <Button variant="outline" size="sm" className="w-full" onClick={() => setSelectedTenant("all")}>
-            Show All Tenants
-          </Button>
+    <div className="space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Rental Hub</h1>
+          <p className="text-sm text-muted-foreground">
+            Everything on this page is filtered by the selected property.
+          </p>
         </div>
-        <div className="overflow-y-auto p-2 text-sm">
-          {tenantStatuses.map(({ tenant, arrears }) => (
-            <button
-              key={tenant.id}
-              onClick={() => setSelectedTenant(tenant.id)}
-              className={
-                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent " +
-                (selectedTenant === tenant.id ? "bg-accent" : "")
-              }
-            >
-              <span
-                className={
-                  "h-2 w-2 shrink-0 rounded-full " + (arrears ? "bg-red-500" : "bg-emerald-500")
-                }
-              />
-              <span className="truncate">{tenant.name}</span>
-            </button>
-          ))}
-          {state.tenants.length === 0 && (
-            <div className="p-2 text-xs text-muted-foreground">No tenants yet.</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={propertyId} onValueChange={setPropertyId}>
+            <SelectTrigger className="h-9 w-[260px]">
+              <SelectValue placeholder="Select a property" />
+            </SelectTrigger>
+            <SelectContent>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {propertyId && (
+            <TenantDialog propertyId={propertyId}>
+              <Button size="sm" className="gap-1">
+                <Plus className="h-4 w-4" /> Quick-Add Tenant
+              </Button>
+            </TenantDialog>
           )}
+          <BankFeedDialog />
         </div>
-      </aside>
-
-      <div className="min-w-0 flex-1 space-y-6 p-4 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Rental Hub</h1>
-            <p className="text-sm text-muted-foreground">Ledgers, arrears and payment reconciliation.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={selectedProperty} onValueChange={(v) => handleSelectProperty(v)}>
-              <SelectTrigger className="h-9 w-[220px]">
-                <SelectValue placeholder="Filter by property" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All properties</SelectItem>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <QuickAddTenant />
-            <BankFeedDialog />
-          </div>
-        </div>
-
-        {/* Mobile filter chips */}
-        <div className="flex gap-2 overflow-x-auto md:hidden">
-          <Button variant={selectedTenant === "all" ? "default" : "outline"} size="sm" onClick={() => setSelectedTenant("all")}>
-            All
-          </Button>
-          {tenantStatuses.map(({ tenant, arrears }) => (
-            <Button
-              key={tenant.id}
-              size="sm"
-              variant={selectedTenant === tenant.id ? "default" : "outline"}
-              onClick={() => setSelectedTenant(tenant.id)}
-              className="gap-1 whitespace-nowrap"
-            >
-              <span className={"h-2 w-2 rounded-full " + (arrears ? "bg-red-500" : "bg-emerald-500")} />
-              {tenant.name}
-            </Button>
-          ))}
-        </div>
-
-        {activeTenants.length === 0 && (
-          <Card>
-            <CardContent className="p-8 text-center text-sm text-muted-foreground">
-              No tenants to display. Add a tenant to see their ledger.
-            </CardContent>
-          </Card>
-        )}
-
-        {activeTenants.map((t) => (
-          <TenantLedgerCard key={t.id} tenant={t} />
-        ))}
       </div>
+
+      {!property && (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            Add a property in the Portfolio Manager to get started.
+          </CardContent>
+        </Card>
+      )}
+
+      {property && tenants.length === 0 && (
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            No tenants linked to <b>{property.address}</b> yet. Use Quick-Add Tenant above.
+          </CardContent>
+        </Card>
+      )}
+
+      {tenants.map((t) => (
+        <div key={t.id} className="space-y-4">
+          <TenantSummaryCard tenant={t} propertyAddress={property?.address} />
+          <TenantLedgerCard tenant={t} />
+        </div>
+      ))}
     </div>
   );
 }
 
-function QuickAddTenant() {
-  const { state } = useStore();
-  const [propertyId, setPropertyId] = useState(state.properties[0]?.id ?? "");
-  if (state.properties.length === 0) return null;
+function TenantSummaryCard({ tenant, propertyAddress }: { tenant: Tenant; propertyAddress?: string }) {
+  const [noticeOpen, setNoticeOpen] = useState<null | TemplateKey>(null);
+  const nextIncreaseDue = (() => {
+    const base = tenant.lastRentIncreaseDate ?? tenant.leaseStart;
+    if (!base) return null;
+    return addMonths(base, 12);
+  })();
+
   return (
-    <div className="flex gap-2">
-      <Select value={propertyId} onValueChange={setPropertyId}>
-        <SelectTrigger className="h-9 w-[160px]">
-          <SelectValue placeholder="Property" />
-        </SelectTrigger>
-        <SelectContent>
-          {state.properties.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.address.slice(0, 30)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {propertyId && (
-        <TenantDialog propertyId={propertyId}>
-          <Button size="sm" className="gap-1">
-            <Plus className="h-4 w-4" /> Quick-Add Tenant
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
+          <span>{tenant.name}</span>
+          <span className="text-xs font-normal text-muted-foreground">{propertyAddress}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-4">
+          <Stat label="Lease start" value={tenant.leaseStart || "—"} />
+          <Stat label="Lease end" value={tenant.leaseExpiry || "Periodic"} />
+          <Stat label="Last rent increase" value={tenant.lastRentIncreaseDate || "—"} />
+          <Stat label="Next increase eligible" value={nextIncreaseDue || "—"} />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => setNoticeOpen("renewal")}
+          >
+            <FileSignature className="h-3.5 w-3.5" /> Send Lease Renewal Offer
           </Button>
-        </TenantDialog>
-      )}
-    </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1"
+            onClick={() => setNoticeOpen("arrears")}
+          >
+            <Mail className="h-3.5 w-3.5" /> Generate Arrears Notice
+          </Button>
+          <RentIncreaseLetterButton tenant={tenant} propertyAddress={propertyAddress} />
+        </div>
+        <Dialog open={!!noticeOpen} onOpenChange={(o) => !o && setNoticeOpen(null)}>
+          {noticeOpen && (
+            <TemplateModal
+              tenant={tenant}
+              outstanding={0}
+              property={propertyAddress}
+              defaultKey={noticeOpen}
+            />
+          )}
+        </Dialog>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RentIncreaseLetterButton({ tenant, propertyAddress }: { tenant: Tenant; propertyAddress?: string }) {
+  const [open, setOpen] = useState(false);
+  const [newRent, setNewRent] = useState((tenant.rentAmount * 1.05).toFixed(0));
+  const [effective, setEffective] = useState(addDays(todayISO(), 60));
+
+  const body = `Dear ${tenant.name},
+
+We are writing to give you formal notice of a rent adjustment at ${propertyAddress ?? "your rental property"}.
+
+Current rent: ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency}
+New rent: ${fmtCurrency(parseFloat(newRent) || 0)} / ${tenant.rentFrequency}
+Effective from: ${effective}
+
+This notice is issued in accordance with your tenancy agreement and relevant state legislation. Please let us know if you have any questions.
+
+Kind regards,
+The Landlord`;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="gap-1">
+          <CalendarClock className="h-3.5 w-3.5" /> Generate Rent Increase Letter
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Rent increase letter — {tenant.name}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs">New rent (AUD)</Label>
+            <Input type="number" value={newRent} onChange={(e) => setNewRent(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Effective from</Label>
+            <Input type="date" value={effective} onChange={(e) => setEffective(e.target.value)} />
+          </div>
+        </div>
+        <Textarea className="min-h-[240px] font-mono text-xs" value={body} readOnly />
+        <DialogFooter>
+          <Button
+            className="gap-1"
+            onClick={() => {
+              navigator.clipboard.writeText(body);
+              toast.success("Letter copied to clipboard");
+            }}
+          >
+            <Copy className="h-4 w-4" /> Copy to clipboard
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const { state, addLedger, deleteLedger, updateTenant } = useStore();
-  const property = state.properties.find((p) => p.id === tenant.propertyId);
   const { rows, total, outstandingRent, outstandingInvoices } = buildTenantLedger(
     tenant,
     state.ledger,
     state.invoices,
   );
   const [amount, setAmount] = useState("");
-  const [templateOpen, setTemplateOpen] = useState(false);
 
   const nextDue = addDays(tenant.paidUpToDate, 1);
 
@@ -223,6 +258,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     const val = parseFloat(amount);
     if (!val || val <= 0) return toast.error("Enter a valid amount");
     const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
+    // 1 week (weekly rent) = 7 days; 9 weeks = 63 days. Never off-by-one.
     const daysCovered = Math.floor(val / rate);
     const newPaidUpTo = addDays(tenant.paidUpToDate, daysCovered);
     addLedger({
@@ -236,7 +272,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     });
     updateTenant(tenant.id, { paidUpToDate: newPaidUpTo });
     setAmount("");
-    toast.success(`Posted ${fmtCurrency(val)}. Paid to ${newPaidUpTo}.`);
+    toast.success(`Posted ${fmtCurrency(val)} → paid to ${newPaidUpTo} (${daysCovered} days).`);
   };
 
   const removePayment = (id: string) => {
@@ -254,13 +290,8 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-base">{tenant.name}</CardTitle>
-            <div className="text-xs text-muted-foreground">
-              {property?.address} • {fmtCurrency(tenant.rentAmount)}/{tenant.rentFrequency}
-            </div>
-          </div>
+        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
+          <span>Ledger — {fmtCurrency(tenant.rentAmount)}/{tenant.rentFrequency}</span>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={total > 0 ? "destructive" : "secondary"}>
               {total > 0 ? `Owes ${fmtCurrency(total)}` : "Up to date"}
@@ -271,23 +302,15 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
               </Button>
             </TenantDialog>
             <AdjustmentDialog tenant={tenant} />
-            <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="gap-1">
-                  <Send className="h-3 w-3" /> Generate Notice
-                </Button>
-              </DialogTrigger>
-              <TemplateModal tenant={tenant} outstanding={total} property={property?.address} />
-            </Dialog>
           </div>
-        </div>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-4">
-          <MiniStat label="Paid up to" value={tenant.paidUpToDate} />
-          <MiniStat label="Next rent due" value={nextDue} />
-          <MiniStat label="Rent arrears" value={fmtCurrency(outstandingRent)} />
-          <MiniStat label="Invoices outstanding" value={fmtCurrency(outstandingInvoices)} />
+          <Stat label="Paid up to" value={tenant.paidUpToDate} />
+          <Stat label="Next rent due" value={nextDue} />
+          <Stat label="Rent arrears" value={fmtCurrency(outstandingRent)} />
+          <Stat label="Invoices outstanding" value={fmtCurrency(outstandingInvoices)} />
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -326,8 +349,15 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
                   <td className="px-3 py-2 text-xs">{r.date}</td>
                   <td className="px-3 py-2">{r.description}</td>
                   <td className="px-3 py-2 text-right">{r.debit ? fmtCurrency(r.debit) : ""}</td>
-                  <td className="px-3 py-2 text-right text-emerald-600">{r.credit ? fmtCurrency(r.credit) : ""}</td>
-                  <td className={"px-3 py-2 text-right font-medium " + (r.balance > 0 ? "text-destructive" : "text-emerald-600")}>
+                  <td className="px-3 py-2 text-right text-emerald-600">
+                    {r.credit ? fmtCurrency(r.credit) : ""}
+                  </td>
+                  <td
+                    className={
+                      "px-3 py-2 text-right font-medium " +
+                      (r.balance > 0 ? "text-destructive" : "text-emerald-600")
+                    }
+                  >
                     {fmtCurrency(r.balance)}
                   </td>
                   <td className="px-3 py-2 text-right">
@@ -386,7 +416,7 @@ function AdjustmentDialog({ tenant }: { tenant: Tenant }) {
           <DialogTitle>One-off ledger adjustment</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground">
-          Modifies this billing cycle's running balance only. Does not change the tenant's base rent setting.
+          Modifies this billing cycle's running balance only. Does not change the tenant's base rent.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
@@ -426,7 +456,7 @@ function AdjustmentDialog({ tenant }: { tenant: Tenant }) {
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-muted p-3 text-sm">
       <div className="text-xs text-muted-foreground">{label}</div>
@@ -439,15 +469,19 @@ function TemplateModal({
   tenant,
   outstanding,
   property,
+  defaultKey,
 }: {
   tenant: Tenant;
   outstanding: number;
   property?: string;
+  defaultKey?: TemplateKey;
 }) {
-  const [tpl, setTpl] = useState<TemplateKey>("arrears");
+  const [tpl, setTpl] = useState<TemplateKey>(defaultKey ?? "arrears");
   const text = renderTemplate(tpl, {
     tenant,
-    property: property ? ({ id: "", address: property, purchasePrice: 0, currentValue: 0 } as any) : undefined,
+    property: property
+      ? ({ id: "", address: property, purchasePrice: 0, currentValue: 0 } as any)
+      : undefined,
     outstanding,
   });
   return (
