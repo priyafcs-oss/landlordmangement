@@ -665,6 +665,11 @@ export function TenantDialog({
     name: tenant?.name ?? "",
     email: tenant?.email ?? "",
     phone: tenant?.phone ?? "",
+    emergencyContactName: tenant?.emergencyContactName ?? "",
+    emergencyContactRelationship: tenant?.emergencyContactRelationship ?? "",
+    emergencyContactPhone: tenant?.emergencyContactPhone ?? "",
+    permanentAddress: tenant?.permanentAddress ?? "",
+    noticePeriod: tenant?.noticePeriod ?? "",
     leaseStart: tenant?.leaseStart ?? "",
     leaseExpiry: tenant?.leaseExpiry ?? "",
     leaseDuration: (tenant?.leaseDuration ?? "") as LeaseDuration | "",
@@ -678,6 +683,10 @@ export function TenantDialog({
     bondReceiptNumber: tenant?.bondReceiptNumber ?? "",
     leaseDocumentFileName: tenant?.leaseDocumentFileName ?? "",
     leaseDocumentFileData: tenant?.leaseDocumentFileData ?? "",
+    idProofFileName: tenant?.idProofFileName ?? "",
+    idProofFileData: tenant?.idProofFileData ?? "",
+    bondTransferFileName: tenant?.bondTransferFileName ?? "",
+    bondTransferFileData: tenant?.bondTransferFileData ?? "",
   });
 
   const onStart = (v: string) => {
@@ -695,13 +704,14 @@ export function TenantDialog({
       leaseExpiry: v === "Periodic" ? "" : computeLeaseEnd(s.leaseStart, v),
     }));
   };
-  const onLeaseFile = (f: File | undefined) => {
+  const onFile = (key: "leaseDocument" | "idProof" | "bondTransfer", f: File | undefined) => {
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () =>
-      setForm((s) => ({ ...s, leaseDocumentFileName: f.name, leaseDocumentFileData: String(reader.result) }));
+      setForm((s) => ({ ...s, [`${key}FileName`]: f.name, [`${key}FileData`]: String(reader.result) } as typeof s));
     reader.readAsDataURL(f);
   };
+  const onLeaseFile = (f: File | undefined) => onFile("leaseDocument", f);
 
   const check12Months = () => {
     if (!tenant) return true;
