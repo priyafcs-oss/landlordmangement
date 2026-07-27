@@ -16,10 +16,12 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Building2, Pencil, Plus, Trash2, User, ShieldCheck, RefreshCw, FileText, History } from "lucide-react";
-import { fmtCurrency, addDays } from "@/lib/calculations";
-import type { Property, Tenant, RentFrequency, LeaseDuration } from "@/lib/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Building2, Pencil, Plus, Trash2, User, ShieldCheck, RefreshCw, FileText, History, Receipt, ExternalLink, CheckCircle2 } from "lucide-react";
+import { fmtCurrency, todayISO } from "@/lib/calculations";
+import type { Property, Tenant, RentFrequency, LeaseDuration, RepaymentFrequency, BillType, PropertyBill } from "@/lib/types";
 import { toast } from "sonner";
+
 
 export const Route = createFileRoute("/portfolio")({
   head: () => ({
