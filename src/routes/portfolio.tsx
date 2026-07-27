@@ -154,6 +154,13 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
     address: property?.address ?? "",
     purchasePrice: property?.purchasePrice?.toString() ?? "",
     currentValue: property?.currentValue?.toString() ?? "",
+    purchaseDate: property?.purchaseDate ?? "",
+    tenantCode: property?.tenantCode ?? "",
+    lender: property?.lender ?? "",
+    loanAccountRef: property?.loanAccountRef ?? "",
+    loanBalance: property?.loanBalance?.toString() ?? "",
+    interestRate: property?.interestRate?.toString() ?? "",
+    repaymentFrequency: (property?.repaymentFrequency ?? "Monthly") as RepaymentFrequency,
   });
 
   return (
@@ -169,7 +176,7 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
           <Plus className="h-4 w-4" /> Add Property
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{property ? "Edit property" : "New property"}</DialogTitle>
         </DialogHeader>
@@ -177,20 +184,48 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
           <Field label="Address">
             <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </Field>
-          <Field label="Purchase price (AUD)">
-            <Input
-              type="number"
-              value={form.purchasePrice}
-              onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })}
-            />
-          </Field>
-          <Field label="Current market value (AUD)">
-            <Input
-              type="number"
-              value={form.currentValue}
-              onChange={(e) => setForm({ ...form, currentValue: e.target.value })}
-            />
-          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Purchase price (AUD)">
+              <Input type="number" value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })} />
+            </Field>
+            <Field label="Current market value (AUD)">
+              <Input type="number" value={form.currentValue} onChange={(e) => setForm({ ...form, currentValue: e.target.value })} />
+            </Field>
+            <Field label="Purchase date">
+              <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+            </Field>
+            <Field label="Tenant code (for maintenance portal)">
+              <Input value={form.tenantCode} onChange={(e) => setForm({ ...form, tenantCode: e.target.value.toUpperCase() })} placeholder="e.g. ROSE12" />
+            </Field>
+          </div>
+
+          <div className="rounded-md border p-3">
+            <div className="mb-2 text-sm font-medium">Bank loan (optional)</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Lender name">
+                <Input value={form.lender} onChange={(e) => setForm({ ...form, lender: e.target.value })} />
+              </Field>
+              <Field label="Loan account / reference">
+                <Input value={form.loanAccountRef} onChange={(e) => setForm({ ...form, loanAccountRef: e.target.value })} />
+              </Field>
+              <Field label="Current loan balance (AUD)">
+                <Input type="number" value={form.loanBalance} onChange={(e) => setForm({ ...form, loanBalance: e.target.value })} />
+              </Field>
+              <Field label="Interest rate (%)">
+                <Input type="number" step="0.01" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
+              </Field>
+              <Field label="Repayment frequency">
+                <Select value={form.repaymentFrequency} onValueChange={(v) => setForm({ ...form, repaymentFrequency: v as RepaymentFrequency })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Weekly">Weekly</SelectItem>
+                    <SelectItem value="Fortnightly">Fortnightly</SelectItem>
+                    <SelectItem value="Monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          </div>
         </div>
         <DialogFooter>
           <Button
@@ -200,12 +235,18 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
                 address: form.address,
                 purchasePrice: parseFloat(form.purchasePrice) || 0,
                 currentValue: parseFloat(form.currentValue) || 0,
+                purchaseDate: form.purchaseDate || undefined,
+                tenantCode: form.tenantCode || undefined,
+                lender: form.lender || undefined,
+                loanAccountRef: form.loanAccountRef || undefined,
+                loanBalance: form.loanBalance ? parseFloat(form.loanBalance) : undefined,
+                interestRate: form.interestRate ? parseFloat(form.interestRate) : undefined,
+                repaymentFrequency: form.repaymentFrequency,
               };
               if (property) updateProperty(property.id, payload);
               else addProperty(payload);
               setOpen(false);
               onDone();
-              setForm({ address: "", purchasePrice: "", currentValue: "" });
               toast.success("Property saved");
             }}
           >
@@ -216,6 +257,7 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
     </Dialog>
   );
 }
+
 
 function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; onClose: () => void }) {
   const { state, deleteTenant } = useStore();
