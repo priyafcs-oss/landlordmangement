@@ -830,11 +830,36 @@ export function TenantDialog({
               onChange={(e) => setForm({ ...form, bondReceiptNumber: e.target.value })}
             />
           </Field>
+          <Field label="Emergency contact name">
+            <Input value={form.emergencyContactName} onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })} />
+          </Field>
+          <Field label="Emergency contact relationship">
+            <Input value={form.emergencyContactRelationship} onChange={(e) => setForm({ ...form, emergencyContactRelationship: e.target.value })} />
+          </Field>
+          <Field label="Emergency contact phone">
+            <Input value={form.emergencyContactPhone} onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })} />
+          </Field>
+          <Field label="Notice period">
+            <Input value={form.noticePeriod} onChange={(e) => setForm({ ...form, noticePeriod: e.target.value })} placeholder="e.g. 14 days" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Permanent / previous address">
+              <Input value={form.permanentAddress} onChange={(e) => setForm({ ...form, permanentAddress: e.target.value })} />
+            </Field>
+          </div>
           <Field label="Lease agreement (PDF)">
             <Input type="file" accept="application/pdf,image/*" onChange={(e) => onLeaseFile(e.target.files?.[0])} />
             {form.leaseDocumentFileName && (
               <div className="mt-1 text-xs text-muted-foreground">📎 {form.leaseDocumentFileName}</div>
             )}
+          </Field>
+          <Field label="ID proof">
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => onFile("idProof", e.target.files?.[0])} />
+            {form.idProofFileName && <div className="mt-1 text-xs text-muted-foreground">📎 {form.idProofFileName}</div>}
+          </Field>
+          <Field label="Bond transfer receipt">
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => onFile("bondTransfer", e.target.files?.[0])} />
+            {form.bondTransferFileName && <div className="mt-1 text-xs text-muted-foreground">📎 {form.bondTransferFileName}</div>}
           </Field>
         </div>
         <DialogFooter>
@@ -844,10 +869,18 @@ export function TenantDialog({
               if (!form.rentAmount) return toast.error("Rent amount is required");
               if (!check12Months()) return;
               const rentAmount = parseFloat(form.rentAmount) || 0;
+              const defaultPaid = form.leaseStart
+                ? new Date(new Date(form.leaseStart).getTime() - 86400000).toISOString().slice(0, 10)
+                : todayISO();
               const payload: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string } = {
                 name: form.name,
                 email: form.email || undefined,
                 phone: form.phone || undefined,
+                emergencyContactName: form.emergencyContactName || undefined,
+                emergencyContactRelationship: form.emergencyContactRelationship || undefined,
+                emergencyContactPhone: form.emergencyContactPhone || undefined,
+                permanentAddress: form.permanentAddress || undefined,
+                noticePeriod: form.noticePeriod || undefined,
                 propertyId,
                 leaseStart: form.leaseStart || undefined,
                 leaseExpiry: form.leaseExpiry || undefined,
@@ -862,14 +895,14 @@ export function TenantDialog({
                 bondReceiptNumber: form.bondReceiptNumber || undefined,
                 leaseDocumentFileName: form.leaseDocumentFileName || undefined,
                 leaseDocumentFileData: form.leaseDocumentFileData || undefined,
-                paidUpToDate: tenant?.paidUpToDate ?? form.leaseStart ?? new Date().toISOString().slice(0, 10),
+                idProofFileName: form.idProofFileName || undefined,
+                idProofFileData: form.idProofFileData || undefined,
+                bondTransferFileName: form.bondTransferFileName || undefined,
+                bondTransferFileData: form.bondTransferFileData || undefined,
+                paidUpToDate: tenant?.paidUpToDate ?? defaultPaid,
               };
-              if (tenant) {
-                // rent-change is auto-logged inside updateTenant
-                updateTenant(tenant.id, payload);
-              } else {
-                addTenant(payload);
-              }
+              if (tenant) updateTenant(tenant.id, payload);
+              else addTenant(payload);
               setOpen(false);
               toast.success("Tenant saved");
             }}
