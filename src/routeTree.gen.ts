@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as PortfolioRouteImport } from './routes/portfolio'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
@@ -17,6 +18,11 @@ import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RentalRoute = RentalRouteImport.update({
   id: '/rental',
   path: '/rental',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
+  '/settings': typeof SettingsRoute
   '/api/copilot': typeof ApiCopilotRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
+  '/settings': typeof SettingsRoute
   '/api/copilot': typeof ApiCopilotRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
+  '/settings': typeof SettingsRoute
   '/api/copilot': typeof ApiCopilotRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/portfolio'
     | '/rental'
+    | '/settings'
     | '/api/copilot'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/portfolio'
     | '/rental'
+    | '/settings'
     | '/api/copilot'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/maintenance'
     | '/portfolio'
     | '/rental'
+    | '/settings'
     | '/api/copilot'
   fileRoutesById: FileRoutesById
 }
@@ -118,11 +130,19 @@ export interface RootRouteChildren {
   MaintenanceRoute: typeof MaintenanceRoute
   PortfolioRoute: typeof PortfolioRoute
   RentalRoute: typeof RentalRoute
+  SettingsRoute: typeof SettingsRoute
   ApiCopilotRoute: typeof ApiCopilotRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/rental': {
       id: '/rental'
       path: '/rental'
@@ -182,18 +202,9 @@ const rootRouteChildren: RootRouteChildren = {
   MaintenanceRoute: MaintenanceRoute,
   PortfolioRoute: PortfolioRoute,
   RentalRoute: RentalRoute,
+  SettingsRoute: SettingsRoute,
   ApiCopilotRoute: ApiCopilotRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

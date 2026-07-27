@@ -12,15 +12,25 @@ import type {
   LeaseHistory,
   MaintenanceRequest,
   AiConfig,
+  LandlordProfile,
+  PropertyBill,
 } from "./types";
 
-const STORAGE_KEY = "landlord-app-v3";
+const STORAGE_KEY = "landlord-app-v4";
 
 const defaultAi: AiConfig = {
   enabled: true,
   dailyCount: 0,
   countDate: new Date().toISOString().slice(0, 10),
   dailyLimit: 10,
+};
+
+const defaultProfile: LandlordProfile = {
+  fullName: "",
+  email: "",
+  phone: "",
+  notifyEmail: true,
+  notifySms: false,
 };
 
 const empty: AppState = {
@@ -35,73 +45,9 @@ const empty: AppState = {
   leaseHistory: [],
   maintenanceRequests: [],
   aiConfig: defaultAi,
+  landlordProfile: defaultProfile,
+  bills: [],
 };
-
-function seed(): AppState {
-  const p1 = "p_" + Math.random().toString(36).slice(2, 9);
-  const p2 = "p_" + Math.random().toString(36).slice(2, 9);
-  const t1 = "t_" + Math.random().toString(36).slice(2, 9);
-  const t2 = "t_" + Math.random().toString(36).slice(2, 9);
-  const today = new Date();
-  const leaseStart1 = new Date(today.getTime() - 120 * 86400000).toISOString().slice(0, 10);
-  const leaseExpiry1 = new Date(today.getTime() + 55 * 86400000).toISOString().slice(0, 10);
-  const leaseStart2 = new Date(today.getTime() - 200 * 86400000).toISOString().slice(0, 10);
-  const leaseExpiry2 = new Date(today.getTime() + 165 * 86400000).toISOString().slice(0, 10);
-  return {
-    properties: [
-      { id: p1, address: "12 Rosewood Ave, Bondi NSW 2026", purchasePrice: 890000, currentValue: 1120000, tenantCode: "ROSE12" },
-      { id: p2, address: "48 Yarra St, Richmond VIC 3121", purchasePrice: 650000, currentValue: 780000, tenantCode: "YARRA48" },
-    ],
-    tenants: [
-      {
-        id: t1,
-        name: "Sarah Kim",
-        email: "sarah@example.com",
-        propertyId: p1,
-        leaseStart: leaseStart1,
-        leaseExpiry: leaseExpiry1,
-        leaseDuration: "6 Months",
-        rentAmount: 720,
-        rentFrequency: "Weekly",
-        bankReference: "REF-SK-2026",
-        bankAccountHolder: "Sarah Kim",
-        paidUpToDate: new Date(today.getTime() - 6 * 86400000).toISOString().slice(0, 10),
-        bondAmount: 2880,
-        bondLodgementDate: leaseStart1,
-        bondReceiptNumber: "RTBA-889123",
-      },
-      {
-        id: t2,
-        name: "Marcus Chen",
-        email: "marcus@example.com",
-        propertyId: p2,
-        leaseStart: leaseStart2,
-        leaseExpiry: leaseExpiry2,
-        leaseDuration: "12 Months",
-        rentAmount: 520,
-        rentFrequency: "Weekly",
-        bankReference: "REF-MC-2026",
-        bankAccountHolder: "Marcus Chen",
-        paidUpToDate: new Date(today.getTime() - 20 * 86400000).toISOString().slice(0, 10),
-        bondAmount: 2080,
-        bondLodgementDate: leaseStart2,
-        bondReceiptNumber: "RTBA-902155",
-      },
-    ],
-    ledger: [],
-    invoices: [],
-    loans: [
-      { id: "l_" + Math.random().toString(36).slice(2, 9), propertyId: p1, bankName: "CommBank", totalBalance: 620000, interestRate: 6.1, monthlyEmi: 3750 },
-      { id: "l_" + Math.random().toString(36).slice(2, 9), propertyId: p2, bankName: "Westpac", totalBalance: 440000, interestRate: 5.9, monthlyEmi: 2680 },
-    ],
-    expenses: [],
-    inspections: [],
-    rentChanges: [],
-    leaseHistory: [],
-    maintenanceRequests: [],
-    aiConfig: defaultAi,
-  };
-}
 
 function load(): AppState {
   if (typeof window === "undefined") return empty;
@@ -109,14 +55,16 @@ function load(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return { ...empty, ...parsed, aiConfig: { ...defaultAi, ...(parsed.aiConfig ?? {}) } };
+      return {
+        ...empty,
+        ...parsed,
+        aiConfig: { ...defaultAi, ...(parsed.aiConfig ?? {}) },
+        landlordProfile: { ...defaultProfile, ...(parsed.landlordProfile ?? {}) },
+        bills: parsed.bills ?? [],
+      };
     }
   } catch {}
-  const s = seed();
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch {}
-  return s;
+  return empty;
 }
 
 interface StoreCtx {
@@ -163,9 +111,14 @@ interface StoreCtx {
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
 
-  // AI budget firewall
+  updateLandlordProfile: (p: Partial<LandlordProfile>) => void;
+
+  addBill: (b: Omit<PropertyBill, "id">) => void;
+  updateBill: (id: string, b: Partial<PropertyBill>) => void;
+  deleteBill: (id: string) => void;
+  markBillPaid: (id: string) => void;
+
   setAiEnabled: (v: boolean) => void;
-  /** Returns true and increments if AI request allowed. Returns false when blocked. */
   consumeAiBudget: () => { ok: boolean; reason?: string };
   resetAiUsage: () => void;
 }
@@ -173,6 +126,12 @@ interface StoreCtx {
 const Ctx = createContext<StoreCtx | null>(null);
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
+
+function addMonthsISO(iso: string, months: number): string {
+  const d = new Date(iso);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(empty);
@@ -199,7 +158,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {}
-      setState({ ...empty, aiConfig: { ...defaultAi } });
+      setState({ ...empty, aiConfig: { ...defaultAi }, landlordProfile: { ...defaultProfile } });
     },
     addProperty: (p) => set((s) => ({ ...s, properties: [...s.properties, { ...p, id: uid("p") }] })),
     updateProperty: (id, p) => set((s) => ({ ...s, properties: s.properties.map((x) => (x.id === id ? { ...x, ...p } : x)) })),
@@ -211,16 +170,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         loans: s.loans.filter((l) => l.propertyId !== id),
         expenses: s.expenses.filter((e) => e.propertyId !== id),
         inspections: s.inspections.filter((i) => i.propertyId !== id),
+        bills: s.bills.filter((b) => b.propertyId !== id),
       })),
 
     addTenant: (t) =>
-      set((s) => ({
-        ...s,
-        tenants: [
-          ...s.tenants,
-          { ...t, paidUpToDate: t.paidUpToDate || t.leaseStart || new Date().toISOString().slice(0, 10), id: uid("t") },
-        ],
-      })),
+      set((s) => {
+        // Paid-up default = one day BEFORE lease start (so day 1 of lease reads as first due day)
+        let defaultPaidUp = new Date().toISOString().slice(0, 10);
+        if (t.leaseStart) {
+          const d = new Date(t.leaseStart);
+          d.setDate(d.getDate() - 1);
+          defaultPaidUp = d.toISOString().slice(0, 10);
+        }
+        return {
+          ...s,
+          tenants: [
+            ...s.tenants,
+            { ...t, paidUpToDate: t.paidUpToDate || defaultPaidUp, id: uid("t") },
+          ],
+        };
+      }),
     updateTenant: (id, patch) =>
       set((s) => {
         const prev = s.tenants.find((x) => x.id === id);
@@ -338,6 +307,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteMaintenanceRequest: (id) =>
       set((s) => ({ ...s, maintenanceRequests: s.maintenanceRequests.filter((x) => x.id !== id) })),
 
+    updateLandlordProfile: (p) =>
+      set((s) => ({ ...s, landlordProfile: { ...s.landlordProfile, ...p } })),
+
+    addBill: (b) => set((s) => ({ ...s, bills: [...s.bills, { ...b, id: uid("bill") }] })),
+    updateBill: (id, b) =>
+      set((s) => ({ ...s, bills: s.bills.map((x) => (x.id === id ? { ...x, ...b } : x)) })),
+    deleteBill: (id) => set((s) => ({ ...s, bills: s.bills.filter((x) => x.id !== id) })),
+    markBillPaid: (id) =>
+      set((s) => {
+        const bill = s.bills.find((b) => b.id === id);
+        if (!bill) return s;
+        const today = new Date().toISOString().slice(0, 10);
+        const updated = s.bills.map((b) =>
+          b.id === id ? { ...b, status: "Paid" as const, paidDate: today } : b,
+        );
+        // Auto-create next cycle
+        if (bill.recurrenceMonths && bill.recurrenceMonths > 0) {
+          const nextDue = addMonthsISO(bill.dueDate, bill.recurrenceMonths);
+          updated.push({
+            ...bill,
+            id: uid("bill"),
+            dueDate: nextDue,
+            status: "Unpaid",
+            paidDate: undefined,
+          });
+        }
+        return { ...s, bills: updated };
+      }),
+
     setAiEnabled: (v) => set((s) => ({ ...s, aiConfig: { ...s.aiConfig, enabled: v } })),
     resetAiUsage: () =>
       set((s) => ({
@@ -347,7 +345,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     consumeAiBudget: () => {
       const today = new Date().toISOString().slice(0, 10);
       if (!state.aiConfig.enabled) return { ok: false, reason: "AI Co-Pilot APIs are disabled by Creator Master Panel." };
-      // Reset counter on new day
       const currentCount = state.aiConfig.countDate === today ? state.aiConfig.dailyCount : 0;
       if (currentCount >= state.aiConfig.dailyLimit) {
         return { ok: false, reason: "Daily AI Budget Limit Reached." };

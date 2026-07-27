@@ -18,24 +18,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Trash2, User, ShieldAlert, Lock } from "lucide-react";
+import { User, ShieldAlert, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { TenantPortal } from "./TenantPortal";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 
 export function AppHeader() {
-  const { state, reset } = useStore();
+  const { state } = useStore();
   const [tenantView, setTenantView] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<string>(state.tenants[0]?.id ?? "");
 
@@ -109,35 +98,6 @@ export function AppHeader() {
             </div>
           </>
         )}
-
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1">
-              <Trash2 className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Clear Sample Data</span>
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Wipe all data?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This permanently removes every property, tenant, ledger entry, invoice, expense and inspection from
-                local storage. Use this to start fresh with your own data.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  reset();
-                  toast.success("All data cleared");
-                }}
-              >
-                Clear everything
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </div>
     </header>
   );
