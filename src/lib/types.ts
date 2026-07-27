@@ -1,13 +1,21 @@
 export type RentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 export type LeaseDuration = "6 Months" | "12 Months" | "Periodic";
+export type RepaymentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 
 export interface Property {
   id: string;
   address: string;
   purchasePrice: number;
   currentValue: number;
+  purchaseDate?: string;
   /** Optional short unique code tenants type into public maintenance form */
   tenantCode?: string;
+  // Optional inline "primary loan" metadata (used by the Housekeeping tab).
+  lender?: string;
+  loanAccountRef?: string;
+  loanBalance?: number;
+  interestRate?: number;
+  repaymentFrequency?: RepaymentFrequency;
 }
 
 export interface Tenant {
@@ -17,6 +25,10 @@ export interface Tenant {
   rentFrequency: RentFrequency; // required
   email?: string;
   phone?: string;
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
+  /** Legacy free-text fallback */
   emergencyContact?: string;
   permanentAddress?: string;
   noticePeriod?: string; // e.g. "14 days"
@@ -32,7 +44,7 @@ export interface Tenant {
   bondLodgementDate?: string;
   bondReceiptNumber?: string;
   leaseDocumentFileName?: string;
-  leaseDocumentFileData?: string; // base64 (simulated Supabase Storage)
+  leaseDocumentFileData?: string;
   idProofFileName?: string;
   idProofFileData?: string;
   bondTransferFileName?: string;
@@ -59,6 +71,8 @@ export interface LedgerEntry {
   newPaidUpToDate?: string;
   manual?: boolean;
   linkedInvoiceId?: string;
+  /** Days that this adjustment/payment shifts the paid-up-to date. Used to reverse cleanly on undo. */
+  daysShift?: number;
 }
 
 export interface TenantInvoice {
@@ -79,6 +93,10 @@ export interface Loan {
   totalBalance: number;
   interestRate: number;
   monthlyEmi: number;
+  dueDayOfMonth?: number;
+  isDirectDebit?: boolean;
+  linkedBankAccount?: string;
+  status?: "Active" | "Paid Off" | "In Arrears";
 }
 
 export interface Expense {
@@ -118,12 +136,10 @@ export interface Inspection {
   notes?: string;
   fileFileName?: string;
   fileData?: string;
-  /** Legacy flat checklist — kept for backwards compat */
   checklist?: ChecklistItem[];
-  /** New: rooms with items, dynamically added/removed */
   rooms?: ChecklistRoom[];
   photos?: { name: string; data: string }[];
-  signature?: string; // typed-name digital signature
+  signature?: string;
 }
 
 export interface RentChange {
@@ -146,9 +162,7 @@ export interface LeaseHistory {
 
 export interface MaintenanceRequest {
   id: string;
-  /** Resolved property id if the typed address/code matched an existing property */
   propertyId?: string;
-  /** Free-text address or tenant code as typed by the reporter */
   propertyAddressTyped: string;
   category: string;
   description: string;
@@ -160,13 +174,48 @@ export interface MaintenanceRequest {
   contactPhone: string;
   contactEmail: string;
   createdAt: string;
+  /** Marks entries the landlord logged manually vs public form submissions */
+  source?: "public" | "landlord";
 }
 
 export interface AiConfig {
   enabled: boolean;
   dailyCount: number;
-  countDate: string; // YYYY-MM-DD
+  countDate: string;
   dailyLimit: number;
+}
+
+export interface LandlordProfile {
+  fullName: string;
+  email: string;
+  phone: string;
+  notifyEmail: boolean;
+  notifySms: boolean;
+}
+
+export type BillType =
+  | "Water"
+  | "Council Rates"
+  | "Strata"
+  | "Insurance"
+  | "Electricity"
+  | "Gas"
+  | "Other";
+
+export interface PropertyBill {
+  id: string;
+  propertyId: string;
+  billType: BillType;
+  amount: number;
+  dueDate: string;
+  status: "Unpaid" | "Paid" | "Overdue";
+  paidDate?: string;
+  portalUrl?: string;
+  portalUsername?: string;
+  passwordNote?: string;
+  notes?: string;
+  /** If set, marking this bill Paid auto-creates the next cycle N months later. */
+  recurrenceMonths?: number;
 }
 
 export interface AppState {
@@ -181,9 +230,10 @@ export interface AppState {
   leaseHistory: LeaseHistory[];
   maintenanceRequests: MaintenanceRequest[];
   aiConfig: AiConfig;
+  landlordProfile: LandlordProfile;
+  bills: PropertyBill[];
 }
 
-// Predefined inspection checklist templates
 export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {
   Entry: [
     "Front door & locks",
@@ -195,14 +245,7 @@ export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {
     "Smoke alarms",
     "Yard / external",
   ],
-  Routine: [
-    "Kitchen",
-    "Bathroom",
-    "Walls",
-    "Floors",
-    "Smoke alarms",
-    "General cleanliness",
-  ],
+  Routine: ["Kitchen", "Bathroom", "Walls", "Floors", "Smoke alarms", "General cleanliness"],
   Exit: [
     "Front door & locks",
     "Kitchen (clean)",
@@ -221,7 +264,15 @@ export const DEFAULT_INSPECTION_ROOMS: Record<Inspection["type"], ChecklistRoom[
     { name: "Entry / Exterior", items: [{ label: "Front door & locks" }, { label: "Yard / external" }] },
     { name: "Kitchen", items: [{ label: "Appliances" }, { label: "Cabinets & bench" }] },
     { name: "Bathroom", items: [{ label: "Fixtures" }, { label: "Tiles & grout" }] },
-    { name: "Living areas", items: [{ label: "Walls & paint" }, { label: "Floors & carpet" }, { label: "Windows & screens" }, { label: "Smoke alarms" }] },
+    {
+      name: "Living areas",
+      items: [
+        { label: "Walls & paint" },
+        { label: "Floors & carpet" },
+        { label: "Windows & screens" },
+        { label: "Smoke alarms" },
+      ],
+    },
   ],
   Routine: [
     { name: "Kitchen", items: [{ label: "Cleanliness" }, { label: "Appliances working" }] },
@@ -229,9 +280,15 @@ export const DEFAULT_INSPECTION_ROOMS: Record<Inspection["type"], ChecklistRoom[
     { name: "Living areas", items: [{ label: "Walls" }, { label: "Floors" }, { label: "Smoke alarms" }] },
   ],
   Exit: [
-    { name: "Entry / Exterior", items: [{ label: "Front door & locks" }, { label: "Yard / external" }, { label: "Keys returned" }] },
+    {
+      name: "Entry / Exterior",
+      items: [{ label: "Front door & locks" }, { label: "Yard / external" }, { label: "Keys returned" }],
+    },
     { name: "Kitchen", items: [{ label: "Cleanliness" }, { label: "Appliances" }] },
     { name: "Bathroom", items: [{ label: "Cleanliness" }] },
-    { name: "Living areas", items: [{ label: "Walls (damage)" }, { label: "Floors & carpet" }, { label: "Smoke alarms" }] },
+    {
+      name: "Living areas",
+      items: [{ label: "Walls (damage)" }, { label: "Floors & carpet" }, { label: "Smoke alarms" }],
+    },
   ],
 };
