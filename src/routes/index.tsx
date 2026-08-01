@@ -435,10 +435,14 @@ function MaintenanceRequestsWidget() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Wrench className="h-4 w-4 text-orange-600" />
-          Tenant maintenance requests ({pending.length})
-          <Button asChild variant="ghost" size="sm" className="ml-auto h-7 px-2 text-xs">
-            <Link to="/maintenance">Open public form</Link>
-          </Button>
+          Maintenance requests ({pending.length})
+          <span className="ml-auto flex items-center gap-2">
+            <LogMaintenanceDialog />
+            <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs">
+              <Link to="/maintenance">Open public form</Link>
+            </Button>
+          </span>
+
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
