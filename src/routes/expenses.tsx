@@ -23,11 +23,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Trash2, FileText, Download, ClipboardCheck, Wrench } from "lucide-react";
+import { Plus, Trash2, FileText, Download, ClipboardCheck, Wrench, Sparkles } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
-import type { Expense, Inspection, ChecklistItem } from "@/lib/types";
-import { INSPECTION_TEMPLATES } from "@/lib/types";
+import type { Expense, Inspection, ChecklistItem, ChecklistRoom } from "@/lib/types";
+import { INSPECTION_TEMPLATES, DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
+
 
 export const Route = createFileRoute("/expenses")({
   head: () => ({
