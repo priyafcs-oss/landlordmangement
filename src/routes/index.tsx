@@ -1,8 +1,25 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   buildTenantLedger,
   fmtCurrency,
@@ -10,7 +27,19 @@ import {
   todayISO,
   daysBetween,
 } from "@/lib/calculations";
-import { AlertTriangle, TrendingUp, ShieldCheck, ClipboardCheck, Wallet, Landmark, ArrowRight, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  TrendingUp,
+  ShieldCheck,
+  ClipboardCheck,
+  Wallet,
+  Landmark,
+  ArrowRight,
+  Wrench,
+  CalendarClock,
+  Plus,
+} from "lucide-react";
+
 import {
   ChartContainer,
   ChartTooltip,
