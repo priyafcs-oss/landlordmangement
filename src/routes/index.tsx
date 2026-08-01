@@ -204,12 +204,181 @@ function DashboardPage() {
         </Card>
       </div>
 
+      <HousekeepingWidget />
+
       <MaintenanceRequestsWidget />
     </div>
   );
 }
 
-function MaintenanceRequestsWidget() {
+/** Bills and loan EMIs falling due within the next 7 days. */
+function HousekeepingWidget() {
+  const { state, markBillPaid } = useStore();
+  const dueBills = state.bills
+    .filter((b) => b.status !== "Paid")
+    .map((b) => ({ bill: b, days: daysUntil(b.dueDate) }))
+    .filter((x) => x.days <= 7)
+    .sort((a, b) => a.days - b.days);
+
+  const today = new Date();
+  const dueEmis = state.loans
+    .filter((l) => l.dueDayOfMonth && l.monthlyEmi > 0)
+    .map((l) => {
+      const day = Math.min(l.dueDayOfMonth!, 28);
+      let due = new Date(today.getFullYear(), today.getMonth(), day);
+      if (due < today) due = new Date(today.getFullYear(), today.getMonth() + 1, day);
+      return { loan: l, days: daysUntil(due.toISOString().slice(0, 10)), date: due.toISOString().slice(0, 10) };
+    })
+    .filter((x) => x.days <= 7)
+    .sort((a, b) => a.days - b.days);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <CalendarClock className="h-4 w-4 text-violet-600" />
+          Housekeeping alerts — due within 7 days
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {dueBills.length === 0 && dueEmis.length === 0 && (
+          <div className="text-muted-foreground">Nothing due in the next 7 days.</div>
+        )}
+        {dueBills.map(({ bill, days }) => {
+          const prop = state.properties.find((p) => p.id === bill.propertyId);
+          return (
+            <div key={bill.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-3">
+              <div>
+                <div className="font-medium">
+                  {bill.billType} — {fmtCurrency(bill.amount)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {prop?.address} • due {bill.dueDate}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={days < 0 ? "destructive" : "outline"}>
+                  {days < 0 ? `${Math.abs(days)} days overdue` : `${days} days`}
+                </Badge>
+                <Button size="sm" variant="outline" onClick={() => markBillPaid(bill.id)}>
+                  Mark paid
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+        {dueEmis.map(({ loan, days, date }) => {
+          const prop = state.properties.find((p) => p.id === loan.propertyId);
+          return (
+            <div key={loan.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-3">
+              <div>
+                <div className="font-medium">
+                  {loan.bankName} EMI — {fmtCurrency(loan.monthlyEmi)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {prop?.address} • due {date}
+                  {loan.isDirectDebit ? " • direct debit" : ""}
+                </div>
+              </div>
+              <Badge variant="outline">{days} days</Badge>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Landlord-initiated maintenance entry (same table as the public tenant form). */
+function LogMaintenanceDialog() {
+  const { state, addMaintenanceRequest } = useStore();
+  const [open, setOpen] = useState(false);
+  const [propertyId, setPropertyId] = useState("");
+  const [category, setCategory] = useState("Other");
+  const [description, setDescription] = useState("");
+  const [urgency, setUrgency] = useState<"Low" | "Medium" | "High">("Medium");
+
+  const save = async () => {
+    if (!propertyId) return toast.error("Select a property");
+    if (!description.trim()) return toast.error("Describe the issue");
+    const prop = state.properties.find((p) => p.id === propertyId);
+    await addMaintenanceRequest({
+      propertyId,
+      propertyAddressTyped: prop?.address ?? "",
+      category,
+      description: description.trim(),
+      urgency,
+      photos: [],
+      contactName: state.landlordProfile.fullName || "Landlord",
+      contactPhone: state.landlordProfile.phone || "",
+      contactEmail: state.landlordProfile.email || "",
+      source: "landlord",
+    });
+    setOpen(false);
+    setDescription("");
+    toast.success("Maintenance job logged");
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs">
+          <Plus className="h-3 w-3" /> Log maintenance
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Log a maintenance job</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Select value={propertyId} onValueChange={setPropertyId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Property" />
+            </SelectTrigger>
+            <SelectContent>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger>
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              {["Plumbing", "Electrical", "Heating / Cooling", "Appliance", "Structural", "Pest", "Other"].map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={urgency} onValueChange={(v) => setUrgency(v as "Low" | "Medium" | "High")}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Low">Low</SelectItem>
+              <SelectItem value="Medium">Medium</SelectItem>
+              <SelectItem value="High">High</SelectItem>
+            </SelectContent>
+          </Select>
+          <Textarea
+            placeholder="Describe the issue"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button onClick={save}>Save job</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
   const { state, updateMaintenanceRequest, addExpense } = useStore();
   const pending = state.maintenanceRequests.filter((r) => r.status === "Pending");
   const convert = (id: string) => {
