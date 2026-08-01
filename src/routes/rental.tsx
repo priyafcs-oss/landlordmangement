@@ -244,7 +244,7 @@ The Landlord`;
 }
 
 function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
-  const { state, addLedger, deleteLedger, updateTenant } = useStore();
+  const { state, addLedger, deleteLedger } = useStore();
   const { rows, total, outstandingRent, outstandingInvoices } = buildTenantLedger(
     tenant,
     state.ledger,
@@ -253,6 +253,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const [amount, setAmount] = useState("");
 
   const nextDue = addDays(tenant.paidUpToDate, 1);
+  const propertyAddress = state.properties.find((p) => p.id === tenant.propertyId)?.address ?? "";
 
   const postPayment = () => {
     const val = parseFloat(amount);
@@ -260,7 +261,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
     // 1 week (weekly rent) = 7 days; 9 weeks = 63 days. Never off-by-one.
     const daysCovered = Math.floor(val / rate);
-    const newPaidUpTo = addDays(tenant.paidUpToDate, daysCovered);
+    // The store re-derives paidUpToDate from lease start + all rent credits.
     addLedger({
       tenantId: tenant.id,
       date: todayISO(),
@@ -268,23 +269,14 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
       description: `Payment received (${daysCovered} days)`,
       debit: 0,
       credit: val,
-      newPaidUpToDate: newPaidUpTo,
     });
-    updateTenant(tenant.id, { paidUpToDate: newPaidUpTo });
     setAmount("");
-    toast.success(`Posted ${fmtCurrency(val)} → paid to ${newPaidUpTo} (${daysCovered} days).`);
+    toast.success(`Posted ${fmtCurrency(val)} — paid-up date recalculated (${daysCovered} days).`);
   };
 
   const removePayment = (id: string) => {
-    const entry = state.ledger.find((e) => e.id === id);
-    if (!entry) return;
-    if (entry.type === "Rent Payment") {
-      const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
-      const daysBack = Math.floor(entry.credit / rate);
-      updateTenant(tenant.id, { paidUpToDate: addDays(tenant.paidUpToDate, -daysBack) });
-    }
     deleteLedger(id);
-    toast.success("Ledger entry reversed");
+    toast.success("Ledger entry reversed — paid-up date recalculated");
   };
 
   return (
@@ -302,6 +294,12 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
               </Button>
             </TenantDialog>
             <AdjustmentDialog tenant={tenant} />
+            <LedgerExportButtons
+              tenant={tenant}
+              propertyAddress={propertyAddress}
+              rows={rows}
+              total={total}
+            />
           </div>
         </CardTitle>
       </CardHeader>
@@ -323,6 +321,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
           />
           <Button onClick={postPayment}>Post Payment</Button>
         </div>
+
 
         <div className="overflow-x-auto rounded border">
           <table className="w-full text-sm">
