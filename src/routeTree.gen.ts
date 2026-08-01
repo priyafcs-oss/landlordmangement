@@ -16,6 +16,7 @@ import { Route as MaintenanceRouteImport } from './routes/maintenance'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiVisionRouteImport } from './routes/api/vision'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -53,6 +54,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiVisionRoute = ApiVisionRouteImport.update({
+  id: '/api/vision',
+  path: '/api/vision',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCopilotRoute = ApiCopilotRouteImport.update({
   id: '/api/copilot',
   path: '/api/copilot',
@@ -68,6 +74,7 @@ export interface FileRoutesByFullPath {
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/api/copilot': typeof ApiCopilotRoute
+  '/api/vision': typeof ApiVisionRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -78,6 +85,7 @@ export interface FileRoutesByTo {
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/api/copilot': typeof ApiCopilotRoute
+  '/api/vision': typeof ApiVisionRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/api/copilot': typeof ApiCopilotRoute
+  '/api/vision': typeof ApiVisionRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
     | '/rental'
     | '/settings'
     | '/api/copilot'
+    | '/api/vision'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
     | '/rental'
     | '/settings'
     | '/api/copilot'
+    | '/api/vision'
   id:
     | '__root__'
     | '/'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '/rental'
     | '/settings'
     | '/api/copilot'
+    | '/api/vision'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -132,6 +144,7 @@ export interface RootRouteChildren {
   RentalRoute: typeof RentalRoute
   SettingsRoute: typeof SettingsRoute
   ApiCopilotRoute: typeof ApiCopilotRoute
+  ApiVisionRoute: typeof ApiVisionRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -185,6 +198,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/vision': {
+      id: '/api/vision'
+      path: '/api/vision'
+      fullPath: '/api/vision'
+      preLoaderRoute: typeof ApiVisionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/copilot': {
       id: '/api/copilot'
       path: '/api/copilot'
@@ -204,6 +224,7 @@ const rootRouteChildren: RootRouteChildren = {
   RentalRoute: RentalRoute,
   SettingsRoute: SettingsRoute,
   ApiCopilotRoute: ApiCopilotRoute,
+  ApiVisionRoute: ApiVisionRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
