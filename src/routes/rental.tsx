@@ -553,7 +553,6 @@ function BankFeedDialog() {
   const post = (m: { tenant: Tenant; amount: number }) => {
     const rate = dailyRentRate(m.tenant.rentAmount, m.tenant.rentFrequency);
     const daysCovered = Math.floor(m.amount / rate);
-    const newPaid = addDays(m.tenant.paidUpToDate, daysCovered);
     addLedger({
       tenantId: m.tenant.id,
       date: todayISO(),
@@ -561,9 +560,8 @@ function BankFeedDialog() {
       description: `Bank feed match (${daysCovered} days)`,
       debit: 0,
       credit: m.amount,
-      newPaidUpToDate: newPaid,
     });
-    updateTenant(m.tenant.id, { paidUpToDate: newPaid });
+
     setMatches((ms) => ms.filter((x) => x !== m));
     setConfirming(null);
     toast.success(`Posted ${fmtCurrency(m.amount)} to ${m.tenant.name}`);
