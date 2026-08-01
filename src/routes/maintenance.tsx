@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Home, Wrench, Upload, CheckCircle2, ShieldCheck } from "lucide-react";
+import { Home, Wrench, Upload, CheckCircle2, ShieldCheck, ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/maintenance")({
   head: () => ({
@@ -69,14 +69,14 @@ function MaintenancePage() {
   const validEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
   const validPhone = (v: string) => v.replace(/\D/g, "").length >= 8;
 
-  const submit = () => {
+  const submit = async () => {
     if (!addressOrCode.trim()) return toast.error("Please enter your property address or tenant code");
     if (!contactName.trim()) return toast.error("Name is required");
     if (!validPhone(contactPhone)) return toast.error("Valid phone number is required");
     if (!validEmail(contactEmail)) return toast.error("Valid email is required");
     if (!category) return toast.error("Please select an issue category");
     if (!description.trim()) return toast.error("Please describe the issue");
-    addMaintenanceRequest({
+    await addMaintenanceRequest({
       propertyId: resolvePropertyId(addressOrCode),
       propertyAddressTyped: addressOrCode.trim(),
       category,
@@ -124,9 +124,16 @@ function MaintenancePage() {
 
   return (
     <div className="mx-auto max-w-lg p-4 sm:p-6">
-      <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
-        <Home className="h-4 w-4" />
-        <span>Tenant maintenance portal</span>
+      <div className="mb-4 flex items-center justify-between gap-2 text-sm text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <Home className="h-4 w-4" />
+          Tenant maintenance portal
+        </span>
+        <Button asChild variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+          <Link to="/">
+            <ArrowLeft className="h-3 w-3" /> Back to Dashboard
+          </Link>
+        </Button>
       </div>
       <div className="mb-4 flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-xs">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
