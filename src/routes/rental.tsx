@@ -32,6 +32,8 @@ import {
   CalendarClock,
   FileSignature,
   Mail,
+  Download,
+  FileDown,
 } from "lucide-react";
 import {
   buildTenantLedger,
@@ -40,8 +42,10 @@ import {
   addDays,
   addMonths,
   dailyRentRate,
+  type LedgerRow,
 } from "@/lib/calculations";
 import type { Tenant } from "@/lib/types";
+
 import { toast } from "sonner";
 import { TenantDialog } from "./portfolio";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
