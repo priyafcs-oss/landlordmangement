@@ -516,8 +516,94 @@ function TemplateModal({
   );
 }
 
+function LedgerExportButtons({
+  tenant,
+  propertyAddress,
+  rows,
+  total,
+}: {
+  tenant: Tenant;
+  propertyAddress: string;
+  rows: LedgerRow[];
+  total: number;
+}) {
+  const header = ["Date", "Description", "Debit", "Credit", "Balance"];
+
+  const toCsv = () => {
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    return [
+      header.map(esc).join(","),
+      ...rows.map((r) => [r.date, r.description, r.debit, r.credit, r.balance].map(esc).join(",")),
+    ].join("\n");
+  };
+
+  const downloadCsv = () => {
+    const blob = new Blob([toCsv()], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Ledger CSV downloaded");
+  };
+
+  const downloadPdf = () => {
+    const win = window.open("", "_blank");
+    if (!win) return toast.error("Allow pop-ups to export the PDF");
+    win.document.write(`<!doctype html><html><head><title>Ledger — ${tenant.name}</title>
+      <style>
+        body{font-family:ui-sans-serif,system-ui,sans-serif;padding:32px;color:#111}
+        h1{font-size:18px;margin:0 0 4px} p{font-size:12px;color:#555;margin:0 0 16px}
+        table{width:100%;border-collapse:collapse;font-size:12px}
+        th,td{border-bottom:1px solid #e5e5e5;padding:6px 8px;text-align:left}
+        td.num,th.num{text-align:right}
+        tfoot td{font-weight:600}
+      </style></head><body>
+      <h1>Tenant Statement — ${tenant.name}</h1>
+      <p>${propertyAddress} • Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} • Paid up to ${tenant.paidUpToDate} • Generated ${todayISO()}</p>
+      <table><thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+      <tbody>${rows
+        .map(
+          (r) =>
+            `<tr><td>${r.date}</td><td>${r.description}</td><td class="num">${r.debit ? fmtCurrency(r.debit) : ""}</td><td class="num">${r.credit ? fmtCurrency(r.credit) : ""}</td><td class="num">${fmtCurrency(r.balance)}</td></tr>`,
+        )
+        .join("")}</tbody>
+      <tfoot><tr><td colspan="4">Total outstanding</td><td class="num">${fmtCurrency(total)}</td></tr></tfoot>
+      </table></body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const emailLedger = () => {
+    const lines = rows
+      .map((r) => `${r.date} | ${r.description} | Dr ${r.debit} | Cr ${r.credit} | Bal ${r.balance}`)
+      .join("\n");
+    const body = `Dear ${tenant.name},\n\nPlease find your rent ledger for ${propertyAddress} below.\n\n${lines}\n\nTotal outstanding: ${fmtCurrency(total)}\nPaid up to: ${tenant.paidUpToDate}\n\nKind regards,\nThe Landlord`;
+    window.location.href = `mailto:${tenant.email ?? ""}?subject=${encodeURIComponent(
+      `Rent ledger — ${propertyAddress}`,
+    )}&body=${encodeURIComponent(body)}`;
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="outline" className="gap-1" onClick={downloadCsv}>
+        <Download className="h-3.5 w-3.5" /> CSV
+      </Button>
+      <Button size="sm" variant="outline" className="gap-1" onClick={downloadPdf}>
+        <FileDown className="h-3.5 w-3.5" /> PDF
+      </Button>
+      <Button size="sm" variant="outline" className="gap-1" onClick={emailLedger}>
+        <Send className="h-3.5 w-3.5" /> Email
+      </Button>
+    </>
+  );
+}
+
 function BankFeedDialog() {
-  const { state, addLedger, updateTenant } = useStore();
+  const { state, addLedger } = useStore();
+
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [matches, setMatches] = useState<{ tenant: Tenant; amount: number; line: string }[]>([]);
