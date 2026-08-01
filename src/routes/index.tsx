@@ -379,6 +379,9 @@ function LogMaintenanceDialog() {
   );
 }
 
+function MaintenanceRequestsWidget() {
+
+
   const { state, updateMaintenanceRequest, addExpense } = useStore();
   const pending = state.maintenanceRequests.filter((r) => r.status === "Pending");
   const convert = (id: string) => {
