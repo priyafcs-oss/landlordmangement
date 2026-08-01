@@ -15,8 +15,18 @@ import type {
   LandlordProfile,
   PropertyBill,
 } from "./types";
-
-const STORAGE_KEY = "landlord-app-v4";
+import {
+  TABLES,
+  selectAll,
+  upsertRow,
+  updateRow,
+  deleteRow,
+  deleteWhere,
+  deleteWhereIn,
+  loadSettings,
+  saveSettings,
+} from "./db";
+import { paidUpToDateFromPayments } from "./calculations";
 
 const defaultAi: AiConfig = {
   enabled: true,
@@ -49,26 +59,10 @@ const empty: AppState = {
   bills: [],
 };
 
-function load(): AppState {
-  if (typeof window === "undefined") return empty;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        ...empty,
-        ...parsed,
-        aiConfig: { ...defaultAi, ...(parsed.aiConfig ?? {}) },
-        landlordProfile: { ...defaultProfile, ...(parsed.landlordProfile ?? {}) },
-        bills: parsed.bills ?? [],
-      };
-    }
-  } catch {}
-  return empty;
-}
-
 interface StoreCtx {
   state: AppState;
+  loading: boolean;
+  refresh: () => Promise<void>;
   set: (updater: (s: AppState) => AppState) => void;
   reset: () => void;
 
@@ -107,7 +101,7 @@ interface StoreCtx {
   addRentChange: (r: Omit<RentChange, "id">) => void;
   addLeaseHistory: (h: Omit<LeaseHistory, "id">) => void;
 
-  addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => void;
+  addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
 
@@ -135,34 +129,100 @@ function addMonthsISO(iso: string, months: number): string {
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(empty);
-  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = async () => {
+    const [
+      properties,
+      tenants,
+      ledger,
+      invoices,
+      loans,
+      expenses,
+      inspections,
+      rentChanges,
+      leaseHistory,
+      maintenanceRequests,
+      bills,
+      settings,
+    ] = await Promise.all([
+      selectAll<Property>(TABLES.properties),
+      selectAll<Tenant>(TABLES.tenants),
+      selectAll<LedgerEntry>(TABLES.ledger),
+      selectAll<TenantInvoice>(TABLES.invoices),
+      selectAll<Loan>(TABLES.loans),
+      selectAll<Expense>(TABLES.expenses),
+      selectAll<Inspection>(TABLES.inspections),
+      selectAll<RentChange>(TABLES.rentChanges),
+      selectAll<LeaseHistory>(TABLES.leaseHistory),
+      selectAll<MaintenanceRequest>(TABLES.maintenanceRequests),
+      selectAll<PropertyBill>(TABLES.bills),
+      loadSettings(),
+    ]);
+    setState({
+      properties,
+      tenants,
+      ledger,
+      invoices,
+      loans,
+      expenses,
+      inspections,
+      rentChanges,
+      leaseHistory,
+      maintenanceRequests,
+      bills,
+      aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
+      landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
+    });
+    setLoading(false);
+  };
 
   useEffect(() => {
-    setState(load());
-    setHydrated(true);
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
-  }, [state, hydrated]);
 
   const set: StoreCtx["set"] = (updater) => setState((s) => updater(s));
 
+  /**
+   * Single source of truth for `paidUpToDate`: always re-derived from the lease
+   * start date plus every Rent Payment credit in the ledger, then persisted.
+   */
+  const recomputePaidUp = (tenantId: string, tenants: Tenant[], ledger: LedgerEntry[]): Tenant[] =>
+    tenants.map((t) => {
+      if (t.id !== tenantId) return t;
+      const next = paidUpToDateFromPayments(t, ledger);
+      if (next === t.paidUpToDate) return t;
+      void updateRow(TABLES.tenants, t.id, { paidUpToDate: next });
+      return { ...t, paidUpToDate: next };
+    });
+
   const value: StoreCtx = {
     state,
+    loading,
+    refresh,
     set,
-    reset: () => {
-      try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch {}
-      setState({ ...empty, aiConfig: { ...defaultAi }, landlordProfile: { ...defaultProfile } });
+    reset: () => void 0,
+
+    addProperty: (p) => {
+      const row: Property = { ...p, id: uid("p") };
+      void upsertRow(TABLES.properties, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, properties: [...s.properties, row] }));
     },
-    addProperty: (p) => set((s) => ({ ...s, properties: [...s.properties, { ...p, id: uid("p") }] })),
-    updateProperty: (id, p) => set((s) => ({ ...s, properties: s.properties.map((x) => (x.id === id ? { ...x, ...p } : x)) })),
-    deleteProperty: (id) =>
+    updateProperty: (id, p) => {
+      void updateRow(TABLES.properties, id, p as Record<string, unknown>);
+      set((s) => ({ ...s, properties: s.properties.map((x) => (x.id === id ? { ...x, ...p } : x)) }));
+    },
+    deleteProperty: (id) => {
+      const tenantIds = state.tenants.filter((t) => t.propertyId === id).map((t) => t.id);
+      void deleteRow(TABLES.properties, id);
+      void deleteWhere(TABLES.tenants, "propertyId", id);
+      void deleteWhere(TABLES.loans, "propertyId", id);
+      void deleteWhere(TABLES.expenses, "propertyId", id);
+      void deleteWhere(TABLES.inspections, "propertyId", id);
+      void deleteWhere(TABLES.bills, "propertyId", id);
+      void deleteWhereIn(TABLES.ledger, "tenantId", tenantIds);
+      void deleteWhereIn(TABLES.invoices, "tenantId", tenantIds);
       set((s) => ({
         ...s,
         properties: s.properties.filter((x) => x.id !== id),
@@ -171,45 +231,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         expenses: s.expenses.filter((e) => e.propertyId !== id),
         inspections: s.inspections.filter((i) => i.propertyId !== id),
         bills: s.bills.filter((b) => b.propertyId !== id),
-      })),
+        ledger: s.ledger.filter((e) => !tenantIds.includes(e.tenantId)),
+        invoices: s.invoices.filter((i) => !tenantIds.includes(i.tenantId)),
+      }));
+    },
 
-    addTenant: (t) =>
-      set((s) => {
-        // Paid-up default = one day BEFORE lease start (so day 1 of lease reads as first due day)
-        let defaultPaidUp = new Date().toISOString().slice(0, 10);
-        if (t.leaseStart) {
-          const d = new Date(t.leaseStart);
-          d.setDate(d.getDate() - 1);
-          defaultPaidUp = d.toISOString().slice(0, 10);
-        }
-        return {
-          ...s,
-          tenants: [
-            ...s.tenants,
-            { ...t, paidUpToDate: t.paidUpToDate || defaultPaidUp, id: uid("t") },
-          ],
-        };
-      }),
+    addTenant: (t) => {
+      // Paid-up default = one day BEFORE lease start (so day 1 of lease reads as first due day)
+      let defaultPaidUp = new Date().toISOString().slice(0, 10);
+      if (t.leaseStart) {
+        const d = new Date(t.leaseStart);
+        d.setDate(d.getDate() - 1);
+        defaultPaidUp = d.toISOString().slice(0, 10);
+      }
+      const row: Tenant = { ...t, paidUpToDate: t.paidUpToDate || defaultPaidUp, id: uid("t") };
+      void upsertRow(TABLES.tenants, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, tenants: [...s.tenants, row] }));
+    },
     updateTenant: (id, patch) =>
       set((s) => {
         const prev = s.tenants.find((x) => x.id === id);
-        const nextTenants = s.tenants.map((x) => (x.id === id ? { ...x, ...patch } : x));
+        void updateRow(TABLES.tenants, id, patch as Record<string, unknown>);
+        let nextTenants = s.tenants.map((x) => (x.id === id ? { ...x, ...patch } : x));
         let rentChanges = s.rentChanges;
         if (prev && patch.rentAmount !== undefined && patch.rentAmount !== prev.rentAmount) {
-          rentChanges = [
-            ...rentChanges,
-            {
-              id: uid("rc"),
-              tenantId: id,
-              changeDate: new Date().toISOString().slice(0, 10),
-              oldRent: prev.rentAmount,
-              newRent: patch.rentAmount,
-            },
-          ];
+          const rc: RentChange = {
+            id: uid("rc"),
+            tenantId: id,
+            changeDate: new Date().toISOString().slice(0, 10),
+            oldRent: prev.rentAmount,
+            newRent: patch.rentAmount,
+          };
+          void upsertRow(TABLES.rentChanges, rc as unknown as Record<string, unknown>);
+          rentChanges = [...rentChanges, rc];
+        }
+        // Structural change → re-derive paid-up date from the ledger.
+        if (
+          patch.leaseStart !== undefined ||
+          patch.rentAmount !== undefined ||
+          patch.rentFrequency !== undefined
+        ) {
+          nextTenants = recomputePaidUp(id, nextTenants, s.ledger);
         }
         return { ...s, tenants: nextTenants, rentChanges };
       }),
-    deleteTenant: (id) =>
+    deleteTenant: (id) => {
+      void deleteRow(TABLES.tenants, id);
+      void deleteWhere(TABLES.ledger, "tenantId", id);
+      void deleteWhere(TABLES.invoices, "tenantId", id);
+      void deleteWhere(TABLES.rentChanges, "tenantId", id);
+      void deleteWhere(TABLES.leaseHistory, "tenantId", id);
       set((s) => ({
         ...s,
         tenants: s.tenants.filter((x) => x.id !== id),
@@ -217,7 +288,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         invoices: s.invoices.filter((i) => i.tenantId !== id),
         rentChanges: s.rentChanges.filter((r) => r.tenantId !== id),
         leaseHistory: s.leaseHistory.filter((r) => r.tenantId !== id),
-      })),
+      }));
+    },
 
     renewLease: (tenantId, args) =>
       set((s) => {
@@ -234,114 +306,204 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           pastRent: prev.rentAmount,
           pastFrequency: prev.rentFrequency,
         };
-        const rentChanges =
-          args.newRent !== prev.rentAmount
-            ? [
-                ...s.rentChanges,
-                {
-                  id: uid("rc"),
-                  tenantId,
-                  changeDate: new Date().toISOString().slice(0, 10),
-                  oldRent: prev.rentAmount,
-                  newRent: args.newRent,
-                },
-              ]
-            : s.rentChanges;
+        void upsertRow(TABLES.leaseHistory, history as unknown as Record<string, unknown>);
+
+        let rentChanges = s.rentChanges;
+        if (args.newRent !== prev.rentAmount) {
+          const rc: RentChange = {
+            id: uid("rc"),
+            tenantId,
+            changeDate: new Date().toISOString().slice(0, 10),
+            oldRent: prev.rentAmount,
+            newRent: args.newRent,
+          };
+          void upsertRow(TABLES.rentChanges, rc as unknown as Record<string, unknown>);
+          rentChanges = [...rentChanges, rc];
+        }
+
+        const patch: Partial<Tenant> = {
+          leaseStart: args.newStart,
+          leaseExpiry: args.newEnd || undefined,
+          leaseDuration: args.newDuration ?? prev.leaseDuration,
+          rentAmount: args.newRent,
+          rentFrequency: args.newFrequency ?? prev.rentFrequency,
+          lastRentIncreaseDate:
+            args.newRent !== prev.rentAmount ? new Date().toISOString().slice(0, 10) : prev.lastRentIncreaseDate,
+        };
+        void updateRow(TABLES.tenants, tenantId, { ...patch, leaseExpiry: args.newEnd || null });
+
+        const tenants = recomputePaidUp(
+          tenantId,
+          s.tenants.map((t) => (t.id === tenantId ? { ...t, ...patch } : t)),
+          s.ledger,
+        );
+        return { ...s, leaseHistory: [...s.leaseHistory, history], rentChanges, tenants };
+      }),
+
+    addLedger: (e) =>
+      set((s) => {
+        const row: LedgerEntry = { ...e, id: uid("le") };
+        void upsertRow(TABLES.ledger, row as unknown as Record<string, unknown>);
+        const ledger = [...s.ledger, row];
+        return { ...s, ledger, tenants: recomputePaidUp(row.tenantId, s.tenants, ledger) };
+      }),
+    deleteLedger: (id) =>
+      set((s) => {
+        const entry = s.ledger.find((e) => e.id === id);
+        void deleteRow(TABLES.ledger, id);
+        const ledger = s.ledger.filter((e) => e.id !== id);
         return {
           ...s,
-          leaseHistory: [...s.leaseHistory, history],
-          rentChanges,
-          tenants: s.tenants.map((t) =>
-            t.id === tenantId
-              ? {
-                  ...t,
-                  leaseStart: args.newStart,
-                  leaseExpiry: args.newEnd || undefined,
-                  leaseDuration: args.newDuration ?? t.leaseDuration,
-                  rentAmount: args.newRent,
-                  rentFrequency: args.newFrequency ?? t.rentFrequency,
-                  lastRentIncreaseDate:
-                    args.newRent !== prev.rentAmount ? new Date().toISOString().slice(0, 10) : t.lastRentIncreaseDate,
-                }
-              : t,
-          ),
+          ledger,
+          tenants: entry ? recomputePaidUp(entry.tenantId, s.tenants, ledger) : s.tenants,
         };
       }),
 
-    addLedger: (e) => set((s) => ({ ...s, ledger: [...s.ledger, { ...e, id: uid("le") }] })),
-    deleteLedger: (id) => set((s) => ({ ...s, ledger: s.ledger.filter((e) => e.id !== id) })),
+    addInvoice: (i) => {
+      const row: TenantInvoice = { ...i, id: uid("inv") };
+      void upsertRow(TABLES.invoices, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, invoices: [...s.invoices, row] }));
+    },
+    updateInvoice: (id, i) => {
+      void updateRow(TABLES.invoices, id, i as Record<string, unknown>);
+      set((s) => ({ ...s, invoices: s.invoices.map((x) => (x.id === id ? { ...x, ...i } : x)) }));
+    },
+    deleteInvoice: (id) => {
+      void deleteRow(TABLES.invoices, id);
+      set((s) => ({ ...s, invoices: s.invoices.filter((x) => x.id !== id) }));
+    },
 
-    addInvoice: (i) => set((s) => ({ ...s, invoices: [...s.invoices, { ...i, id: uid("inv") }] })),
-    updateInvoice: (id, i) => set((s) => ({ ...s, invoices: s.invoices.map((x) => (x.id === id ? { ...x, ...i } : x)) })),
-    deleteInvoice: (id) => set((s) => ({ ...s, invoices: s.invoices.filter((x) => x.id !== id) })),
+    addLoan: (l) => {
+      const row: Loan = { ...l, id: uid("l") };
+      void upsertRow(TABLES.loans, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, loans: [...s.loans, row] }));
+    },
+    updateLoan: (id, l) => {
+      void updateRow(TABLES.loans, id, l as Record<string, unknown>);
+      set((s) => ({ ...s, loans: s.loans.map((x) => (x.id === id ? { ...x, ...l } : x)) }));
+    },
+    deleteLoan: (id) => {
+      void deleteRow(TABLES.loans, id);
+      set((s) => ({ ...s, loans: s.loans.filter((x) => x.id !== id) }));
+    },
 
-    addLoan: (l) => set((s) => ({ ...s, loans: [...s.loans, { ...l, id: uid("l") }] })),
-    updateLoan: (id, l) => set((s) => ({ ...s, loans: s.loans.map((x) => (x.id === id ? { ...x, ...l } : x)) })),
-    deleteLoan: (id) => set((s) => ({ ...s, loans: s.loans.filter((x) => x.id !== id) })),
+    addExpense: (e) => {
+      const row: Expense = { ...e, id: uid("ex") };
+      void upsertRow(TABLES.expenses, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, expenses: [...s.expenses, row] }));
+    },
+    updateExpense: (id, e) => {
+      void updateRow(TABLES.expenses, id, e as Record<string, unknown>);
+      set((s) => ({ ...s, expenses: s.expenses.map((x) => (x.id === id ? { ...x, ...e } : x)) }));
+    },
+    deleteExpense: (id) => {
+      void deleteRow(TABLES.expenses, id);
+      set((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
+    },
 
-    addExpense: (e) => set((s) => ({ ...s, expenses: [...s.expenses, { ...e, id: uid("ex") }] })),
-    updateExpense: (id, e) => set((s) => ({ ...s, expenses: s.expenses.map((x) => (x.id === id ? { ...x, ...e } : x)) })),
-    deleteExpense: (id) => set((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) })),
+    addInspection: (i) => {
+      const row: Inspection = { ...i, id: uid("ins") };
+      void upsertRow(TABLES.inspections, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, inspections: [...s.inspections, row] }));
+    },
+    updateInspection: (id, i) => {
+      void updateRow(TABLES.inspections, id, i as Record<string, unknown>);
+      set((s) => ({ ...s, inspections: s.inspections.map((x) => (x.id === id ? { ...x, ...i } : x)) }));
+    },
+    deleteInspection: (id) => {
+      void deleteRow(TABLES.inspections, id);
+      set((s) => ({ ...s, inspections: s.inspections.filter((x) => x.id !== id) }));
+    },
 
-    addInspection: (i) => set((s) => ({ ...s, inspections: [...s.inspections, { ...i, id: uid("ins") }] })),
-    updateInspection: (id, i) =>
-      set((s) => ({ ...s, inspections: s.inspections.map((x) => (x.id === id ? { ...x, ...i } : x)) })),
-    deleteInspection: (id) => set((s) => ({ ...s, inspections: s.inspections.filter((x) => x.id !== id) })),
+    addRentChange: (r) => {
+      const row: RentChange = { ...r, id: uid("rc") };
+      void upsertRow(TABLES.rentChanges, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, rentChanges: [...s.rentChanges, row] }));
+    },
+    addLeaseHistory: (h) => {
+      const row: LeaseHistory = { ...h, id: uid("lh") };
+      void upsertRow(TABLES.leaseHistory, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, leaseHistory: [...s.leaseHistory, row] }));
+    },
 
-    addRentChange: (r) => set((s) => ({ ...s, rentChanges: [...s.rentChanges, { ...r, id: uid("rc") }] })),
-    addLeaseHistory: (h) => set((s) => ({ ...s, leaseHistory: [...s.leaseHistory, { ...h, id: uid("lh") }] })),
-
-    addMaintenanceRequest: (m) =>
-      set((s) => ({
-        ...s,
-        maintenanceRequests: [
-          ...s.maintenanceRequests,
-          { ...m, id: uid("mr"), createdAt: new Date().toISOString(), status: "Pending" },
-        ],
-      })),
-    updateMaintenanceRequest: (id, m) =>
+    addMaintenanceRequest: async (m) => {
+      const row: MaintenanceRequest = {
+        ...m,
+        id: uid("mr"),
+        createdAt: new Date().toISOString(),
+        status: "Pending",
+      };
+      await upsertRow(TABLES.maintenanceRequests, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, maintenanceRequests: [...s.maintenanceRequests, row] }));
+    },
+    updateMaintenanceRequest: (id, m) => {
+      void updateRow(TABLES.maintenanceRequests, id, m as Record<string, unknown>);
       set((s) => ({
         ...s,
         maintenanceRequests: s.maintenanceRequests.map((x) => (x.id === id ? { ...x, ...m } : x)),
-      })),
-    deleteMaintenanceRequest: (id) =>
-      set((s) => ({ ...s, maintenanceRequests: s.maintenanceRequests.filter((x) => x.id !== id) })),
+      }));
+    },
+    deleteMaintenanceRequest: (id) => {
+      void deleteRow(TABLES.maintenanceRequests, id);
+      set((s) => ({ ...s, maintenanceRequests: s.maintenanceRequests.filter((x) => x.id !== id) }));
+    },
 
     updateLandlordProfile: (p) =>
-      set((s) => ({ ...s, landlordProfile: { ...s.landlordProfile, ...p } })),
+      set((s) => {
+        const landlordProfile = { ...s.landlordProfile, ...p };
+        void saveSettings({ landlordProfile });
+        return { ...s, landlordProfile };
+      }),
 
-    addBill: (b) => set((s) => ({ ...s, bills: [...s.bills, { ...b, id: uid("bill") }] })),
-    updateBill: (id, b) =>
-      set((s) => ({ ...s, bills: s.bills.map((x) => (x.id === id ? { ...x, ...b } : x)) })),
-    deleteBill: (id) => set((s) => ({ ...s, bills: s.bills.filter((x) => x.id !== id) })),
+    addBill: (b) => {
+      const row: PropertyBill = { ...b, id: uid("bill") };
+      void upsertRow(TABLES.bills, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, bills: [...s.bills, row] }));
+    },
+    updateBill: (id, b) => {
+      void updateRow(TABLES.bills, id, b as Record<string, unknown>);
+      set((s) => ({ ...s, bills: s.bills.map((x) => (x.id === id ? { ...x, ...b } : x)) }));
+    },
+    deleteBill: (id) => {
+      void deleteRow(TABLES.bills, id);
+      set((s) => ({ ...s, bills: s.bills.filter((x) => x.id !== id) }));
+    },
     markBillPaid: (id) =>
       set((s) => {
         const bill = s.bills.find((b) => b.id === id);
         if (!bill) return s;
         const today = new Date().toISOString().slice(0, 10);
+        void updateRow(TABLES.bills, id, { status: "Paid", paidDate: today });
         const updated = s.bills.map((b) =>
           b.id === id ? { ...b, status: "Paid" as const, paidDate: today } : b,
         );
         // Auto-create next cycle
         if (bill.recurrenceMonths && bill.recurrenceMonths > 0) {
-          const nextDue = addMonthsISO(bill.dueDate, bill.recurrenceMonths);
-          updated.push({
+          const next: PropertyBill = {
             ...bill,
             id: uid("bill"),
-            dueDate: nextDue,
+            dueDate: addMonthsISO(bill.dueDate, bill.recurrenceMonths),
             status: "Unpaid",
             paidDate: undefined,
-          });
+          };
+          void upsertRow(TABLES.bills, { ...next, paidDate: null } as unknown as Record<string, unknown>);
+          updated.push(next);
         }
         return { ...s, bills: updated };
       }),
 
-    setAiEnabled: (v) => set((s) => ({ ...s, aiConfig: { ...s.aiConfig, enabled: v } })),
+    setAiEnabled: (v) =>
+      set((s) => {
+        const aiConfig = { ...s.aiConfig, enabled: v };
+        void saveSettings({ aiConfig });
+        return { ...s, aiConfig };
+      }),
     resetAiUsage: () =>
-      set((s) => ({
-        ...s,
-        aiConfig: { ...s.aiConfig, dailyCount: 0, countDate: new Date().toISOString().slice(0, 10) },
-      })),
+      set((s) => {
+        const aiConfig = { ...s.aiConfig, dailyCount: 0, countDate: new Date().toISOString().slice(0, 10) };
+        void saveSettings({ aiConfig });
+        return { ...s, aiConfig };
+      }),
     consumeAiBudget: () => {
       const today = new Date().toISOString().slice(0, 10);
       if (!state.aiConfig.enabled) return { ok: false, reason: "AI Co-Pilot APIs are disabled by Creator Master Panel." };
@@ -349,14 +511,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (currentCount >= state.aiConfig.dailyLimit) {
         return { ok: false, reason: "Daily AI Budget Limit Reached." };
       }
-      setState((s) => ({
-        ...s,
-        aiConfig: {
+      setState((s) => {
+        const aiConfig = {
           ...s.aiConfig,
           countDate: today,
           dailyCount: (s.aiConfig.countDate === today ? s.aiConfig.dailyCount : 0) + 1,
-        },
-      }));
+        };
+        void saveSettings({ aiConfig });
+        return { ...s, aiConfig };
+      });
       return { ok: true };
     },
   };
