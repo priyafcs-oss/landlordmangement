@@ -13,7 +13,6 @@ export default defineTool({
     urgency: z.string().trim().optional().describe("e.g. Low, Medium, High, Emergency."),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  needsApproval: true,
   handler: async ({ propertyId, description, category, urgency }, ctx) => {
     if (!ctx.isAuthenticated()) return errorResult("Not authenticated");
     const supabase = supabaseForUser(ctx);
