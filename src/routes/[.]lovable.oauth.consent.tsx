@@ -183,11 +183,10 @@ function SignIn({ error, onError }: { error: string | null; onError: (m: string 
 
   async function google() {
     onError(null);
-    const { error: err } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.href },
+    const result = await lovable.auth.signInWithOAuth("google", {
+      redirect_uri: window.location.href,
     });
-    if (err) onError(err.message);
+    if (result.error) onError(result.error.message);
   }
 
   return (
