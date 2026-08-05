@@ -153,10 +153,19 @@ export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[]): PaidUpT
   const totalPaid = entries
     .filter((e) => e.tenantId === tenant.id && e.type === "Rent Payment")
     .reduce((s, e) => s + e.credit, 0);
-  // Full days covered by paid amount, then advance from lease start.
-  const daysCovered = Math.floor(totalPaid / rate);
-  const extra = Math.round((totalPaid - daysCovered * rate) * 100) / 100;
-  return { date: addDays(start, Math.max(0, daysCovered - 1)), extra };
+
+  const EPS = 1e-8;
+  const rawDaysCovered = totalPaid / rate;
+  let fullDays = Math.floor(rawDaysCovered + EPS);
+  let leftover = totalPaid - fullDays * rate;
+
+  if (leftover + EPS >= rate) {
+    fullDays += 1;
+    leftover = 0;
+  }
+
+  const extra = Math.round(Math.max(0, leftover) * 100) / 100;
+  return { date: addDays(start, Math.max(0, fullDays - 1)), extra };
 }
 
 export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[]): string {
