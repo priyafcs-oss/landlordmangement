@@ -140,16 +140,27 @@ export function tenantArrearsStatus(
   return { inArrears: total > 0.01, amount: total };
 }
 
-export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[]): string {
+export interface PaidUpToInfo {
+  date: string;
+  /** Leftover amount paid beyond the last fully-covered day (e.g. $15 credit sitting past "paid up to"). */
+  extra: number;
+}
+
+export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[]): PaidUpToInfo {
   const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
   const start = tenant.leaseStart ?? tenant.paidUpToDate;
-  if (rate <= 0) return start;
+  if (rate <= 0) return { date: start, extra: 0 };
   const totalPaid = entries
     .filter((e) => e.tenantId === tenant.id && e.type === "Rent Payment")
     .reduce((s, e) => s + e.credit, 0);
   // Full days covered by paid amount, then advance from lease start.
   const daysCovered = Math.floor(totalPaid / rate);
-  return addDays(start, Math.max(0, daysCovered - 1));
+  const extra = Math.round((totalPaid - daysCovered * rate) * 100) / 100;
+  return { date: addDays(start, Math.max(0, daysCovered - 1)), extra };
+}
+
+export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[]): string {
+  return paidUpToDetails(tenant, entries).date;
 }
 
 export function daysUntil(dateISO: string): number {

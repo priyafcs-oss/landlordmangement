@@ -42,11 +42,13 @@ import {
   addDays,
   addMonths,
   dailyRentRate,
+  paidUpToDetails,
   type LedgerRow,
 } from "@/lib/calculations";
 import type { Tenant } from "@/lib/types";
 
 import { toast } from "sonner";
+import jsPDF from "jspdf";
 import { TenantDialog } from "./portfolio";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 
@@ -255,26 +257,30 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     state.invoices,
   );
   const [amount, setAmount] = useState("");
+  const [paymentDate, setPaymentDate] = useState(todayISO());
 
   const nextDue = addDays(tenant.paidUpToDate, 1);
   const propertyAddress = state.properties.find((p) => p.id === tenant.propertyId)?.address ?? "";
+  const paidUpTo = paidUpToDetails(tenant, state.ledger);
 
   const postPayment = () => {
     const val = parseFloat(amount);
     if (!val || val <= 0) return toast.error("Enter a valid amount");
+    if (!paymentDate) return toast.error("Enter the date the payment was received");
     const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
     // 1 week (weekly rent) = 7 days; 9 weeks = 63 days. Never off-by-one.
     const daysCovered = Math.floor(val / rate);
     // The store re-derives paidUpToDate from lease start + all rent credits.
     addLedger({
       tenantId: tenant.id,
-      date: todayISO(),
+      date: paymentDate,
       type: "Rent Payment",
       description: `Payment received (${daysCovered} days)`,
       debit: 0,
       credit: val,
     });
     setAmount("");
+    setPaymentDate(todayISO());
     toast.success(`Posted ${fmtCurrency(val)} — paid-up date recalculated (${daysCovered} days).`);
   };
 
@@ -309,20 +315,39 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-4">
-          <Stat label="Paid up to" value={tenant.paidUpToDate} />
+          <Stat
+            label="Paid up to"
+            value={
+              paidUpTo.extra > 0
+                ? `${tenant.paidUpToDate} + ${fmtCurrency(paidUpTo.extra)} extra`
+                : tenant.paidUpToDate
+            }
+          />
           <Stat label="Next rent due" value={nextDue} />
           <Stat label="Rent arrears" value={fmtCurrency(outstandingRent)} />
           <Stat label="Invoices outstanding" value={fmtCurrency(outstandingInvoices)} />
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Input
-            placeholder="Payment amount"
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="max-w-[180px]"
-          />
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Payment amount</Label>
+            <Input
+              placeholder="Payment amount"
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="max-w-[180px]"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Date received</Label>
+            <Input
+              type="date"
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              className="max-w-[180px]"
+            />
+          </div>
           <Button onClick={postPayment}>Post Payment</Button>
         </div>
 
@@ -553,31 +578,71 @@ function LedgerExportButtons({
   };
 
   const downloadPdf = () => {
-    const win = window.open("", "_blank");
-    if (!win) return toast.error("Allow pop-ups to export the PDF");
-    win.document.write(`<!doctype html><html><head><title>Ledger — ${tenant.name}</title>
-      <style>
-        body{font-family:ui-sans-serif,system-ui,sans-serif;padding:32px;color:#111}
-        h1{font-size:18px;margin:0 0 4px} p{font-size:12px;color:#555;margin:0 0 16px}
-        table{width:100%;border-collapse:collapse;font-size:12px}
-        th,td{border-bottom:1px solid #e5e5e5;padding:6px 8px;text-align:left}
-        td.num,th.num{text-align:right}
-        tfoot td{font-weight:600}
-      </style></head><body>
-      <h1>Tenant Statement — ${tenant.name}</h1>
-      <p>${propertyAddress} • Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} • Paid up to ${tenant.paidUpToDate} • Generated ${todayISO()}</p>
-      <table><thead><tr><th>Date</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
-      <tbody>${rows
-        .map(
-          (r) =>
-            `<tr><td>${r.date}</td><td>${r.description}</td><td class="num">${r.debit ? fmtCurrency(r.debit) : ""}</td><td class="num">${r.credit ? fmtCurrency(r.credit) : ""}</td><td class="num">${fmtCurrency(r.balance)}</td></tr>`,
-        )
-        .join("")}</tbody>
-      <tfoot><tr><td colspan="4">Total outstanding</td><td class="num">${fmtCurrency(total)}</td></tr></tfoot>
-      </table></body></html>`);
-    win.document.close();
-    win.focus();
-    win.print();
+    const doc = new jsPDF();
+    const marginX = 14;
+    const rightEdge = 196;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let y = 18;
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Tenant Statement - ${tenant.name}`, marginX, y);
+    y += 7;
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(85);
+    doc.text(
+      `${propertyAddress} - Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} - Paid up to ${tenant.paidUpToDate} - Generated ${todayISO()}`,
+      marginX,
+      y,
+    );
+    y += 8;
+
+    const col = { date: marginX, desc: marginX + 24, debit: marginX + 112, credit: marginX + 142, balance: marginX + 172 };
+
+    const drawHeader = () => {
+      doc.setFontSize(9);
+      doc.setTextColor(17);
+      doc.setFont("helvetica", "bold");
+      doc.text("Date", col.date, y);
+      doc.text("Description", col.desc, y);
+      doc.text("Debit", col.debit, y);
+      doc.text("Credit", col.credit, y);
+      doc.text("Balance", col.balance, y);
+      y += 2;
+      doc.setDrawColor(229);
+      doc.line(marginX, y, rightEdge, y);
+      y += 5;
+      doc.setFont("helvetica", "normal");
+    };
+
+    drawHeader();
+    rows.forEach((r) => {
+      if (y > pageHeight - 20) {
+        doc.addPage();
+        y = 18;
+        drawHeader();
+      }
+      doc.text(r.date, col.date, y);
+      doc.text(r.description.slice(0, 42), col.desc, y);
+      doc.text(r.debit ? fmtCurrency(r.debit) : "", col.debit, y);
+      doc.text(r.credit ? fmtCurrency(r.credit) : "", col.credit, y);
+      doc.text(fmtCurrency(r.balance), col.balance, y);
+      y += 6;
+    });
+
+    y += 2;
+    doc.setDrawColor(229);
+    doc.line(marginX, y, rightEdge, y);
+    y += 6;
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(17);
+    doc.text("Total outstanding", col.desc, y);
+    doc.text(fmtCurrency(total), col.balance, y);
+
+    doc.save(`ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.pdf`);
+    toast.success("Ledger PDF downloaded");
   };
 
   const emailLedger = () => {
