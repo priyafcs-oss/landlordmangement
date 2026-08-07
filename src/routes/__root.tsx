@@ -8,7 +8,7 @@ import {
   Scripts,
   Link,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { StoreProvider } from "@/lib/store";
@@ -36,9 +36,6 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
-  useEffect(() => {
-    // No-op: keep the app shell error view without Lovable-specific reporting.
-  }, [error]);
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -71,8 +68,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Dashboard — Landlord OS" },
       { name: "twitter:description", content: "Portfolio wealth, cash flow and proactive compliance alerts." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/a8e08057-4cc4-4074-8e10-f8e661f433d9/id-preview-ddc48cd8--723b10c3-3100-45d5-ba9e-c4ab2b4d14cd.lovable.app-1784543803163.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/a8e08057-4cc4-4074-8e10-f8e661f433d9/id-preview-ddc48cd8--723b10c3-3100-45d5-ba9e-c4ab2b4d14cd.lovable.app-1784543803163.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
