@@ -17,7 +17,24 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building2, Pencil, Plus, Trash2, User, ShieldCheck, RefreshCw, FileText, History, Receipt, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Building2,
+  Pencil,
+  Plus,
+  Trash2,
+  User,
+  ShieldCheck,
+  RefreshCw,
+  FileText,
+  History,
+  Receipt,
+  ExternalLink,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  UserCog,
+} from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Property, Tenant, RentFrequency, LeaseDuration, RepaymentFrequency, BillType, PropertyBill } from "@/lib/types";
 import { toast } from "sonner";
@@ -45,7 +62,7 @@ function PortfolioPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Portfolio Manager</h1>
           <p className="text-sm text-muted-foreground">Properties, tenants and leases.</p>
         </div>
-        <PropertyDialog onDone={() => setOpenProp(null)} property={openProp} />
+        <PropertyDialog key={openProp?.id ?? "new"} onDone={() => setOpenProp(null)} property={openProp} />
       </div>
 
       {state.properties.length === 0 && (
@@ -88,8 +105,18 @@ function PropertyCard({
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-2">
           <button className="min-w-0 text-left" onClick={onOpen}>
-            <div className="truncate text-sm font-semibold">{property.address}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Value {fmtCurrency(property.currentValue)}</div>
+            <div className="truncate text-sm font-semibold">{property.alias || property.address}</div>
+            {property.alias && (
+              <div className="truncate text-xs text-muted-foreground">{property.address}</div>
+            )}
+            <div className="mt-1 text-xs text-muted-foreground">
+              {property.currentValue > 0 ? `Value ${fmtCurrency(property.currentValue)}` : "Add portfolio details"}
+            </div>
+            {property.managerName && (
+              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                <UserCog className="h-3 w-3" /> {property.managerName}
+              </div>
+            )}
           </button>
           <div className="flex shrink-0 gap-1">
             <Button size="icon" variant="ghost" onClick={onEdit}>
@@ -126,7 +153,9 @@ function PropertyCard({
             tenants.map((t) => (
               <div key={t.id} className="mt-2 flex items-center gap-2 text-xs">
                 <User className="h-3 w-3" />
-                <span className="truncate">{t.name}</span>
+                <span className="truncate">
+                  {t.name} • {fmtCurrency(t.rentAmount)}/{t.rentFrequency}
+                </span>
                 {t.bondAmount ? (
                   <Badge variant="secondary" className="gap-1">
                     <ShieldCheck className="h-3 w-3" /> Bond
@@ -148,20 +177,49 @@ function PropertyCard({
 }
 
 function PropertyDialog({ property, onDone }: { property: Property | null; onDone: () => void }) {
-  const { addProperty, updateProperty } = useStore();
+  const { state, addProperty, updateProperty } = useStore();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     address: property?.address ?? "",
+    alias: property?.alias ?? "",
+    tenantCode: property?.tenantCode ?? "",
+    managerName: property?.managerName ?? "",
+    managerPhone: property?.managerPhone ?? "",
+    managerEmail: property?.managerEmail ?? "",
+    councilRateRef: property?.councilRateRef ?? "",
+    waterAccountRef: property?.waterAccountRef ?? "",
     purchasePrice: property?.purchasePrice?.toString() ?? "",
     currentValue: property?.currentValue?.toString() ?? "",
     purchaseDate: property?.purchaseDate ?? "",
-    tenantCode: property?.tenantCode ?? "",
+    stampDuty: property?.stampDuty?.toString() ?? "",
+    deposit: property?.deposit?.toString() ?? "",
+    lotSize: property?.lotSize ?? "",
+    physicalAttributes: property?.physicalAttributes ?? "",
     lender: property?.lender ?? "",
     loanAccountRef: property?.loanAccountRef ?? "",
     loanBalance: property?.loanBalance?.toString() ?? "",
     interestRate: property?.interestRate?.toString() ?? "",
     repaymentFrequency: (property?.repaymentFrequency ?? "Monthly") as RepaymentFrequency,
   });
+  // Open the advanced section by default for properties that already have acquisition/loan
+  // data on file, so editing doesn't silently hide fields the landlord already filled in.
+  const [advancedOpen, setAdvancedOpen] = useState(
+    !!property &&
+      !!(
+        property.purchasePrice ||
+        property.currentValue ||
+        property.stampDuty ||
+        property.deposit ||
+        property.lotSize ||
+        property.physicalAttributes ||
+        property.lender ||
+        property.loanAccountRef ||
+        property.loanBalance ||
+        property.interestRate
+      ),
+  );
+
+  const currentTenant = property ? state.tenants.find((t) => t.propertyId === property.id) : undefined;
 
   return (
     <Dialog
@@ -185,47 +243,113 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
             <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Purchase price (AUD)">
-              <Input type="number" value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })} />
-            </Field>
-            <Field label="Current market value (AUD)">
-              <Input type="number" value={form.currentValue} onChange={(e) => setForm({ ...form, currentValue: e.target.value })} />
-            </Field>
-            <Field label="Purchase date">
-              <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+            <Field label="Property name / alias">
+              <Input
+                value={form.alias}
+                onChange={(e) => setForm({ ...form, alias: e.target.value })}
+                placeholder="e.g. The Rose St Duplex"
+              />
             </Field>
             <Field label="Tenant code (for maintenance portal)">
               <Input value={form.tenantCode} onChange={(e) => setForm({ ...form, tenantCode: e.target.value.toUpperCase() })} placeholder="e.g. ROSE12" />
             </Field>
+            <Field label="Council rate reference">
+              <Input value={form.councilRateRef} onChange={(e) => setForm({ ...form, councilRateRef: e.target.value })} placeholder="for auto-matching bills" />
+            </Field>
+            <Field label="Water account #">
+              <Input value={form.waterAccountRef} onChange={(e) => setForm({ ...form, waterAccountRef: e.target.value })} placeholder="for auto-matching bills" />
+            </Field>
           </div>
 
+          {currentTenant && (
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Current tenant: <span className="font-medium text-foreground">{currentTenant.name}</span> —{" "}
+              {fmtCurrency(currentTenant.rentAmount)}/{currentTenant.rentFrequency}
+            </div>
+          )}
+
           <div className="rounded-md border p-3">
-            <div className="mb-2 text-sm font-medium">Bank loan (optional)</div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Lender name">
-                <Input value={form.lender} onChange={(e) => setForm({ ...form, lender: e.target.value })} />
+            <div className="mb-2 text-sm font-medium">Property manager / primary contact</div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Name">
+                <Input value={form.managerName} onChange={(e) => setForm({ ...form, managerName: e.target.value })} />
               </Field>
-              <Field label="Loan account / reference">
-                <Input value={form.loanAccountRef} onChange={(e) => setForm({ ...form, loanAccountRef: e.target.value })} />
+              <Field label="Phone">
+                <Input value={form.managerPhone} onChange={(e) => setForm({ ...form, managerPhone: e.target.value })} />
               </Field>
-              <Field label="Current loan balance (AUD)">
-                <Input type="number" value={form.loanBalance} onChange={(e) => setForm({ ...form, loanBalance: e.target.value })} />
-              </Field>
-              <Field label="Interest rate (%)">
-                <Input type="number" step="0.01" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
-              </Field>
-              <Field label="Repayment frequency">
-                <Select value={form.repaymentFrequency} onValueChange={(v) => setForm({ ...form, repaymentFrequency: v as RepaymentFrequency })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Weekly">Weekly</SelectItem>
-                    <SelectItem value="Fortnightly">Fortnightly</SelectItem>
-                    <SelectItem value="Monthly">Monthly</SelectItem>
-                  </SelectContent>
-                </Select>
+              <Field label="Email">
+                <Input value={form.managerEmail} onChange={(e) => setForm({ ...form, managerEmail: e.target.value })} />
               </Field>
             </div>
           </div>
+
+          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="outline" size="sm" className="w-full justify-between">
+                Portfolio &amp; Acquisition Details
+                {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Purchase price (AUD)">
+                  <Input type="number" value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })} />
+                </Field>
+                <Field label="Estimated market value (AUD)">
+                  <Input type="number" value={form.currentValue} onChange={(e) => setForm({ ...form, currentValue: e.target.value })} />
+                </Field>
+                <Field label="Settlement date">
+                  <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+                </Field>
+                <Field label="Stamp duty (AUD)">
+                  <Input type="number" value={form.stampDuty} onChange={(e) => setForm({ ...form, stampDuty: e.target.value })} />
+                </Field>
+                <Field label="Deposit (AUD)">
+                  <Input type="number" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} />
+                </Field>
+                <Field label="Lot size">
+                  <Input value={form.lotSize} onChange={(e) => setForm({ ...form, lotSize: e.target.value })} placeholder="e.g. 450m²" />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Physical attributes">
+                    <Input
+                      value={form.physicalAttributes}
+                      onChange={(e) => setForm({ ...form, physicalAttributes: e.target.value })}
+                      placeholder="e.g. 3 bed / 2 bath / 1 car"
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="rounded-md border p-3">
+                <div className="mb-2 text-sm font-medium">Bank loan (optional)</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Lender name">
+                    <Input value={form.lender} onChange={(e) => setForm({ ...form, lender: e.target.value })} />
+                  </Field>
+                  <Field label="Loan account / reference">
+                    <Input value={form.loanAccountRef} onChange={(e) => setForm({ ...form, loanAccountRef: e.target.value })} />
+                  </Field>
+                  <Field label="Current loan balance (AUD)">
+                    <Input type="number" value={form.loanBalance} onChange={(e) => setForm({ ...form, loanBalance: e.target.value })} />
+                  </Field>
+                  <Field label="Interest rate (%)">
+                    <Input type="number" step="0.01" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
+                  </Field>
+                  <Field label="Repayment frequency">
+                    <Select value={form.repaymentFrequency} onValueChange={(v) => setForm({ ...form, repaymentFrequency: v as RepaymentFrequency })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Weekly">Weekly</SelectItem>
+                        <SelectItem value="Fortnightly">Fortnightly</SelectItem>
+                        <SelectItem value="Monthly">Monthly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
         <DialogFooter>
           <Button
@@ -233,10 +357,20 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
               if (!form.address) return toast.error("Address required");
               const payload = {
                 address: form.address,
+                alias: form.alias || undefined,
+                tenantCode: form.tenantCode || undefined,
+                managerName: form.managerName || undefined,
+                managerPhone: form.managerPhone || undefined,
+                managerEmail: form.managerEmail || undefined,
+                councilRateRef: form.councilRateRef || undefined,
+                waterAccountRef: form.waterAccountRef || undefined,
                 purchasePrice: parseFloat(form.purchasePrice) || 0,
                 currentValue: parseFloat(form.currentValue) || 0,
                 purchaseDate: form.purchaseDate || undefined,
-                tenantCode: form.tenantCode || undefined,
+                stampDuty: form.stampDuty ? parseFloat(form.stampDuty) : undefined,
+                deposit: form.deposit ? parseFloat(form.deposit) : undefined,
+                lotSize: form.lotSize || undefined,
+                physicalAttributes: form.physicalAttributes || undefined,
                 lender: form.lender || undefined,
                 loanAccountRef: form.loanAccountRef || undefined,
                 loanBalance: form.loanBalance ? parseFloat(form.loanBalance) : undefined,
@@ -269,7 +403,8 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
     <Sheet open={!!propertyId} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{prop?.address}</SheetTitle>
+          <SheetTitle>{prop?.alias || prop?.address}</SheetTitle>
+          {prop?.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
         </SheetHeader>
         {prop && (
           <Tabs defaultValue="details" className="mt-4">
@@ -279,10 +414,13 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
             </TabsList>
             <TabsContent value="details" className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
+                <Stat label="Tenant code" value={prop.tenantCode || "—"} />
+                <Stat label="Property manager" value={prop.managerName || "—"} />
+                <Stat label="Council rate ref" value={prop.councilRateRef || "—"} />
+                <Stat label="Water account #" value={prop.waterAccountRef || "—"} />
                 <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
                 <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
-                <Stat label="Purchase date" value={prop.purchaseDate || "—"} />
-                <Stat label="Tenant code" value={prop.tenantCode || "—"} />
+                <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
                 <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
                 <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
                 <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />

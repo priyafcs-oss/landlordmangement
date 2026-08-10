@@ -10,6 +10,18 @@ export interface Property {
   purchaseDate?: string;
   /** Optional short unique code tenants type into public maintenance form */
   tenantCode?: string;
+  /** Display name shown instead of the raw address when set. */
+  alias?: string;
+  managerName?: string;
+  managerPhone?: string;
+  managerEmail?: string;
+  /** Account references used for auto-matching inbound bills to this property. */
+  councilRateRef?: string;
+  waterAccountRef?: string;
+  stampDuty?: number;
+  deposit?: number;
+  lotSize?: string;
+  physicalAttributes?: string;
   // Optional inline "primary loan" metadata (used by the Housekeeping tab).
   lender?: string;
   loanAccountRef?: string;
@@ -104,7 +116,7 @@ export interface Expense {
   itemName: string;
   cost: number;
   date: string;
-  propertyId: string;
+  propertyId?: string;
   taxCategory: "Immediate Deduction" | "Capital Works";
   invoiceFileName?: string;
   invoiceFileData?: string;
@@ -112,6 +124,14 @@ export interface Expense {
   warrantyExpiry?: string;
   rechargeToTenant: boolean;
   tenantId?: string;
+  status: "needs_review" | "approved" | "paid";
+  source: "manual" | "email_auto";
+  bpayBillerCode?: string;
+  bpayReference?: string;
+  paidDate?: string;
+  rawPropertyAddress?: string;
+  emailMessageId?: string;
+  reviewReason?: string | null;
 }
 
 export interface ChecklistItem {

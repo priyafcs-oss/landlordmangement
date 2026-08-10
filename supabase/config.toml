@@ -1,1 +1,6 @@
 project_id = "jnlcjotkhfyttewdegac"
+
+[functions.parse-inbound-bill]
+# Called by Resend's webhook, not by an authenticated app user — Svix signature
+# verification inside the function is the real auth boundary, not a Supabase JWT.
+verify_jwt = false

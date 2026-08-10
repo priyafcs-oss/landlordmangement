@@ -426,6 +426,8 @@ function MaintenanceRequestsWidget() {
       taxCategory: "Immediate Deduction",
       hasWarranty: false,
       rechargeToTenant: false,
+      status: "approved",
+      source: "manual",
     });
     updateMaintenanceRequest(id, { status: "Converted" });
     toast.success("Converted to expense — update cost on the Expenses tab");

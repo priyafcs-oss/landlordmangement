@@ -37,46 +37,70 @@ export type Database = {
       }
       expenses: {
         Row: {
+          bpayBillerCode: string | null
+          bpayReference: string | null
           cost: number
           created_at: string
           date: string
+          emailMessageId: string | null
           hasWarranty: boolean
           id: string
           invoiceFileData: string | null
           invoiceFileName: string | null
           itemName: string
-          propertyId: string
+          paidDate: string | null
+          propertyId: string | null
+          rawPropertyAddress: string | null
           rechargeToTenant: boolean
+          reviewReason: string | null
+          source: string
+          status: string
           taxCategory: string
           tenantId: string | null
           warrantyExpiry: string | null
         }
         Insert: {
+          bpayBillerCode?: string | null
+          bpayReference?: string | null
           cost?: number
           created_at?: string
           date?: string
+          emailMessageId?: string | null
           hasWarranty?: boolean
           id: string
           invoiceFileData?: string | null
           invoiceFileName?: string | null
           itemName?: string
-          propertyId: string
+          paidDate?: string | null
+          propertyId?: string | null
+          rawPropertyAddress?: string | null
           rechargeToTenant?: boolean
+          reviewReason?: string | null
+          source?: string
+          status?: string
           taxCategory?: string
           tenantId?: string | null
           warrantyExpiry?: string | null
         }
         Update: {
+          bpayBillerCode?: string | null
+          bpayReference?: string | null
           cost?: number
           created_at?: string
           date?: string
+          emailMessageId?: string | null
           hasWarranty?: boolean
           id?: string
           invoiceFileData?: string | null
           invoiceFileName?: string | null
           itemName?: string
-          propertyId?: string
+          paidDate?: string | null
+          propertyId?: string | null
+          rawPropertyAddress?: string | null
           rechargeToTenant?: boolean
+          reviewReason?: string | null
+          source?: string
+          status?: string
           taxCategory?: string
           tenantId?: string | null
           warrantyExpiry?: string | null
@@ -308,45 +332,75 @@ export type Database = {
       properties: {
         Row: {
           address: string
+          alias: string | null
+          councilRateRef: string | null
           created_at: string
           currentValue: number
+          deposit: number | null
           id: string
           interestRate: number | null
           lender: string | null
           loanAccountRef: string | null
           loanBalance: number | null
+          lotSize: string | null
+          managerEmail: string | null
+          managerName: string | null
+          managerPhone: string | null
+          physicalAttributes: string | null
           purchaseDate: string | null
           purchasePrice: number
           repaymentFrequency: string | null
+          stampDuty: number | null
           tenantCode: string | null
+          waterAccountRef: string | null
         }
         Insert: {
           address?: string
+          alias?: string | null
+          councilRateRef?: string | null
           created_at?: string
           currentValue?: number
+          deposit?: number | null
           id: string
           interestRate?: number | null
           lender?: string | null
           loanAccountRef?: string | null
           loanBalance?: number | null
+          lotSize?: string | null
+          managerEmail?: string | null
+          managerName?: string | null
+          managerPhone?: string | null
+          physicalAttributes?: string | null
           purchaseDate?: string | null
           purchasePrice?: number
           repaymentFrequency?: string | null
+          stampDuty?: number | null
           tenantCode?: string | null
+          waterAccountRef?: string | null
         }
         Update: {
           address?: string
+          alias?: string | null
+          councilRateRef?: string | null
           created_at?: string
           currentValue?: number
+          deposit?: number | null
           id?: string
           interestRate?: number | null
           lender?: string | null
           loanAccountRef?: string | null
           loanBalance?: number | null
+          lotSize?: string | null
+          managerEmail?: string | null
+          managerName?: string | null
+          managerPhone?: string | null
+          physicalAttributes?: string | null
           purchaseDate?: string | null
           purchasePrice?: number
           repaymentFrequency?: string | null
+          stampDuty?: number | null
           tenantCode?: string | null
+          waterAccountRef?: string | null
         }
         Relationships: []
       }

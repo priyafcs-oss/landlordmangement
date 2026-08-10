@@ -23,7 +23,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Trash2, FileText, Download, ClipboardCheck, Wrench, Sparkles } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  FileText,
+  Download,
+  ClipboardCheck,
+  Wrench,
+  Sparkles,
+  TriangleAlert,
+  Check,
+  DollarSign,
+  Pencil,
+  Copy,
+} from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
 import type { Expense, Inspection, ChecklistItem, ChecklistRoom } from "@/lib/types";
@@ -91,6 +104,8 @@ function ExpensesTab({ fy, setFy }: { fy: string; setFy: (v: string) => void }) 
 
   return (
     <div className="space-y-4">
+      <NeedsReviewBanner />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Select value={fy} onValueChange={setFy}>
           <SelectTrigger className="w-[200px]">
@@ -129,6 +144,10 @@ function ExpensesTab({ fy, setFy }: { fy: string; setFy: (v: string) => void }) 
                     {e.hasWarranty && e.warrantyExpiry && (
                       <Badge variant="outline">Warranty {e.warrantyExpiry}</Badge>
                     )}
+                    {e.source === "email_auto" && <Badge variant="secondary">Auto</Badge>}
+                    {e.status === "paid" && (
+                      <Badge variant="outline">Paid{e.paidDate ? ` ${e.paidDate}` : ""}</Badge>
+                    )}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {e.date} • {prop?.address}
@@ -157,22 +176,181 @@ function ExpensesTab({ fy, setFy }: { fy: string; setFy: (v: string) => void }) 
   );
 }
 
-function ExpenseDialog() {
-  const { state, addExpense, addInvoice } = useStore();
+function NeedsReviewBanner() {
+  const { state, updateExpense, deleteExpense } = useStore();
+  const flagged = state.expenses.filter((e) => e.status === "needs_review");
+  if (flagged.length === 0) return null;
+
+  const copyBpay = async (biller?: string, reference?: string) => {
+    if (!biller && !reference) return;
+    try {
+      await navigator.clipboard.writeText(`Biller code: ${biller ?? "-"}  Ref: ${reference ?? "-"}`);
+      toast.success("BPAY details copied");
+    } catch {
+      toast.error("Couldn't copy — copy manually");
+    }
+  };
+
+  return (
+    <Card className="border-amber-500/50 bg-amber-500/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <TriangleAlert className="h-4 w-4 text-amber-600" />
+          Needs Review ({flagged.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {flagged.map((e) => {
+          const prop = state.properties.find((p) => p.id === e.propertyId);
+          return (
+            <Card key={e.id} className="border-amber-500/30">
+              <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{e.itemName}</span>
+                    {e.source === "email_auto" && <Badge variant="secondary">Auto</Badge>}
+                    {(e.reviewReason ?? "")
+                      .split("; ")
+                      .filter(Boolean)
+                      .map((r) => (
+                        <Badge key={r} variant="destructive">
+                          {r}
+                        </Badge>
+                      ))}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Due {e.date} • {fmtCurrency(e.cost)}
+                  </div>
+                  {prop ? (
+                    <div className="text-xs text-muted-foreground">{prop.address}</div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-destructive">
+                        No property matched{e.rawPropertyAddress ? ` — "${e.rawPropertyAddress}"` : ""}
+                      </span>
+                      <Select
+                        value={e.propertyId ?? ""}
+                        onValueChange={(v) => updateExpense(e.id, { propertyId: v })}
+                      >
+                        <SelectTrigger className="h-7 w-[220px] text-xs">
+                          <SelectValue placeholder="Assign property" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {state.properties.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.address}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {(e.bpayBillerCode || e.bpayReference) && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-mono">
+                        BPAY {e.bpayBillerCode ?? "-"} / {e.bpayReference ?? "-"}
+                      </span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5"
+                        onClick={() => copyBpay(e.bpayBillerCode, e.bpayReference)}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => {
+                      updateExpense(e.id, { status: "approved", reviewReason: null });
+                      toast.success("Approved");
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" /> Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => {
+                      updateExpense(e.id, { status: "paid", paidDate: todayISO(), reviewReason: null });
+                      toast.success("Marked as paid");
+                    }}
+                  >
+                    <DollarSign className="h-3.5 w-3.5" /> Mark Paid
+                  </Button>
+                  <ExpenseDialog
+                    expense={e}
+                    trigger={
+                      <Button size="icon" variant="ghost">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    }
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => {
+                      deleteExpense(e.id);
+                      toast.success("Discarded");
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExpenseDialog({
+  expense,
+  trigger,
+}: {
+  expense?: Expense;
+  trigger?: React.ReactNode;
+} = {}) {
+  const { state, addExpense, updateExpense, addInvoice } = useStore();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    itemName: "",
-    cost: "",
-    date: todayISO(),
-    propertyId: state.properties[0]?.id ?? "",
-    taxCategory: "Immediate Deduction" as Expense["taxCategory"],
-    hasWarranty: false,
-    warrantyExpiry: "",
-    rechargeToTenant: false,
-    tenantId: "",
-    invoiceFileName: "",
-    invoiceFileData: "",
-  });
+  const isEdit = !!expense;
+  const [form, setForm] = useState(() =>
+    expense
+      ? {
+          itemName: expense.itemName,
+          cost: String(expense.cost),
+          date: expense.date,
+          propertyId: expense.propertyId ?? state.properties[0]?.id ?? "",
+          taxCategory: expense.taxCategory,
+          hasWarranty: expense.hasWarranty,
+          warrantyExpiry: expense.warrantyExpiry ?? "",
+          rechargeToTenant: expense.rechargeToTenant,
+          tenantId: expense.tenantId ?? "",
+          invoiceFileName: expense.invoiceFileName ?? "",
+          invoiceFileData: expense.invoiceFileData ?? "",
+        }
+      : {
+          itemName: "",
+          cost: "",
+          date: todayISO(),
+          propertyId: state.properties[0]?.id ?? "",
+          taxCategory: "Immediate Deduction" as Expense["taxCategory"],
+          hasWarranty: false,
+          warrantyExpiry: "",
+          rechargeToTenant: false,
+          tenantId: "",
+          invoiceFileName: "",
+          invoiceFileData: "",
+        },
+  );
 
   const handleFile = (f: File | undefined) => {
     if (!f) return;
@@ -186,7 +364,7 @@ function ExpenseDialog() {
   const submit = () => {
     if (!form.itemName || !form.propertyId) return toast.error("Item and property required");
     const cost = parseFloat(form.cost) || 0;
-    addExpense({
+    const payload = {
       itemName: form.itemName,
       cost,
       date: form.date,
@@ -198,7 +376,16 @@ function ExpenseDialog() {
       tenantId: form.rechargeToTenant ? form.tenantId : undefined,
       invoiceFileName: form.invoiceFileName || undefined,
       invoiceFileData: form.invoiceFileData || undefined,
-    });
+    };
+
+    if (isEdit && expense) {
+      updateExpense(expense.id, payload);
+      toast.success("Expense updated");
+      setOpen(false);
+      return;
+    }
+
+    addExpense({ ...payload, status: "approved", source: "manual" });
     if (form.rechargeToTenant && form.tenantId) {
       addInvoice({
         tenantId: form.tenantId,
@@ -234,13 +421,15 @@ function ExpenseDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2">
-          <Plus className="h-4 w-4" /> Log Expense
-        </Button>
+        {trigger ?? (
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" /> Log Expense
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New expense / maintenance</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit expense" : "New expense / maintenance"}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Item">
