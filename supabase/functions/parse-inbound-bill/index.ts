@@ -3,46 +3,76 @@ import { Webhook } from "npm:svix@1";
 import { parseInboundBill } from "./core-parser.ts";
 import type { NormalizedBillInput } from "./types.ts";
 
-interface ResendAttachment {
+interface ResendAttachmentMeta {
+  id: string;
   filename: string;
-  contentType: string;
-  /** base64-encoded attachment content. */
-  content: string;
+  content_type: string;
 }
 
-interface ResendInboundEmail {
+interface ResendReceivedEmail {
+  id: string;
   from: string;
   subject: string;
-  text?: string;
-  attachments?: ResendAttachment[];
+  text: string | null;
+  attachments: ResendAttachmentMeta[];
 }
 
-/**
- * Fetches the full inbound email (body + attachments) by id.
- * NOTE: mirrors `resend.emails.receiving.get(emailId)` in raw REST form — verify this exact
- * path against current Resend inbound-email docs before relying on it in production; if the
- * shape differs this is the only function that needs to change.
- */
-async function fetchInboundEmail(emailId: string): Promise<ResendInboundEmail> {
-  const apiKey = Deno.env.get("RESEND_API_KEY");
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured");
+interface ResendAttachmentDownload {
+  download_url: string;
+}
 
-  const res = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+const RESEND_BASE_URL = "https://api.resend.com/emails/receiving";
+
+/**
+ * GET /emails/receiving/{id} — email metadata + text/html body. Attachments here are metadata
+ * only (id/filename/content_type), never inline content — confirmed against Resend's docs
+ * (resend.com/docs/api-reference/emails/retrieve-received-email).
+ */
+async function fetchReceivedEmail(emailId: string, apiKey: string): Promise<ResendReceivedEmail> {
+  const res = await fetch(`${RESEND_BASE_URL}/${emailId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch inbound email ${emailId}: ${res.status} ${await res.text()}`);
   }
-  return (await res.json()) as ResendInboundEmail;
+  return (await res.json()) as ResendReceivedEmail;
 }
 
-function normalize(email: ResendInboundEmail): NormalizedBillInput {
-  const pdfAttachment = email.attachments?.find((a) => a.contentType === "application/pdf");
+/**
+ * Attachment bytes require two calls: GET .../attachments/{id} for a short-lived signed
+ * download_url, then fetching that URL for the actual file
+ * (resend.com/docs/api-reference/emails/retrieve-received-email-attachment).
+ */
+async function fetchAttachmentBase64(emailId: string, attachmentId: string, apiKey: string): Promise<string> {
+  const metaRes = await fetch(`${RESEND_BASE_URL}/${emailId}/attachments/${attachmentId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!metaRes.ok) {
+    throw new Error(`Failed to fetch attachment ${attachmentId}: ${metaRes.status} ${await metaRes.text()}`);
+  }
+  const meta = (await metaRes.json()) as ResendAttachmentDownload;
+
+  const fileRes = await fetch(meta.download_url);
+  if (!fileRes.ok) {
+    throw new Error(`Failed to download attachment ${attachmentId}: ${fileRes.status}`);
+  }
+  const bytes = new Uint8Array(await fileRes.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function normalize(email: ResendReceivedEmail, apiKey: string): Promise<NormalizedBillInput> {
+  const pdfMeta = email.attachments?.find((a) => a.content_type === "application/pdf");
+  const pdfBase64 = pdfMeta ? await fetchAttachmentBase64(email.id, pdfMeta.id, apiKey) : undefined;
   return {
     fromEmail: email.from,
     subject: email.subject,
-    textBody: email.text,
-    pdfBase64: pdfAttachment?.content,
+    textBody: email.text ?? undefined,
+    pdfBase64,
   };
 }
 
@@ -82,9 +112,15 @@ Deno.serve(async (req) => {
     return new Response("Missing data.email_id", { status: 400 });
   }
 
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  if (!apiKey) {
+    console.error("[parse-inbound-bill] RESEND_API_KEY is not configured");
+    return new Response("Server misconfigured", { status: 500 });
+  }
+
   try {
-    const email = await fetchInboundEmail(emailId);
-    const input = normalize(email);
+    const email = await fetchReceivedEmail(emailId, apiKey);
+    const input = await normalize(email, apiKey);
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
