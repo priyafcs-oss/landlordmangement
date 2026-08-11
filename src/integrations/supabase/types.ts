@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_intake_proposals: {
+        Row: {
+          created_at: string
+          emailMessageId: string | null
+          id: string
+          kind: string
+          matchedTenantId: string | null
+          payload: Json
+          propertyId: string | null
+          rawPropertyAddress: string | null
+          reviewReason: string | null
+          sourceEmailBody: string | null
+          sourceFileData: string | null
+          sourceFileName: string | null
+          sourceSubject: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          emailMessageId?: string | null
+          id: string
+          kind: string
+          matchedTenantId?: string | null
+          payload: Json
+          propertyId?: string | null
+          rawPropertyAddress?: string | null
+          reviewReason?: string | null
+          sourceEmailBody?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
+          sourceSubject?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          emailMessageId?: string | null
+          id?: string
+          kind?: string
+          matchedTenantId?: string | null
+          payload?: Json
+          propertyId?: string | null
+          rawPropertyAddress?: string | null
+          reviewReason?: string | null
+          sourceEmailBody?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
+          sourceSubject?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
       app_settings: {
         Row: {
           aiConfig: Json
@@ -54,6 +105,8 @@ export type Database = {
           rechargeToTenant: boolean
           reviewReason: string | null
           source: string
+          sourceEmailBody: string | null
+          sourceSubject: string | null
           status: string
           taxCategory: string
           tenantId: string | null
@@ -77,6 +130,8 @@ export type Database = {
           rechargeToTenant?: boolean
           reviewReason?: string | null
           source?: string
+          sourceEmailBody?: string | null
+          sourceSubject?: string | null
           status?: string
           taxCategory?: string
           tenantId?: string | null
@@ -100,6 +155,8 @@ export type Database = {
           rechargeToTenant?: boolean
           reviewReason?: string | null
           source?: string
+          sourceEmailBody?: string | null
+          sourceSubject?: string | null
           status?: string
           taxCategory?: string
           tenantId?: string | null
@@ -159,6 +216,8 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          leaseDocumentFileData: string | null
+          leaseDocumentFileName: string | null
           originalStartDate: string
           pastEndDate: string
           pastFrequency: string
@@ -169,6 +228,8 @@ export type Database = {
         Insert: {
           created_at?: string
           id: string
+          leaseDocumentFileData?: string | null
+          leaseDocumentFileName?: string | null
           originalStartDate?: string
           pastEndDate?: string
           pastFrequency?: string
@@ -179,6 +240,8 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          leaseDocumentFileData?: string | null
+          leaseDocumentFileName?: string | null
           originalStartDate?: string
           pastEndDate?: string
           pastFrequency?: string
@@ -334,11 +397,14 @@ export type Database = {
           address: string
           alias: string | null
           councilRateRef: string | null
+          councilRatesAnnual: number | null
           created_at: string
           currentValue: number
           deposit: number | null
           id: string
+          insuranceAnnual: number | null
           interestRate: number | null
+          landTaxAnnual: number | null
           lender: string | null
           loanAccountRef: string | null
           loanBalance: number | null
@@ -346,23 +412,33 @@ export type Database = {
           managerEmail: string | null
           managerName: string | null
           managerPhone: string | null
+          notes: string | null
+          photos: Json | null
           physicalAttributes: string | null
+          pmFeePercent: number | null
           purchaseDate: string | null
           purchasePrice: number
+          repairsMaintenanceAnnual: number | null
           repaymentFrequency: string | null
           stampDuty: number | null
+          strataFeesAnnual: number | null
           tenantCode: string | null
+          videos: Json | null
           waterAccountRef: string | null
+          waterRatesAnnual: number | null
         }
         Insert: {
           address?: string
           alias?: string | null
           councilRateRef?: string | null
+          councilRatesAnnual?: number | null
           created_at?: string
           currentValue?: number
           deposit?: number | null
           id: string
+          insuranceAnnual?: number | null
           interestRate?: number | null
+          landTaxAnnual?: number | null
           lender?: string | null
           loanAccountRef?: string | null
           loanBalance?: number | null
@@ -370,23 +446,33 @@ export type Database = {
           managerEmail?: string | null
           managerName?: string | null
           managerPhone?: string | null
+          notes?: string | null
+          photos?: Json | null
           physicalAttributes?: string | null
+          pmFeePercent?: number | null
           purchaseDate?: string | null
           purchasePrice?: number
+          repairsMaintenanceAnnual?: number | null
           repaymentFrequency?: string | null
           stampDuty?: number | null
+          strataFeesAnnual?: number | null
           tenantCode?: string | null
+          videos?: Json | null
           waterAccountRef?: string | null
+          waterRatesAnnual?: number | null
         }
         Update: {
           address?: string
           alias?: string | null
           councilRateRef?: string | null
+          councilRatesAnnual?: number | null
           created_at?: string
           currentValue?: number
           deposit?: number | null
           id?: string
+          insuranceAnnual?: number | null
           interestRate?: number | null
+          landTaxAnnual?: number | null
           lender?: string | null
           loanAccountRef?: string | null
           loanBalance?: number | null
@@ -394,13 +480,20 @@ export type Database = {
           managerEmail?: string | null
           managerName?: string | null
           managerPhone?: string | null
+          notes?: string | null
+          photos?: Json | null
           physicalAttributes?: string | null
+          pmFeePercent?: number | null
           purchaseDate?: string | null
           purchasePrice?: number
+          repairsMaintenanceAnnual?: number | null
           repaymentFrequency?: string | null
           stampDuty?: number | null
+          strataFeesAnnual?: number | null
           tenantCode?: string | null
+          videos?: Json | null
           waterAccountRef?: string | null
+          waterRatesAnnual?: number | null
         }
         Relationships: []
       }

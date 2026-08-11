@@ -14,6 +14,7 @@ import type {
   AiConfig,
   LandlordProfile,
   PropertyBill,
+  AiIntakeProposal,
 } from "./types";
 import {
   TABLES,
@@ -57,6 +58,7 @@ const empty: AppState = {
   aiConfig: defaultAi,
   landlordProfile: defaultProfile,
   bills: [],
+  aiProposals: [],
 };
 
 interface StoreCtx {
@@ -76,7 +78,15 @@ interface StoreCtx {
 
   renewLease: (
     tenantId: string,
-    args: { newStart: string; newEnd?: string; newDuration?: Tenant["leaseDuration"]; newRent: number; newFrequency?: Tenant["rentFrequency"] },
+    args: {
+      newStart: string;
+      newEnd?: string;
+      newDuration?: Tenant["leaseDuration"];
+      newRent: number;
+      newFrequency?: Tenant["rentFrequency"];
+      newLeaseDocumentFileName?: string;
+      newLeaseDocumentFileData?: string;
+    },
   ) => void;
 
   addLedger: (e: Omit<LedgerEntry, "id">) => void;
@@ -112,6 +122,9 @@ interface StoreCtx {
   deleteBill: (id: string) => void;
   markBillPaid: (id: string) => void;
 
+  dismissProposal: (id: string) => void;
+  markProposalApplied: (id: string) => void;
+
   setAiEnabled: (v: boolean) => void;
   consumeAiBudget: () => { ok: boolean; reason?: string };
   resetAiUsage: () => void;
@@ -144,6 +157,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       leaseHistory,
       maintenanceRequests,
       bills,
+      aiProposals,
       settings,
     ] = await Promise.all([
       selectAll<Property>(TABLES.properties),
@@ -157,6 +171,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectAll<LeaseHistory>(TABLES.leaseHistory),
       selectAll<MaintenanceRequest>(TABLES.maintenanceRequests),
       selectAll<PropertyBill>(TABLES.bills),
+      selectAll<AiIntakeProposal>(TABLES.aiProposals),
       loadSettings(),
     ]);
     setState({
@@ -171,6 +186,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       leaseHistory,
       maintenanceRequests,
       bills,
+      aiProposals,
       aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
       landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
     });
@@ -305,6 +321,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           pastEndDate: prev.leaseExpiry ?? "",
           pastRent: prev.rentAmount,
           pastFrequency: prev.rentFrequency,
+          // Archive whichever lease document was active during this past lease, so a
+          // newly uploaded renewal document doesn't overwrite/lose the original.
+          leaseDocumentFileName: prev.leaseDocumentFileName,
+          leaseDocumentFileData: prev.leaseDocumentFileData,
         };
         void upsertRow(TABLES.leaseHistory, history as unknown as Record<string, unknown>);
 
@@ -329,6 +349,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rentFrequency: args.newFrequency ?? prev.rentFrequency,
           lastRentIncreaseDate:
             args.newRent !== prev.rentAmount ? new Date().toISOString().slice(0, 10) : prev.lastRentIncreaseDate,
+          // Only replace the current lease document if a new one was uploaded at renewal.
+          ...(args.newLeaseDocumentFileData
+            ? {
+                leaseDocumentFileName: args.newLeaseDocumentFileName,
+                leaseDocumentFileData: args.newLeaseDocumentFileData,
+              }
+            : {}),
         };
         void updateRow(TABLES.tenants, tenantId, { ...patch, leaseExpiry: args.newEnd || null });
 
@@ -491,6 +518,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         return { ...s, bills: updated };
       }),
+
+    dismissProposal: (id) => {
+      void deleteRow(TABLES.aiProposals, id);
+      set((s) => ({ ...s, aiProposals: s.aiProposals.filter((x) => x.id !== id) }));
+    },
+    markProposalApplied: (id) => {
+      void updateRow(TABLES.aiProposals, id, { status: "applied" });
+      set((s) => ({
+        ...s,
+        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, status: "applied" as const } : x)),
+      }));
+    },
 
     setAiEnabled: (v) =>
       set((s) => {

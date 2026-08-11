@@ -3,6 +3,7 @@ export interface NormalizedBillInput {
   fromEmail: string;
   subject: string;
   pdfBase64?: string;
+  pdfFileName?: string;
   textBody?: string;
 }
 
@@ -25,5 +26,44 @@ export interface ParseResult {
   status?: "approved" | "needs_review";
   reviewReason?: string | null;
   matchedPropertyId?: string | null;
+  error?: string;
+}
+
+export type DocumentType = "bill" | "lease_agreement" | "rent_statement" | "other";
+
+export interface ClassificationResult {
+  document_type: DocumentType;
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for a lease/rent agreement. */
+export interface ParsedLeaseFields {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  rentAmount: number;
+  rentFrequency: "Weekly" | "Fortnightly" | "Monthly";
+  leaseStart: string | null; // YYYY-MM-DD
+  leaseExpiry: string | null; // YYYY-MM-DD
+  leaseDuration: "6 Months" | "12 Months" | "Periodic" | null;
+  bondAmount: number | null;
+  property_address: string;
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for a rent statement/ledger. */
+export interface ParsedLedgerFields {
+  tenantName: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  transactions: { date: string; amount: number; description: string }[];
+  property_address: string;
+  confidence: number;
+}
+
+/** Result shape shared by the lease and rent-statement extractors — both stage a proposal, never write directly. */
+export interface ProposalParseResult {
+  ok: boolean;
+  proposalId?: string;
   error?: string;
 }

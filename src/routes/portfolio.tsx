@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Building2,
   Pencil,
@@ -34,9 +35,24 @@ import {
   ChevronDown,
   ChevronUp,
   UserCog,
+  X,
+  Video as VideoIcon,
+  Mail,
+  Sparkles,
 } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
-import type { Property, Tenant, RentFrequency, LeaseDuration, RepaymentFrequency, BillType, PropertyBill } from "@/lib/types";
+import type {
+  Property,
+  Tenant,
+  RentFrequency,
+  LeaseDuration,
+  RepaymentFrequency,
+  BillType,
+  PropertyBill,
+  AiIntakeProposal,
+  TenantLeaseProposalPayload,
+  RentLedgerProposalPayload,
+} from "@/lib/types";
 import { toast } from "sonner";
 
 
@@ -65,6 +81,8 @@ function PortfolioPage() {
         <PropertyDialog key={openProp?.id ?? "new"} onDone={() => setOpenProp(null)} property={openProp} />
       </div>
 
+      <AiProposalsSection />
+
       {state.properties.length === 0 && (
         <Card>
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
@@ -81,6 +99,240 @@ function PortfolioPage() {
 
       <PropertyDrawer propertyId={drawerId} onClose={() => setDrawerId(null)} />
     </div>
+  );
+}
+
+/** "View PDF" / "View email" affordances for anything with source-document provenance columns. */
+function DocumentViewLinks({
+  fileName,
+  fileData,
+  subject,
+  emailBody,
+}: {
+  fileName?: string;
+  fileData?: string;
+  subject?: string;
+  emailBody?: string;
+}) {
+  const [showEmail, setShowEmail] = useState(false);
+  if (!fileData && !emailBody) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs">
+      {fileData && (
+        <a href={fileData} download={fileName || "document.pdf"} className="inline-flex items-center gap-1 text-primary underline">
+          <FileText className="h-3 w-3" /> View PDF
+        </a>
+      )}
+      {emailBody && (
+        <>
+          <button type="button" onClick={() => setShowEmail(true)} className="inline-flex items-center gap-1 text-primary underline">
+            <Mail className="h-3 w-3" /> View email
+          </button>
+          <Dialog open={showEmail} onOpenChange={setShowEmail}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{subject || "Original email"}</DialogTitle>
+              </DialogHeader>
+              <div className="whitespace-pre-wrap text-sm">{emailBody}</div>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AiProposalsSection() {
+  const { state, dismissProposal } = useStore();
+  const pending = state.aiProposals.filter((p) => p.status === "pending");
+  if (pending.length === 0) return null;
+
+  return (
+    <Card className="border-amber-500/50 bg-amber-500/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Sparkles className="h-4 w-4 text-amber-600" />
+          AI Proposals ({pending.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {pending.map((p) =>
+          p.kind === "tenant_lease" ? (
+            <TenantLeaseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : (
+            <RentLedgerProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ),
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, markProposalApplied } = useStore();
+  const payload = proposal.payload as TenantLeaseProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Lease agreement</Badge>
+          <span className="font-medium">{payload.name}</span>
+          <span className="text-xs text-muted-foreground">
+            {fmtCurrency(payload.rentAmount)}/{payload.rentFrequency}
+          </span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {payload.leaseStart || "—"} → {payload.leaseExpiry || "Periodic"}
+          {payload.bondAmount ? ` • Bond ${fmtCurrency(payload.bondAmount)}` : ""}
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">
+              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+            </span>
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger className="h-7 w-[220px] text-xs">
+                <SelectValue placeholder="Assign property" />
+              </SelectTrigger>
+              <SelectContent>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.alias || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <TenantDialog
+            propertyId={propertyId}
+            initialValues={{
+              name: payload.name,
+              email: payload.email,
+              phone: payload.phone,
+              rentAmount: payload.rentAmount,
+              rentFrequency: payload.rentFrequency,
+              leaseStart: payload.leaseStart,
+              leaseExpiry: payload.leaseExpiry,
+              leaseDuration: payload.leaseDuration,
+              bondAmount: payload.bondAmount,
+            }}
+            onSaved={() => markProposalApplied(proposal.id)}
+          >
+            <Button size="sm" disabled={!propertyId}>
+              Review &amp; Create Tenant
+            </Button>
+          </TenantDialog>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, addLedger, markProposalApplied } = useStore();
+  const payload = proposal.payload as RentLedgerProposalPayload;
+  const [tenantId, setTenantId] = useState(proposal.matchedTenantId ?? "");
+  const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => true));
+
+  const tenantsAtProperty = proposal.propertyId
+    ? state.tenants.filter((t) => t.propertyId === proposal.propertyId)
+    : state.tenants;
+
+  const confirm = () => {
+    if (!tenantId) return toast.error("Select a tenant first");
+    payload.transactions.forEach((tx, i) => {
+      if (!included[i]) return;
+      addLedger({
+        tenantId,
+        date: tx.date,
+        type: "Rent Payment",
+        description: tx.description,
+        debit: 0,
+        credit: tx.amount,
+      });
+    });
+    markProposalApplied(proposal.id);
+    toast.success("Rent payments added");
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Rent statement</Badge>
+          {payload.tenantName && <span className="font-medium">{payload.tenantName}</span>}
+          <span className="text-xs text-muted-foreground">
+            {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Tenant:</span>
+          <Select value={tenantId} onValueChange={setTenantId}>
+            <SelectTrigger className="h-7 w-[220px] text-xs">
+              <SelectValue placeholder="Select tenant" />
+            </SelectTrigger>
+            <SelectContent>
+              {tenantsAtProperty.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!proposal.propertyId && proposal.rawPropertyAddress && (
+            <span className="text-xs text-destructive">No property matched — "{proposal.rawPropertyAddress}"</span>
+          )}
+        </div>
+
+        <div className="space-y-1 rounded border p-2">
+          {payload.transactions.map((tx, i) => (
+            <label key={i} className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={included[i]}
+                onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+              />
+              <span className="w-24 shrink-0">{tx.date}</span>
+              <span className="w-20 shrink-0 font-medium">{fmtCurrency(tx.amount)}</span>
+              <span className="truncate text-muted-foreground">{tx.description}</span>
+            </label>
+          ))}
+        </div>
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" onClick={confirm}>
+            Confirm &amp; Add Payments
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -200,7 +452,17 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
     loanBalance: property?.loanBalance?.toString() ?? "",
     interestRate: property?.interestRate?.toString() ?? "",
     repaymentFrequency: (property?.repaymentFrequency ?? "Monthly") as RepaymentFrequency,
+    councilRatesAnnual: property?.councilRatesAnnual?.toString() ?? "",
+    waterRatesAnnual: property?.waterRatesAnnual?.toString() ?? "",
+    insuranceAnnual: property?.insuranceAnnual?.toString() ?? "",
+    strataFeesAnnual: property?.strataFeesAnnual?.toString() ?? "",
+    landTaxAnnual: property?.landTaxAnnual?.toString() ?? "",
+    repairsMaintenanceAnnual: property?.repairsMaintenanceAnnual?.toString() ?? "",
+    pmFeePercent: property?.pmFeePercent?.toString() ?? "",
+    notes: property?.notes ?? "",
   });
+  const [photos, setPhotos] = useState<{ name: string; data: string }[]>(property?.photos ?? []);
+  const [videos, setVideos] = useState<{ name: string; data: string }[]>(property?.videos ?? []);
   // Open the advanced section by default for properties that already have acquisition/loan
   // data on file, so editing doesn't silently hide fields the landlord already filled in.
   const [advancedOpen, setAdvancedOpen] = useState(
@@ -215,11 +477,38 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
         property.lender ||
         property.loanAccountRef ||
         property.loanBalance ||
-        property.interestRate
+        property.interestRate ||
+        property.councilRatesAnnual ||
+        property.waterRatesAnnual ||
+        property.insuranceAnnual ||
+        property.strataFeesAnnual ||
+        property.landTaxAnnual ||
+        property.repairsMaintenanceAnnual ||
+        property.pmFeePercent ||
+        property.notes ||
+        (property.photos && property.photos.length > 0) ||
+        (property.videos && property.videos.length > 0)
       ),
   );
 
   const currentTenant = property ? state.tenants.find((t) => t.propertyId === property.id) : undefined;
+
+  const onPhotos = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach((f) => {
+      const reader = new FileReader();
+      reader.onload = () => setPhotos((ps) => [...ps, { name: f.name, data: String(reader.result) }]);
+      reader.readAsDataURL(f);
+    });
+  };
+  const onVideos = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach((f) => {
+      const reader = new FileReader();
+      reader.onload = () => setVideos((vs) => [...vs, { name: f.name, data: String(reader.result) }]);
+      reader.readAsDataURL(f);
+    });
+  };
 
   return (
     <Dialog
@@ -348,6 +637,84 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
                   </Field>
                 </div>
               </div>
+
+              <div className="rounded-md border p-3">
+                <div className="mb-1 text-sm font-medium">Annual running costs</div>
+                <div className="mb-2 text-xs text-muted-foreground">Used across the property's finances.</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Council rates (annual)">
+                    <Input type="number" value={form.councilRatesAnnual} onChange={(e) => setForm({ ...form, councilRatesAnnual: e.target.value })} />
+                  </Field>
+                  <Field label="Water rates (annual)">
+                    <Input type="number" value={form.waterRatesAnnual} onChange={(e) => setForm({ ...form, waterRatesAnnual: e.target.value })} />
+                  </Field>
+                  <Field label="Insurance (annual)">
+                    <Input type="number" value={form.insuranceAnnual} onChange={(e) => setForm({ ...form, insuranceAnnual: e.target.value })} />
+                  </Field>
+                  <Field label="Strata fees (annual)">
+                    <Input type="number" value={form.strataFeesAnnual} onChange={(e) => setForm({ ...form, strataFeesAnnual: e.target.value })} />
+                  </Field>
+                  <Field label="Land tax (annual)">
+                    <Input type="number" value={form.landTaxAnnual} onChange={(e) => setForm({ ...form, landTaxAnnual: e.target.value })} />
+                  </Field>
+                  <Field label="Repairs & maintenance (annual)">
+                    <Input type="number" value={form.repairsMaintenanceAnnual} onChange={(e) => setForm({ ...form, repairsMaintenanceAnnual: e.target.value })} />
+                  </Field>
+                  <Field label="PM fee (%)">
+                    <Input type="number" step="0.01" value={form.pmFeePercent} onChange={(e) => setForm({ ...form, pmFeePercent: e.target.value })} />
+                  </Field>
+                </div>
+              </div>
+
+              <Field label="Notes">
+                <Textarea
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Anything worth remembering about this property…"
+                />
+              </Field>
+
+              <div className="rounded-md border p-3">
+                <div className="mb-2 text-sm font-medium">Photos &amp; videos</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Photos">
+                    <Input type="file" accept="image/*" multiple onChange={(e) => onPhotos(e.target.files)} />
+                  </Field>
+                  <Field label="Videos">
+                    <Input type="file" accept="video/*" multiple onChange={(e) => onVideos(e.target.files)} />
+                  </Field>
+                </div>
+                {photos.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {photos.map((p, i) => (
+                      <div key={i} className="relative">
+                        <img src={p.data} alt={p.name} className="h-14 w-14 rounded object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setPhotos((ps) => ps.filter((_, j) => j !== i))}
+                          className="absolute -right-1 -top-1 rounded-full bg-destructive p-0.5 text-destructive-foreground"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {videos.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {videos.map((v, i) => (
+                      <div key={i} className="flex items-center justify-between rounded border p-2 text-xs">
+                        <span className="flex items-center gap-1 truncate">
+                          <VideoIcon className="h-3 w-3 shrink-0" /> {v.name}
+                        </span>
+                        <button type="button" onClick={() => setVideos((vs) => vs.filter((_, j) => j !== i))}>
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </CollapsibleContent>
           </Collapsible>
         </div>
@@ -376,6 +743,18 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
                 loanBalance: form.loanBalance ? parseFloat(form.loanBalance) : undefined,
                 interestRate: form.interestRate ? parseFloat(form.interestRate) : undefined,
                 repaymentFrequency: form.repaymentFrequency,
+                councilRatesAnnual: form.councilRatesAnnual ? parseFloat(form.councilRatesAnnual) : undefined,
+                waterRatesAnnual: form.waterRatesAnnual ? parseFloat(form.waterRatesAnnual) : undefined,
+                insuranceAnnual: form.insuranceAnnual ? parseFloat(form.insuranceAnnual) : undefined,
+                strataFeesAnnual: form.strataFeesAnnual ? parseFloat(form.strataFeesAnnual) : undefined,
+                landTaxAnnual: form.landTaxAnnual ? parseFloat(form.landTaxAnnual) : undefined,
+                repairsMaintenanceAnnual: form.repairsMaintenanceAnnual
+                  ? parseFloat(form.repairsMaintenanceAnnual)
+                  : undefined,
+                pmFeePercent: form.pmFeePercent ? parseFloat(form.pmFeePercent) : undefined,
+                notes: form.notes || undefined,
+                photos: photos.length > 0 ? photos : undefined,
+                videos: videos.length > 0 ? videos : undefined,
               };
               if (property) updateProperty(property.id, payload);
               else addProperty(payload);
@@ -411,21 +790,60 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
             <TabsList>
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="housekeeping">Housekeeping &amp; Bills</TabsTrigger>
+              <TabsTrigger value="media">Media</TabsTrigger>
             </TabsList>
             <TabsContent value="details" className="space-y-4 text-sm">
-              <div className="grid grid-cols-2 gap-3">
-                <Stat label="Tenant code" value={prop.tenantCode || "—"} />
-                <Stat label="Property manager" value={prop.managerName || "—"} />
-                <Stat label="Council rate ref" value={prop.councilRateRef || "—"} />
-                <Stat label="Water account #" value={prop.waterAccountRef || "—"} />
-                <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
-                <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
-                <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
-                <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
-                <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
-                <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
-                <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
+              <div>
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Operational</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Stat label="Tenant code" value={prop.tenantCode || "—"} />
+                  <Stat label="Property manager" value={prop.managerName || "—"} />
+                  <Stat label="Manager phone" value={prop.managerPhone || "—"} />
+                  <Stat label="Manager email" value={prop.managerEmail || "—"} />
+                  <Stat label="Council rate ref" value={prop.councilRateRef || "—"} />
+                  <Stat label="Water account #" value={prop.waterAccountRef || "—"} />
+                </div>
               </div>
+
+              <div>
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Acquisition &amp; loan</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+                  <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
+                  <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
+                  <Stat label="Stamp duty" value={prop.stampDuty ? fmtCurrency(prop.stampDuty) : "—"} />
+                  <Stat label="Deposit" value={prop.deposit ? fmtCurrency(prop.deposit) : "—"} />
+                  <Stat label="Lot size" value={prop.lotSize || "—"} />
+                  <Stat label="Physical attributes" value={prop.physicalAttributes || "—"} />
+                  <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
+                  <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
+                  <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
+                  <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Annual running costs</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Stat label="Council rates" value={prop.councilRatesAnnual ? fmtCurrency(prop.councilRatesAnnual) : "—"} />
+                  <Stat label="Water rates" value={prop.waterRatesAnnual ? fmtCurrency(prop.waterRatesAnnual) : "—"} />
+                  <Stat label="Insurance" value={prop.insuranceAnnual ? fmtCurrency(prop.insuranceAnnual) : "—"} />
+                  <Stat label="Strata fees" value={prop.strataFeesAnnual ? fmtCurrency(prop.strataFeesAnnual) : "—"} />
+                  <Stat label="Land tax" value={prop.landTaxAnnual ? fmtCurrency(prop.landTaxAnnual) : "—"} />
+                  <Stat
+                    label="Repairs & maintenance"
+                    value={prop.repairsMaintenanceAnnual ? fmtCurrency(prop.repairsMaintenanceAnnual) : "—"}
+                  />
+                  <Stat label="PM fee" value={prop.pmFeePercent ? `${prop.pmFeePercent}%` : "—"} />
+                </div>
+              </div>
+
+              {prop.notes && (
+                <div>
+                  <div className="mb-1 text-xs font-medium text-muted-foreground">Notes</div>
+                  <div className="whitespace-pre-wrap rounded bg-muted p-3">{prop.notes}</div>
+                </div>
+              )}
 
               <div>
                 <div className="mb-2 flex items-center justify-between">
@@ -459,13 +877,46 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
                   .map((e) => (
                     <div key={e.id} className="flex justify-between rounded border p-2 text-xs">
                       <span>{e.itemName}</span>
-                      <span className="text-muted-foreground">{e.invoiceFileName}</span>
+                      {e.invoiceFileData ? (
+                        <a href={e.invoiceFileData} download={e.invoiceFileName} className="text-primary underline">
+                          {e.invoiceFileName}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">{e.invoiceFileName}</span>
+                      )}
                     </div>
                   ))}
               </div>
             </TabsContent>
             <TabsContent value="housekeeping">
               <PropertyBillsTab propertyId={prop.id} />
+            </TabsContent>
+            <TabsContent value="media" className="space-y-4 text-sm">
+              <div>
+                <div className="mb-2 text-sm font-medium">Photos ({prop.photos?.length ?? 0})</div>
+                {!prop.photos?.length && <div className="text-xs text-muted-foreground">No photos yet.</div>}
+                {!!prop.photos?.length && (
+                  <div className="flex flex-wrap gap-2">
+                    {prop.photos.map((p, i) => (
+                      <a key={i} href={p.data} download={p.name}>
+                        <img src={p.data} alt={p.name} className="h-20 w-20 rounded object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="mb-2 text-sm font-medium">Videos ({prop.videos?.length ?? 0})</div>
+                {!prop.videos?.length && <div className="text-xs text-muted-foreground">No videos yet.</div>}
+                {prop.videos?.map((v, i) => (
+                  <div key={i} className="mb-2 rounded border p-2">
+                    <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      <VideoIcon className="h-3 w-3" /> {v.name}
+                    </div>
+                    <video src={v.data} controls className="max-h-48 w-full rounded" />
+                  </div>
+                ))}
+              </div>
             </TabsContent>
           </Tabs>
         )}
@@ -622,6 +1073,7 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
   const { state } = useStore();
   const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
   const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
+  const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
   const [showHist, setShowHist] = useState(false);
 
   return (
@@ -633,16 +1085,24 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
             {tenant.leaseStart || "—"} → {tenant.leaseExpiry || "Periodic"} •{" "}
             {fmtCurrency(tenant.rentAmount)}/{tenant.rentFrequency}
           </div>
+          {latestRentChange && (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (increased{" "}
+              {latestRentChange.changeDate})
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap gap-1">
             {tenant.bondAmount ? (
               <Badge variant="secondary" className="gap-1">
                 <ShieldCheck className="h-3 w-3" /> Bond Secured — {fmtCurrency(tenant.bondAmount)}
               </Badge>
             ) : null}
-            {tenant.leaseDocumentFileName && (
-              <Badge variant="outline" className="gap-1">
-                <FileText className="h-3 w-3" /> Lease PDF
-              </Badge>
+            {tenant.leaseDocumentFileName && tenant.leaseDocumentFileData && (
+              <a href={tenant.leaseDocumentFileData} download={tenant.leaseDocumentFileName}>
+                <Badge variant="outline" className="gap-1">
+                  <FileText className="h-3 w-3" /> Lease PDF
+                </Badge>
+              </a>
             )}
             {!tenant.leaseExpiry && <Badge variant="outline">Periodic</Badge>}
           </div>
@@ -673,9 +1133,20 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
           {showHist && (
             <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
               {history.map((h) => (
-                <div key={h.id}>
-                  Previous lease: {h.pastStartDate} → {h.pastEndDate || "Periodic"} @ {fmtCurrency(h.pastRent)}/
-                  {h.pastFrequency}
+                <div key={h.id} className="flex flex-wrap items-center gap-2">
+                  <span>
+                    Previous lease: {h.pastStartDate} → {h.pastEndDate || "Periodic"} @ {fmtCurrency(h.pastRent)}/
+                    {h.pastFrequency}
+                  </span>
+                  {h.leaseDocumentFileData && (
+                    <a
+                      href={h.leaseDocumentFileData}
+                      download={h.leaseDocumentFileName || "lease.pdf"}
+                      className="text-primary underline"
+                    >
+                      View lease
+                    </a>
+                  )}
                 </div>
               ))}
               {rentChanges.map((r) => (
@@ -709,6 +1180,8 @@ function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
   const [end, setEnd] = useState<string>(computeLeaseEnd(today, "12 Months"));
   const [rent, setRent] = useState(tenant.rentAmount.toString());
   const [frequency, setFrequency] = useState<RentFrequency>(tenant.rentFrequency);
+  const [docFileName, setDocFileName] = useState("");
+  const [docFileData, setDocFileData] = useState("");
 
   const onStart = (v: string) => {
     setStart(v);
@@ -718,6 +1191,15 @@ function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
     setDuration(v);
     if (v === "Periodic") setEnd("");
     else setEnd(computeLeaseEnd(start, v));
+  };
+  const onDocFile = (f: File | undefined) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDocFileName(f.name);
+      setDocFileData(String(reader.result));
+    };
+    reader.readAsDataURL(f);
   };
 
   return (
@@ -765,6 +1247,12 @@ function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
               </SelectContent>
             </Select>
           </Field>
+          <div className="sm:col-span-2">
+            <Field label="New lease document (optional — replaces the current one, original is archived to history)">
+              <Input type="file" accept="application/pdf,image/*" onChange={(e) => onDocFile(e.target.files?.[0])} />
+              {docFileName && <div className="mt-1 text-xs text-muted-foreground">📎 {docFileName}</div>}
+            </Field>
+          </div>
         </div>
         <DialogFooter>
           <Button
@@ -775,6 +1263,8 @@ function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
                 newDuration: (duration as LeaseDuration) || undefined,
                 newRent: parseFloat(rent) || 0,
                 newFrequency: frequency,
+                newLeaseDocumentFileName: docFileName || undefined,
+                newLeaseDocumentFileData: docFileData || undefined,
               });
               setOpen(false);
               toast.success("Lease renewed. Previous lease archived to history.");
@@ -788,35 +1278,53 @@ function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
   );
 }
 
+export interface TenantInitialValues {
+  name?: string;
+  email?: string;
+  phone?: string;
+  rentAmount?: number;
+  rentFrequency?: RentFrequency;
+  leaseStart?: string;
+  leaseExpiry?: string;
+  leaseDuration?: LeaseDuration;
+  bondAmount?: number;
+}
+
 export function TenantDialog({
   propertyId,
   tenant,
+  initialValues,
+  onSaved,
   children,
 }: {
   propertyId: string;
   tenant?: Tenant;
+  /** Pre-fills a *new* tenant's form from AI-extracted data (e.g. a reviewed lease proposal). Ignored in edit mode. */
+  initialValues?: TenantInitialValues;
+  /** Called after the tenant is actually saved (not when the dialog merely opens). */
+  onSaved?: () => void;
   children?: React.ReactNode;
 }) {
   const { addTenant, updateTenant, state } = useStore();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    name: tenant?.name ?? "",
-    email: tenant?.email ?? "",
-    phone: tenant?.phone ?? "",
+    name: tenant?.name ?? initialValues?.name ?? "",
+    email: tenant?.email ?? initialValues?.email ?? "",
+    phone: tenant?.phone ?? initialValues?.phone ?? "",
     emergencyContactName: tenant?.emergencyContactName ?? "",
     emergencyContactRelationship: tenant?.emergencyContactRelationship ?? "",
     emergencyContactPhone: tenant?.emergencyContactPhone ?? "",
     permanentAddress: tenant?.permanentAddress ?? "",
     noticePeriod: tenant?.noticePeriod ?? "",
-    leaseStart: tenant?.leaseStart ?? "",
-    leaseExpiry: tenant?.leaseExpiry ?? "",
-    leaseDuration: (tenant?.leaseDuration ?? "") as LeaseDuration | "",
+    leaseStart: tenant?.leaseStart ?? initialValues?.leaseStart ?? "",
+    leaseExpiry: tenant?.leaseExpiry ?? initialValues?.leaseExpiry ?? "",
+    leaseDuration: (tenant?.leaseDuration ?? initialValues?.leaseDuration ?? "") as LeaseDuration | "",
     lastRentIncreaseDate: tenant?.lastRentIncreaseDate ?? "",
-    rentAmount: tenant?.rentAmount?.toString() ?? "",
-    rentFrequency: (tenant?.rentFrequency ?? "Weekly") as RentFrequency,
+    rentAmount: tenant?.rentAmount?.toString() ?? initialValues?.rentAmount?.toString() ?? "",
+    rentFrequency: (tenant?.rentFrequency ?? initialValues?.rentFrequency ?? "Weekly") as RentFrequency,
     bankReference: tenant?.bankReference ?? "",
     bankAccountHolder: tenant?.bankAccountHolder ?? "",
-    bondAmount: tenant?.bondAmount?.toString() ?? "",
+    bondAmount: tenant?.bondAmount?.toString() ?? initialValues?.bondAmount?.toString() ?? "",
     bondLodgementDate: tenant?.bondLodgementDate ?? "",
     bondReceiptNumber: tenant?.bondReceiptNumber ?? "",
     leaseDocumentFileName: tenant?.leaseDocumentFileName ?? "",
@@ -1042,6 +1550,7 @@ export function TenantDialog({
               if (tenant) updateTenant(tenant.id, payload);
               else addTenant(payload);
               setOpen(false);
+              onSaved?.();
               toast.success("Tenant saved");
             }}
           >

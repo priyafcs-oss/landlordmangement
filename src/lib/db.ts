@@ -13,6 +13,7 @@ export const TABLES = {
   leaseHistory: "lease_history",
   maintenanceRequests: "maintenance_requests",
   bills: "property_bills",
+  aiProposals: "ai_intake_proposals",
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";

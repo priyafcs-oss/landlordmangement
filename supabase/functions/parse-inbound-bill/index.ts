@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Webhook } from "npm:svix@1";
-import { parseInboundBill } from "./core-parser.ts";
+import { routeInboundDocument } from "./router.ts";
 import type { NormalizedBillInput } from "./types.ts";
 
 interface ResendAttachmentMeta {
@@ -73,6 +73,7 @@ async function normalize(email: ResendReceivedEmail, apiKey: string): Promise<No
     subject: email.subject,
     textBody: email.text ?? undefined,
     pdfBase64,
+    pdfFileName: pdfMeta?.filename,
   };
 }
 
@@ -127,7 +128,7 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const result = await parseInboundBill(supabase, input, emailId);
+    const result = await routeInboundDocument(supabase, input, emailId);
     if (!result.ok) {
       console.error("[parse-inbound-bill] parse failed", result.error);
       return new Response(JSON.stringify({ error: result.error }), {
@@ -138,10 +139,12 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        expenseId: result.expenseId,
-        status: result.status,
-        reviewReason: result.reviewReason,
-        matchedPropertyId: result.matchedPropertyId,
+        skipped: result.skipped,
+        expenseId: "expenseId" in result ? result.expenseId : undefined,
+        proposalId: "proposalId" in result ? result.proposalId : undefined,
+        status: "status" in result ? result.status : undefined,
+        reviewReason: "reviewReason" in result ? result.reviewReason : undefined,
+        matchedPropertyId: "matchedPropertyId" in result ? result.matchedPropertyId : undefined,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );

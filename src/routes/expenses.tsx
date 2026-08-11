@@ -36,6 +36,7 @@ import {
   DollarSign,
   Pencil,
   Copy,
+  Mail,
 } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
@@ -151,8 +152,24 @@ function ExpensesTab({ fy, setFy }: { fy: string; setFy: (v: string) => void }) 
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {e.date} • {prop?.address}
-                    {e.invoiceFileName && <> • 📎 {e.invoiceFileName}</>}
+                    {e.invoiceFileName && (
+                      <>
+                        {" • 📎 "}
+                        {e.invoiceFileData ? (
+                          <a href={e.invoiceFileData} download={e.invoiceFileName} className="text-primary underline">
+                            {e.invoiceFileName}
+                          </a>
+                        ) : (
+                          e.invoiceFileName
+                        )}
+                      </>
+                    )}
                   </div>
+                  {e.sourceEmailBody && (
+                    <div className="mt-1">
+                      <DocumentViewLinks subject={e.sourceSubject} emailBody={e.sourceEmailBody} />
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-right font-medium">{fmtCurrency(e.cost)}</div>
@@ -172,6 +189,54 @@ function ExpensesTab({ fy, setFy }: { fy: string; setFy: (v: string) => void }) 
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** "View PDF" / "View email" affordances for anything with source-document provenance columns. */
+function DocumentViewLinks({
+  fileName,
+  fileData,
+  subject,
+  emailBody,
+}: {
+  fileName?: string;
+  fileData?: string;
+  subject?: string;
+  emailBody?: string;
+}) {
+  const [showEmail, setShowEmail] = useState(false);
+  if (!fileData && !emailBody) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs">
+      {fileData && (
+        <a
+          href={fileData}
+          download={fileName || "document.pdf"}
+          className="inline-flex items-center gap-1 text-primary underline"
+        >
+          <FileText className="h-3 w-3" /> View PDF
+        </a>
+      )}
+      {emailBody && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowEmail(true)}
+            className="inline-flex items-center gap-1 text-primary underline"
+          >
+            <Mail className="h-3 w-3" /> View email
+          </button>
+          <Dialog open={showEmail} onOpenChange={setShowEmail}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{subject || "Original email"}</DialogTitle>
+              </DialogHeader>
+              <div className="whitespace-pre-wrap text-sm">{emailBody}</div>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </div>
   );
 }
@@ -260,6 +325,12 @@ function NeedsReviewBanner() {
                       </Button>
                     </div>
                   )}
+                  <DocumentViewLinks
+                    fileName={e.invoiceFileName}
+                    fileData={e.invoiceFileData}
+                    subject={e.sourceSubject}
+                    emailBody={e.sourceEmailBody}
+                  />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button

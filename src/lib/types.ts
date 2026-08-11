@@ -28,6 +28,17 @@ export interface Property {
   loanBalance?: number;
   interestRate?: number;
   repaymentFrequency?: RepaymentFrequency;
+  // Annual running-cost budget figures, used across the property's finances.
+  councilRatesAnnual?: number;
+  waterRatesAnnual?: number;
+  insuranceAnnual?: number;
+  strataFeesAnnual?: number;
+  landTaxAnnual?: number;
+  repairsMaintenanceAnnual?: number;
+  pmFeePercent?: number;
+  notes?: string;
+  photos?: { name: string; data: string }[];
+  videos?: { name: string; data: string }[];
 }
 
 export interface Tenant {
@@ -132,6 +143,8 @@ export interface Expense {
   rawPropertyAddress?: string;
   emailMessageId?: string;
   reviewReason?: string | null;
+  sourceSubject?: string;
+  sourceEmailBody?: string;
 }
 
 export interface ChecklistItem {
@@ -178,6 +191,9 @@ export interface LeaseHistory {
   pastEndDate: string;
   pastRent: number;
   pastFrequency: RentFrequency;
+  /** The lease document that was active during this past lease period, archived at renewal time. */
+  leaseDocumentFileName?: string;
+  leaseDocumentFileData?: string;
 }
 
 export interface MaintenanceRequest {
@@ -238,6 +254,45 @@ export interface PropertyBill {
   recurrenceMonths?: number;
 }
 
+/** Extracted-but-unconfirmed lease details from an inbound rent/lease agreement. */
+export interface TenantLeaseProposalPayload {
+  name: string;
+  email?: string;
+  phone?: string;
+  rentAmount: number;
+  rentFrequency: RentFrequency;
+  leaseStart?: string;
+  leaseExpiry?: string;
+  leaseDuration?: LeaseDuration;
+  bondAmount?: number;
+  confidence: number;
+}
+
+/** Extracted-but-unconfirmed rent payment transactions from an inbound agent statement. */
+export interface RentLedgerProposalPayload {
+  tenantName?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  transactions: { date: string; amount: number; description: string }[];
+  confidence: number;
+}
+
+export interface AiIntakeProposal {
+  id: string;
+  kind: "tenant_lease" | "rent_ledger";
+  status: "pending" | "applied" | "dismissed";
+  propertyId?: string;
+  matchedTenantId?: string;
+  rawPropertyAddress?: string;
+  sourceSubject?: string;
+  emailMessageId?: string;
+  sourceFileName?: string;
+  sourceFileData?: string;
+  sourceEmailBody?: string;
+  payload: TenantLeaseProposalPayload | RentLedgerProposalPayload;
+  reviewReason?: string | null;
+}
+
 export interface AppState {
   properties: Property[];
   tenants: Tenant[];
@@ -252,6 +307,7 @@ export interface AppState {
   aiConfig: AiConfig;
   landlordProfile: LandlordProfile;
   bills: PropertyBill[];
+  aiProposals: AiIntakeProposal[];
 }
 
 export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {

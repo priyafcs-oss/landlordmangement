@@ -1,23 +1,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
+import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedBillFields, ParseResult } from "./types.ts";
-
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-
-// Google has been retiring Gemini model IDs for new API keys faster than their published
-// deprecation dates (see the GEMINI_MODEL override below for the no-redeploy fix path).
-const DEFAULT_MODEL_CANDIDATES = ["gemini-3.6-flash", "gemini-3.5-flash-lite"];
-
-/**
- * GEMINI_MODEL (optional secret) lets you point at a new model the moment Google retires the
- * current one, without a code change or redeploy: `supabase secrets set GEMINI_MODEL=...`.
- * If it's unset, or itself gets retired, we fall through the hardcoded candidates below.
- */
-function modelCandidates(): string[] {
-  const override = Deno.env.get("GEMINI_MODEL");
-  const list = override ? [override, ...DEFAULT_MODEL_CANDIDATES] : DEFAULT_MODEL_CANDIDATES;
-  return [...new Set(list)];
-}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
@@ -25,82 +9,32 @@ const DUPLICATE_WINDOW_DAYS = 14;
 const PRICE_SPIKE_MULTIPLIER = 1.4;
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 
-async function callGemini(input: NormalizedBillInput): Promise<ParsedBillFields> {
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-
-  const parts: Record<string, unknown>[] = [
-    {
-      text: `You are extracting structured invoice data from an Australian property bill email (council rates, water, strata, or similar).
+const BILL_PROMPT = `You are extracting structured invoice data from an Australian property bill email (council rates, water, strata, or similar).
 Extract the fields defined in the response schema as strict JSON.
 - due_date must be formatted YYYY-MM-DD.
 - bpay_biller_code and bpay_reference must be null if the bill has no BPAY details.
-- confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.
+- confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;
 
-Subject: ${input.subject}
-From: ${input.fromEmail}
-Body:
-${input.textBody ?? "(see attached PDF)"}`,
-    },
-  ];
+const BILL_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    vendor: { type: "STRING" },
+    amount: { type: "NUMBER" },
+    due_date: { type: "STRING" },
+    property_address: { type: "STRING" },
+    bpay_biller_code: { type: "STRING", nullable: true },
+    bpay_reference: { type: "STRING", nullable: true },
+    ato_category: { type: "STRING" },
+    confidence: { type: "NUMBER" },
+  },
+  required: ["vendor", "amount", "due_date", "property_address", "ato_category", "confidence"],
+};
 
-  if (input.pdfBase64) {
-    parts.push({ inlineData: { mimeType: "application/pdf", data: input.pdfBase64 } });
-  }
-
-  const requestBody = JSON.stringify({
-    contents: [{ role: "user", parts }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        properties: {
-          vendor: { type: "STRING" },
-          amount: { type: "NUMBER" },
-          due_date: { type: "STRING" },
-          property_address: { type: "STRING" },
-          bpay_biller_code: { type: "STRING", nullable: true },
-          bpay_reference: { type: "STRING", nullable: true },
-          ato_category: { type: "STRING" },
-          confidence: { type: "NUMBER" },
-        },
-        required: ["vendor", "amount", "due_date", "property_address", "ato_category", "confidence"],
-      },
-    },
-  });
-
-  const candidates = modelCandidates();
-  let lastError = "unknown error";
-
-  for (const model of candidates) {
-    const res = await fetch(`${GEMINI_BASE_URL}/${model}:generateContent?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: requestBody,
-    });
-
-    if (res.ok) {
-      if (model !== candidates[0]) {
-        console.warn(
-          `[parse-inbound-bill] Gemini model "${candidates[0]}" is unavailable; used fallback "${model}". Update the GEMINI_MODEL secret before the fallback also breaks.`,
-        );
-      }
-      const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error("Gemini returned no content");
-      return JSON.parse(text) as ParsedBillFields;
-    }
-
-    lastError = `${res.status} ${await res.text()}`;
-    // Only fall through to the next candidate when the model itself was retired (404) — any
-    // other failure (bad key, quota, malformed request) is a real bug, not a model-rot issue.
-    if (res.status !== 404) {
-      throw new Error(`Gemini request failed: ${lastError}`);
-    }
-    console.warn(`[parse-inbound-bill] Gemini model "${model}" unavailable (404), trying next candidate`);
-  }
-
-  throw new Error(`Gemini request failed on all model candidates: ${lastError}`);
+async function callGemini(input: NormalizedBillInput): Promise<ParsedBillFields> {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
+  const parts = buildDocumentParts(BILL_PROMPT, input);
+  return callGeminiJSON<ParsedBillFields>(apiKey, parts, BILL_SCHEMA);
 }
 
 function validateParsed(parsed: ParsedBillFields): string | null {
@@ -220,6 +154,10 @@ export async function parseInboundBill(
     rawPropertyAddress: parsed.property_address,
     emailMessageId,
     reviewReason,
+    invoiceFileName: input.pdfFileName,
+    invoiceFileData: input.pdfBase64,
+    sourceSubject: input.subject,
+    sourceEmailBody: input.textBody,
   };
 
   const { error } = await supabase.from("expenses").insert(row);
