@@ -1243,7 +1243,7 @@ function checkRentIncreaseCompliance(tenant: Tenant, newRent: number, rentChange
  * A standalone rent bump — distinct from lease renewal, since periodic/rolling tenancies get
  * rent increases without a formal renewal in most Australian jurisdictions.
  */
-function IncreaseRentDialog({ tenant }: { tenant: Tenant }) {
+export function IncreaseRentDialog({ tenant, trigger }: { tenant: Tenant; trigger?: React.ReactNode }) {
   const { state, updateTenant } = useStore();
   const [open, setOpen] = useState(false);
   const [newRent, setNewRent] = useState(tenant.rentAmount.toString());
@@ -1261,9 +1261,11 @@ function IncreaseRentDialog({ tenant }: { tenant: Tenant }) {
       }}
     >
       <DialogTrigger asChild>
-        <Button size="icon" variant="ghost" title="Increase rent">
-          <TrendingUp className="h-4 w-4" />
-        </Button>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" title="Increase rent">
+            <TrendingUp className="h-4 w-4" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

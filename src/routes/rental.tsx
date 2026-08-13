@@ -34,6 +34,7 @@ import {
   Mail,
   Download,
   FileDown,
+  TrendingUp,
 } from "lucide-react";
 import {
   buildTenantLedger,
@@ -49,7 +50,7 @@ import type { Tenant } from "@/lib/types";
 
 import { toast } from "sonner";
 import jsPDF from "jspdf";
-import { TenantDialog } from "./portfolio";
+import { TenantDialog, IncreaseRentDialog } from "./portfolio";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 
 export const Route = createFileRoute("/rental")({
@@ -303,6 +304,14 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
                 Edit Tenant Details
               </Button>
             </TenantDialog>
+            <IncreaseRentDialog
+              tenant={tenant}
+              trigger={
+                <Button size="sm" variant="outline" className="gap-1">
+                  <TrendingUp className="h-3.5 w-3.5" /> Increase Rent
+                </Button>
+              }
+            />
             <AdjustmentDialog tenant={tenant} />
             <LedgerExportButtons
               tenant={tenant}
