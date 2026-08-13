@@ -97,6 +97,11 @@ export interface Tenant {
   petsAllowed?: boolean;
   petsDescription?: string;
   additionalLeaseTerms?: string;
+  /** Co-tenants beyond the primary `name` — the standard NSW form has slots for tenant 2 and 3. */
+  additionalTenants?: ContactPerson[];
+  bondPaidTo?: "Landlord" | "Agent" | "NSW Fair Trading";
+  landlordConsentsToElectronicService?: boolean;
+  tenantConsentsToElectronicService?: boolean;
 }
 
 export type LedgerType =
@@ -248,12 +253,21 @@ export interface AiConfig {
   dailyLimit: number;
 }
 
+/** A co-landlord or co-tenant beyond the primary one — name plus optional contact details. */
+export interface ContactPerson {
+  name: string;
+  email?: string;
+  phone?: string;
+}
+
 export interface LandlordProfile {
   fullName: string;
   email: string;
   phone: string;
   notifyEmail: boolean;
   notifySms: boolean;
+  /** Co-landlords/owners, reused as the default pool when generating a tenancy agreement. */
+  additionalLandlords?: ContactPerson[];
 }
 
 export type LeaseTemplateFieldType = "text" | "checkbox" | "radio" | "dropdown";
@@ -367,6 +381,8 @@ export interface AppState {
   bills: PropertyBill[];
   aiProposals: AiIntakeProposal[];
   leaseTemplate: LeaseTemplateConfig | null;
+  /** The official Tenant Information Statement PDF, appended after the filled agreement on generation. */
+  tenantInfoStatement: { fileName: string; fileData: string; uploadedAt: string } | null;
 }
 
 export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {

@@ -7,10 +7,19 @@ import type { LeaseTemplateConfig, LeaseTemplateField } from "./types";
  * builds a `values` object keyed exactly like this). Keeping one source of truth means the two
  * can never silently drift apart.
  */
-export const LEASE_DATA_FIELDS: { key: string; label: string; group: "Landlord" | "Property" | "Tenant" }[] = [
+export const LEASE_DATA_FIELDS: {
+  key: string;
+  label: string;
+  group: "Agreement" | "Landlord" | "Property" | "Tenant";
+}[] = [
+  { key: "agreementDate", label: "Date agreement was made", group: "Agreement" },
+  { key: "agreementPlace", label: "Place agreement was made", group: "Agreement" },
+
   { key: "landlordName", label: "Landlord / rental provider name", group: "Landlord" },
   { key: "landlordEmail", label: "Landlord email", group: "Landlord" },
   { key: "landlordPhone", label: "Landlord phone", group: "Landlord" },
+  { key: "landlordName2", label: "Co-landlord name (2nd landlord)", group: "Landlord" },
+  { key: "landlordConsentsToElectronicService", label: "Landlord consents to electronic service", group: "Landlord" },
 
   { key: "propertyAddress", label: "Property address", group: "Property" },
   { key: "maxOccupants", label: "Maximum occupants", group: "Property" },
@@ -43,16 +52,24 @@ export const LEASE_DATA_FIELDS: { key: string; label: string; group: "Landlord" 
   { key: "tenantName", label: "Tenant name", group: "Tenant" },
   { key: "tenantEmail", label: "Tenant email", group: "Tenant" },
   { key: "tenantPhone", label: "Tenant phone", group: "Tenant" },
+  { key: "tenantName2", label: "Co-tenant name (2nd tenant)", group: "Tenant" },
+  { key: "tenantName3", label: "Co-tenant name (3rd tenant)", group: "Tenant" },
+  { key: "tenantNameOthers", label: "Further co-tenant names (4th onward, combined)", group: "Tenant" },
   { key: "rentAmount", label: "Rent amount", group: "Tenant" },
   { key: "rentFrequency", label: "Rent frequency", group: "Tenant" },
   { key: "bondAmount", label: "Bond amount", group: "Tenant" },
+  { key: "bondPaidTo", label: "Bond paid to (Landlord / Agent / NSW Fair Trading)", group: "Tenant" },
   { key: "leaseStart", label: "Lease start date", group: "Tenant" },
   { key: "leaseExpiry", label: "Lease end date", group: "Tenant" },
   { key: "leaseDuration", label: "Lease duration", group: "Tenant" },
   { key: "petsAllowed", label: "Pets allowed", group: "Tenant" },
   { key: "petsDescription", label: "Pet details", group: "Tenant" },
   { key: "additionalLeaseTerms", label: "Additional terms", group: "Tenant" },
+  { key: "tenantConsentsToElectronicService", label: "Tenant consents to electronic service", group: "Tenant" },
 ];
+
+/** Preset battery types the wizard offers for a battery-operated smoke alarm — the two kinds a fresh unit is normally sold with. */
+export const SMOKE_ALARM_BATTERY_TYPES = ["9V carbon-zinc/alkaline", "Sealed 10-year lithium"] as const;
 
 /** This app stores dates as ISO (yyyy-mm-dd); printed tenancy agreements conventionally expect dd/mm/yyyy. */
 export function toDDMMYYYY(iso: string | undefined): string | undefined {
@@ -154,4 +171,18 @@ export async function fillLeaseTemplate(
   }
 
   return pdfDoc.save();
+}
+
+/**
+ * Appends every page of `extraFileData` (a stored data-URL PDF, e.g. the Tenant Information
+ * Statement) after `baseBytes` (the just-filled agreement), returning one combined PDF. Used so
+ * the generated document is a single file the landlord can hand the tenant, matching how the
+ * Tenant Information Statement is required to accompany every NSW tenancy agreement.
+ */
+export async function appendPdf(baseBytes: Uint8Array, extraFileData: string): Promise<Uint8Array> {
+  const baseDoc = await PDFDocument.load(baseBytes, { ignoreEncryption: true });
+  const extraDoc = await PDFDocument.load(base64ToBytes(extraFileData), { ignoreEncryption: true });
+  const copiedPages = await baseDoc.copyPages(extraDoc, extraDoc.getPageIndices());
+  for (const page of copiedPages) baseDoc.addPage(page);
+  return baseDoc.save();
 }

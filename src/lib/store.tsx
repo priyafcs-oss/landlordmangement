@@ -61,6 +61,7 @@ const empty: AppState = {
   bills: [],
   aiProposals: [],
   leaseTemplate: null,
+  tenantInfoStatement: null,
 };
 
 interface StoreCtx {
@@ -121,6 +122,7 @@ interface StoreCtx {
 
   updateLandlordProfile: (p: Partial<LandlordProfile>) => void;
   updateLeaseTemplate: (t: LeaseTemplateConfig | null) => void;
+  updateTenantInfoStatement: (t: AppState["tenantInfoStatement"]) => void;
 
   addBill: (b: Omit<PropertyBill, "id">) => void;
   updateBill: (id: string, b: Partial<PropertyBill>) => void;
@@ -195,6 +197,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
       landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
       leaseTemplate: (settings?.leaseTemplate as LeaseTemplateConfig | undefined) ?? null,
+      tenantInfoStatement:
+        (settings?.tenantInfoStatement as AppState["tenantInfoStatement"] | undefined) ?? null,
     });
     setLoading(false);
   };
@@ -518,6 +522,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => {
         void saveSettings({ leaseTemplate: t });
         return { ...s, leaseTemplate: t };
+      }),
+    updateTenantInfoStatement: (t) =>
+      set((s) => {
+        void saveSettings({ tenantInfoStatement: t });
+        return { ...s, tenantInfoStatement: t };
       }),
 
     addBill: (b) => {

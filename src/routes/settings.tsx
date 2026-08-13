@@ -9,9 +9,9 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { User, FileText, ChevronDown, ChevronUp, X } from "lucide-react";
+import { User, FileText, ChevronDown, ChevronUp, X, Plus } from "lucide-react";
 import { inspectLeaseTemplate, LEASE_DATA_FIELDS } from "@/lib/leaseTemplate";
-import type { LeaseTemplateConfig, LeaseTemplateField } from "@/lib/types";
+import type { LeaseTemplateConfig, LeaseTemplateField, ContactPerson } from "@/lib/types";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -35,6 +35,19 @@ function SettingsPage() {
     updateLandlordProfile(form);
     toast.success("Profile saved");
   };
+
+  const additionalLandlords = form.additionalLandlords ?? [];
+  const updateAdditionalLandlord = (idx: number, patch: Partial<ContactPerson>) => {
+    setForm((f) => {
+      const next = [...(f.additionalLandlords ?? [])];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...f, additionalLandlords: next };
+    });
+  };
+  const addAdditionalLandlord = () =>
+    setForm((f) => ({ ...f, additionalLandlords: [...(f.additionalLandlords ?? []), { name: "" }] }));
+  const removeAdditionalLandlord = (idx: number) =>
+    setForm((f) => ({ ...f, additionalLandlords: (f.additionalLandlords ?? []).filter((_, i) => i !== idx) }));
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
@@ -74,6 +87,44 @@ function SettingsPage() {
           </div>
 
           <div className="space-y-3 rounded-md border p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Additional landlords / owners</div>
+                <div className="text-xs text-muted-foreground">
+                  Co-owners on title — offered when generating a tenancy agreement.
+                </div>
+              </div>
+              <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={addAdditionalLandlord}>
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+            {additionalLandlords.map((l, idx) => (
+              <div key={idx} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+                <Field label="Name">
+                  <Input value={l.name} onChange={(e) => updateAdditionalLandlord(idx, { name: e.target.value })} />
+                </Field>
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    value={l.email ?? ""}
+                    onChange={(e) => updateAdditionalLandlord(idx, { email: e.target.value })}
+                  />
+                </Field>
+                <Field label="Phone">
+                  <Input
+                    inputMode="tel"
+                    value={l.phone ?? ""}
+                    onChange={(e) => updateAdditionalLandlord(idx, { phone: e.target.value })}
+                  />
+                </Field>
+                <Button size="icon" variant="ghost" onClick={() => removeAdditionalLandlord(idx)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-3 rounded-md border p-4">
             <div className="text-sm font-medium">Notification preferences</div>
             <div className="flex items-center justify-between">
               <div>
@@ -108,7 +159,54 @@ function SettingsPage() {
       </Card>
 
       <LeaseTemplateSettings />
+      <TenantInfoStatementSettings />
     </div>
+  );
+}
+
+function TenantInfoStatementSettings() {
+  const { state, updateTenantInfoStatement } = useStore();
+  const doc = state.tenantInfoStatement;
+
+  const handleUpload = (f: File | undefined) => {
+    if (!f) return;
+    if (f.type !== "application/pdf") return toast.error("Please upload a PDF file");
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateTenantInfoStatement({ fileName: f.name, fileData: String(reader.result), uploadedAt: new Date().toISOString() });
+      toast.success("Tenant Information Statement uploaded");
+    };
+    reader.readAsDataURL(f);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <FileText className="h-4 w-4" />
+          Tenant Information Statement
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          The official NSW Fair Trading Tenant Information Statement — appended after the filled
+          tenancy agreement every time you generate one, since it's required to accompany the
+          agreement.
+        </p>
+        <Input type="file" accept="application/pdf" onChange={(e) => handleUpload(e.target.files?.[0])} className="max-w-xs" />
+        {doc && (
+          <div className="flex items-center justify-between rounded-md border bg-muted/30 p-3 text-xs">
+            <div>
+              <div className="font-medium">{doc.fileName}</div>
+              <div className="text-muted-foreground">Uploaded {new Date(doc.uploadedAt).toLocaleString("en-AU")}</div>
+            </div>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => updateTenantInfoStatement(null)}>
+              Remove
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -276,7 +374,7 @@ function LeaseTemplateSettings() {
 
             <div className="space-y-4">
               <div className="text-sm font-medium">Field mapping</div>
-              {(["Landlord", "Property", "Tenant"] as const).map((group) => (
+              {(["Agreement", "Landlord", "Property", "Tenant"] as const).map((group) => (
                 <div key={group} className="space-y-2">
                   <div className="text-xs font-medium text-muted-foreground">{group}</div>
                   {LEASE_DATA_FIELDS.filter((f) => f.group === group).map((f) => {

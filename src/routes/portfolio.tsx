@@ -56,9 +56,10 @@ import type {
   TenantLeaseProposalPayload,
   RentLedgerProposalPayload,
   RentChange,
+  ContactPerson,
 } from "@/lib/types";
 import { toast } from "sonner";
-import { fillLeaseTemplate, toDDMMYYYY } from "@/lib/leaseTemplate";
+import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { FileSignature } from "lucide-react";
 
@@ -984,7 +985,7 @@ function LeaseAgreementWizard({
   tenant?: Tenant;
   children: React.ReactNode;
 }) {
-  const { state, updateProperty, addTenant, updateTenant } = useStore();
+  const { state, updateProperty, addTenant, updateTenant, updateLandlordProfile } = useStore();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [generating, setGenerating] = useState(false);
@@ -994,8 +995,10 @@ function LeaseAgreementWizard({
     maxOccupants: property.maxOccupants?.toString() ?? "",
     premisesInclusions: property.premisesInclusions ?? "",
     smokeAlarmType: (property.smokeAlarmType ?? "Battery") as "Hardwired" | "Battery",
-    smokeAlarmBatteryReplaceable: property.smokeAlarmBatteryReplaceable,
-    smokeAlarmBatteryType: property.smokeAlarmBatteryType ?? "",
+    // The vast majority of NSW residential smoke alarms are battery-operated with a replaceable
+    // battery, so we default to that rather than leaving the landlord to answer from scratch.
+    smokeAlarmBatteryReplaceable: property.smokeAlarmBatteryReplaceable ?? true,
+    smokeAlarmBatteryType: property.smokeAlarmBatteryType || SMOKE_ALARM_BATTERY_TYPES[0],
     smokeAlarmBackupBatteryReplaceable: property.smokeAlarmBackupBatteryReplaceable,
     smokeAlarmBackupBatteryType: property.smokeAlarmBackupBatteryType ?? "",
     strataResponsibleForSmokeAlarms: property.strataResponsibleForSmokeAlarms,
@@ -1006,9 +1009,10 @@ function LeaseAgreementWizard({
     plumbingRepairsContactPhone: property.plumbingRepairsContactPhone ?? "",
     otherRepairsContactName: property.otherRepairsContactName ?? "",
     otherRepairsContactPhone: property.otherRepairsContactPhone ?? "",
-    waterUsagePaidSeparately: property.waterUsagePaidSeparately,
-    electricityEmbeddedNetwork: property.electricityEmbeddedNetwork,
-    gasEmbeddedNetwork: property.gasEmbeddedNetwork,
+    // The form requires an answer to each of these — default to No rather than leaving them blank.
+    waterUsagePaidSeparately: property.waterUsagePaidSeparately ?? false,
+    electricityEmbeddedNetwork: property.electricityEmbeddedNetwork ?? false,
+    gasEmbeddedNetwork: property.gasEmbeddedNetwork ?? false,
   });
   const [premises, setPremises] = useState(buildPremises);
 
@@ -1019,14 +1023,24 @@ function LeaseAgreementWizard({
     rentAmount: tenant?.rentAmount?.toString() ?? "",
     rentFrequency: (tenant?.rentFrequency ?? "Weekly") as RentFrequency,
     bondAmount: tenant?.bondAmount?.toString() ?? "",
+    bondPaidTo: (tenant?.bondPaidTo ?? "NSW Fair Trading") as NonNullable<Tenant["bondPaidTo"]>,
     leaseStart: tenant?.leaseStart ?? todayISO(),
     leaseDuration: (tenant?.leaseDuration ?? "12 Months") as LeaseDuration,
     leaseExpiry: tenant?.leaseExpiry ?? "",
     petsAllowed: tenant?.petsAllowed,
     petsDescription: tenant?.petsDescription ?? "",
     additionalLeaseTerms: tenant?.additionalLeaseTerms ?? "",
+    landlordConsentsToElectronicService: tenant?.landlordConsentsToElectronicService ?? true,
+    tenantConsentsToElectronicService: tenant?.tenantConsentsToElectronicService ?? true,
+    // Not persisted on the tenant — this is "when/where this document was made", re-set every time.
+    agreementDate: todayISO(),
+    agreementPlace: property.address,
   });
   const [leaseForm, setLeaseForm] = useState(buildLeaseForm);
+  const [additionalLandlords, setAdditionalLandlords] = useState<ContactPerson[]>(
+    () => state.landlordProfile.additionalLandlords ?? [],
+  );
+  const [additionalTenants, setAdditionalTenants] = useState<ContactPerson[]>(() => tenant?.additionalTenants ?? []);
 
   const onOpenChange = (o: boolean) => {
     setOpen(o);
@@ -1034,9 +1048,21 @@ function LeaseAgreementWizard({
       setStep(1);
       setPremises(buildPremises());
       setLeaseForm(buildLeaseForm());
+      setAdditionalLandlords(state.landlordProfile.additionalLandlords ?? []);
+      setAdditionalTenants(tenant?.additionalTenants ?? []);
       setGeneratedBlob(null);
     }
   };
+
+  const updateAdditionalLandlord = (idx: number, patch: Partial<ContactPerson>) =>
+    setAdditionalLandlords((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  const addAdditionalLandlordRow = () => setAdditionalLandlords((rows) => [...rows, { name: "" }]);
+  const removeAdditionalLandlordRow = (idx: number) => setAdditionalLandlords((rows) => rows.filter((_, i) => i !== idx));
+
+  const updateAdditionalTenant = (idx: number, patch: Partial<ContactPerson>) =>
+    setAdditionalTenants((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  const addAdditionalTenantRow = () => setAdditionalTenants((rows) => [...rows, { name: "" }]);
+  const removeAdditionalTenantRow = (idx: number) => setAdditionalTenants((rows) => rows.filter((_, i) => i !== idx));
 
   const onStartChange = (v: string) => {
     setLeaseForm((s) => ({
@@ -1080,6 +1106,7 @@ function LeaseAgreementWizard({
   const saveStep2 = () => {
     if (!leaseForm.name) return toast.error("Tenant name required");
     if (!leaseForm.rentAmount) return toast.error("Rent amount required");
+    const cleanedAdditionalTenants = additionalTenants.filter((t) => t.name.trim());
     const patch = {
       name: leaseForm.name,
       email: leaseForm.email || undefined,
@@ -1087,23 +1114,36 @@ function LeaseAgreementWizard({
       rentAmount: parseFloat(leaseForm.rentAmount) || 0,
       rentFrequency: leaseForm.rentFrequency,
       bondAmount: leaseForm.bondAmount ? parseFloat(leaseForm.bondAmount) : undefined,
+      bondPaidTo: leaseForm.bondAmount ? leaseForm.bondPaidTo : undefined,
       leaseStart: leaseForm.leaseStart || undefined,
       leaseExpiry: leaseForm.leaseExpiry || undefined,
       leaseDuration: leaseForm.leaseDuration,
       petsAllowed: leaseForm.petsAllowed,
       petsDescription: leaseForm.petsAllowed ? leaseForm.petsDescription || undefined : undefined,
       additionalLeaseTerms: leaseForm.additionalLeaseTerms || undefined,
+      additionalTenants: cleanedAdditionalTenants.length ? cleanedAdditionalTenants : undefined,
+      landlordConsentsToElectronicService: leaseForm.landlordConsentsToElectronicService,
+      tenantConsentsToElectronicService: leaseForm.tenantConsentsToElectronicService,
       propertyId: property.id,
     };
     if (tenant) updateTenant(tenant.id, patch);
     else addTenant(patch);
+
+    const cleanedAdditionalLandlords = additionalLandlords.filter((l) => l.name.trim());
+    updateLandlordProfile({ additionalLandlords: cleanedAdditionalLandlords });
+
     setStep(3);
   };
 
   const buildValues = (): Record<string, string | boolean | undefined> => ({
+    agreementDate: toDDMMYYYY(leaseForm.agreementDate) || undefined,
+    agreementPlace: leaseForm.agreementPlace || undefined,
+
     landlordName: state.landlordProfile.fullName || undefined,
-    landlordEmail: state.landlordProfile.email || undefined,
+    landlordEmail: leaseForm.landlordConsentsToElectronicService ? state.landlordProfile.email || undefined : undefined,
     landlordPhone: state.landlordProfile.phone || undefined,
+    landlordName2: additionalLandlords[0]?.name || undefined,
+    landlordConsentsToElectronicService: leaseForm.landlordConsentsToElectronicService,
 
     propertyAddress: property.address,
     maxOccupants: premises.maxOccupants || undefined,
@@ -1126,11 +1166,16 @@ function LeaseAgreementWizard({
     gasEmbeddedNetwork: premises.gasEmbeddedNetwork,
 
     tenantName: leaseForm.name || undefined,
-    tenantEmail: leaseForm.email || undefined,
+    tenantEmail: leaseForm.tenantConsentsToElectronicService ? leaseForm.email || undefined : undefined,
     tenantPhone: leaseForm.phone || undefined,
+    tenantName2: additionalTenants[0]?.name || undefined,
+    tenantName3: additionalTenants[1]?.name || undefined,
+    tenantNameOthers: additionalTenants.slice(2).map((t) => t.name).filter(Boolean).join(", ") || undefined,
+    tenantConsentsToElectronicService: leaseForm.tenantConsentsToElectronicService,
     rentAmount: leaseForm.rentAmount || undefined,
     rentFrequency: leaseForm.rentFrequency,
     bondAmount: leaseForm.bondAmount || undefined,
+    bondPaidTo: leaseForm.bondAmount ? leaseForm.bondPaidTo : undefined,
     leaseStart: toDDMMYYYY(leaseForm.leaseStart) || undefined,
     leaseExpiry: toDDMMYYYY(leaseForm.leaseExpiry) || undefined,
     leaseDuration: leaseForm.leaseDuration,
@@ -1147,9 +1192,16 @@ function LeaseAgreementWizard({
     }
     setGenerating(true);
     try {
-      const bytes = await fillLeaseTemplate(state.leaseTemplate, buildValues());
+      let bytes = await fillLeaseTemplate(state.leaseTemplate, buildValues());
+      if (state.tenantInfoStatement) {
+        bytes = await appendPdf(bytes, state.tenantInfoStatement.fileData);
+      }
       setGeneratedBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }));
-      toast.success("Lease agreement generated");
+      toast.success(
+        state.tenantInfoStatement
+          ? "Lease agreement generated (with Tenant Information Statement attached)"
+          : "Lease agreement generated",
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not generate the document");
     } finally {
@@ -1230,15 +1282,26 @@ function LeaseAgreementWizard({
                     <Field label="Battery tenant-replaceable?">
                       <YesNoSelect
                         value={premises.smokeAlarmBatteryReplaceable}
-                        onChange={(v) => setPremises({ ...premises, smokeAlarmBatteryReplaceable: v })}
+                        onChange={(v) => setPremises({ ...premises, smokeAlarmBatteryReplaceable: v ?? true })}
                       />
                     </Field>
                     {premises.smokeAlarmBatteryReplaceable && (
                       <Field label="Battery type">
-                        <Input
+                        <Select
                           value={premises.smokeAlarmBatteryType}
-                          onChange={(e) => setPremises({ ...premises, smokeAlarmBatteryType: e.target.value })}
-                        />
+                          onValueChange={(v) => setPremises({ ...premises, smokeAlarmBatteryType: v })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SMOKE_ALARM_BATTERY_TYPES.map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {t}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </Field>
                     )}
                   </>
@@ -1279,22 +1342,22 @@ function LeaseAgreementWizard({
                   onChange={(v) => setPremises({ ...premises, strataBylawsApply: v })}
                 />
               </Field>
-              <Field label="Tenant pays water usage separately?">
+              <Field label="Tenant pays water usage separately? (Required)">
                 <YesNoSelect
                   value={premises.waterUsagePaidSeparately}
-                  onChange={(v) => setPremises({ ...premises, waterUsagePaidSeparately: v })}
+                  onChange={(v) => setPremises({ ...premises, waterUsagePaidSeparately: v ?? false })}
                 />
               </Field>
-              <Field label="Electricity from embedded network?">
+              <Field label="Electricity from embedded network? (Required)">
                 <YesNoSelect
                   value={premises.electricityEmbeddedNetwork}
-                  onChange={(v) => setPremises({ ...premises, electricityEmbeddedNetwork: v })}
+                  onChange={(v) => setPremises({ ...premises, electricityEmbeddedNetwork: v ?? false })}
                 />
               </Field>
-              <Field label="Gas from embedded network?">
+              <Field label="Gas from embedded network? (Required)">
                 <YesNoSelect
                   value={premises.gasEmbeddedNetwork}
-                  onChange={(v) => setPremises({ ...premises, gasEmbeddedNetwork: v })}
+                  onChange={(v) => setPremises({ ...premises, gasEmbeddedNetwork: v ?? false })}
                 />
               </Field>
             </div>
@@ -1345,6 +1408,62 @@ function LeaseAgreementWizard({
 
         {step === 2 && (
           <div className="space-y-3">
+            <div className="rounded-md border p-3">
+              <div className="mb-2 text-sm font-medium">Agreement details</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Date agreement was made">
+                  <Input
+                    type="date"
+                    value={leaseForm.agreementDate}
+                    onChange={(e) => setLeaseForm({ ...leaseForm, agreementDate: e.target.value })}
+                  />
+                </Field>
+                <Field label="Place agreement was made">
+                  <Input
+                    value={leaseForm.agreementPlace}
+                    onChange={(e) => setLeaseForm({ ...leaseForm, agreementPlace: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-medium">Landlord(s)</div>
+                <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={addAdditionalLandlordRow}>
+                  <Plus className="h-3 w-3" /> Add co-landlord
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {state.landlordProfile.fullName || "(no landlord name set in Settings)"}
+                {state.landlordProfile.email ? ` • ${state.landlordProfile.email}` : ""}
+              </div>
+              {additionalLandlords.map((l, idx) => (
+                <div key={idx} className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+                  <Field label="Name">
+                    <Input value={l.name} onChange={(e) => updateAdditionalLandlord(idx, { name: e.target.value })} />
+                  </Field>
+                  <Field label="Email">
+                    <Input
+                      type="email"
+                      value={l.email ?? ""}
+                      onChange={(e) => updateAdditionalLandlord(idx, { email: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <Input
+                      inputMode="tel"
+                      value={l.phone ?? ""}
+                      onChange={(e) => updateAdditionalLandlord(idx, { phone: e.target.value })}
+                    />
+                  </Field>
+                  <Button size="icon" variant="ghost" onClick={() => removeAdditionalLandlordRow(idx)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
             {tenant ? (
               <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
                 Using existing tenant details for <span className="font-medium text-foreground">{tenant.name}</span>{" "}
@@ -1407,6 +1526,89 @@ function LeaseAgreementWizard({
                 </Field>
               </div>
             )}
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-medium">Co-tenants</div>
+                <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={addAdditionalTenantRow}>
+                  <Plus className="h-3 w-3" /> Add co-tenant
+                </Button>
+              </div>
+              {additionalTenants.length === 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {leaseForm.name || "This tenant"} is the only tenant on this agreement.
+                </div>
+              )}
+              {additionalTenants.map((t, idx) => (
+                <div key={idx} className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+                  <Field label="Name">
+                    <Input value={t.name} onChange={(e) => updateAdditionalTenant(idx, { name: e.target.value })} />
+                  </Field>
+                  <Field label="Email">
+                    <Input
+                      type="email"
+                      value={t.email ?? ""}
+                      onChange={(e) => updateAdditionalTenant(idx, { email: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <Input
+                      inputMode="tel"
+                      value={t.phone ?? ""}
+                      onChange={(e) => updateAdditionalTenant(idx, { phone: e.target.value })}
+                    />
+                  </Field>
+                  <Button size="icon" variant="ghost" onClick={() => removeAdditionalTenantRow(idx)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {tenant && (
+              <Field label="Bond amount (AUD)">
+                <Input
+                  type="number"
+                  value={leaseForm.bondAmount}
+                  onChange={(e) => setLeaseForm({ ...leaseForm, bondAmount: e.target.value })}
+                />
+              </Field>
+            )}
+            {leaseForm.bondAmount && (
+              <Field label="Bond paid to">
+                <Select
+                  value={leaseForm.bondPaidTo}
+                  onValueChange={(v) => setLeaseForm({ ...leaseForm, bondPaidTo: v as NonNullable<Tenant["bondPaidTo"]> })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NSW Fair Trading">NSW Fair Trading (Rental Bond Online)</SelectItem>
+                    <SelectItem value="Landlord">The landlord or another person</SelectItem>
+                    <SelectItem value="Agent">The landlord's agent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 text-sm font-medium">Electronic service of notices and documents</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Landlord consents?">
+                  <YesNoSelect
+                    value={leaseForm.landlordConsentsToElectronicService}
+                    onChange={(v) => setLeaseForm({ ...leaseForm, landlordConsentsToElectronicService: v ?? true })}
+                  />
+                </Field>
+                <Field label="Tenant consents?">
+                  <YesNoSelect
+                    value={leaseForm.tenantConsentsToElectronicService}
+                    onChange={(v) => setLeaseForm({ ...leaseForm, tenantConsentsToElectronicService: v ?? true })}
+                  />
+                </Field>
+              </div>
+            </div>
 
             <div className="rounded-md border p-3">
               <div className="mb-2 text-sm font-medium">Pets on the premises</div>
@@ -2037,6 +2239,11 @@ export function TenantDialog({
     bondTransferFileName: tenant?.bondTransferFileName ?? "",
     bondTransferFileData: tenant?.bondTransferFileData ?? "",
   });
+  const [additionalTenants, setAdditionalTenants] = useState<ContactPerson[]>(tenant?.additionalTenants ?? []);
+  const updateAdditionalTenant = (idx: number, patch: Partial<ContactPerson>) =>
+    setAdditionalTenants((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  const addAdditionalTenant = () => setAdditionalTenants((rows) => [...rows, { name: "" }]);
+  const removeAdditionalTenant = (idx: number) => setAdditionalTenants((rows) => rows.filter((_, i) => i !== idx));
 
   const onStart = (v: string) => {
     setForm((s) => ({
@@ -2182,6 +2389,38 @@ export function TenantDialog({
               <Input value={form.permanentAddress} onChange={(e) => setForm({ ...form, permanentAddress: e.target.value })} />
             </Field>
           </div>
+          <div className="space-y-2 rounded-md border p-3 sm:col-span-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium">Additional / co-tenants</div>
+              <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={addAdditionalTenant}>
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+            {additionalTenants.map((t, idx) => (
+              <div key={idx} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+                <Field label="Name">
+                  <Input value={t.name} onChange={(e) => updateAdditionalTenant(idx, { name: e.target.value })} />
+                </Field>
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    value={t.email ?? ""}
+                    onChange={(e) => updateAdditionalTenant(idx, { email: e.target.value })}
+                  />
+                </Field>
+                <Field label="Phone">
+                  <Input
+                    inputMode="tel"
+                    value={t.phone ?? ""}
+                    onChange={(e) => updateAdditionalTenant(idx, { phone: e.target.value })}
+                  />
+                </Field>
+                <Button size="icon" variant="ghost" onClick={() => removeAdditionalTenant(idx)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
           <Field label="Lease agreement (PDF)">
             <Input type="file" accept="application/pdf,image/*" onChange={(e) => onLeaseFile(e.target.files?.[0])} />
             {form.leaseDocumentFileName && (
@@ -2234,6 +2473,9 @@ export function TenantDialog({
                 idProofFileData: form.idProofFileData || undefined,
                 bondTransferFileName: form.bondTransferFileName || undefined,
                 bondTransferFileData: form.bondTransferFileData || undefined,
+                additionalTenants: additionalTenants.filter((t) => t.name.trim()).length
+                  ? additionalTenants.filter((t) => t.name.trim())
+                  : undefined,
                 paidUpToDate: tenant?.paidUpToDate ?? defaultPaid,
               };
               if (tenant) updateTenant(tenant.id, payload);

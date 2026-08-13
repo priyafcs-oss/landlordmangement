@@ -71,6 +71,7 @@ export type Database = {
           id: string
           landlordProfile: Json
           leaseTemplate: Json | null
+          tenantInfoStatement: Json | null
           updated_at: string
         }
         Insert: {
@@ -78,6 +79,7 @@ export type Database = {
           id: string
           landlordProfile?: Json
           leaseTemplate?: Json | null
+          tenantInfoStatement?: Json | null
           updated_at?: string
         }
         Update: {
@@ -85,6 +87,7 @@ export type Database = {
           id?: string
           landlordProfile?: Json
           leaseTemplate?: Json | null
+          tenantInfoStatement?: Json | null
           updated_at?: string
         }
         Relationships: []
@@ -671,10 +674,12 @@ export type Database = {
       tenants: {
         Row: {
           additionalLeaseTerms: string | null
+          additionalTenants: Json | null
           bankAccountHolder: string | null
           bankReference: string | null
           bondAmount: number | null
           bondLodgementDate: string | null
+          bondPaidTo: string | null
           bondReceiptNumber: string | null
           bondTransferFileData: string | null
           bondTransferFileName: string | null
@@ -687,6 +692,7 @@ export type Database = {
           id: string
           idProofFileData: string | null
           idProofFileName: string | null
+          landlordConsentsToElectronicService: boolean | null
           lastRentIncreaseDate: string | null
           leaseDocumentFileData: string | null
           leaseDocumentFileName: string | null
@@ -703,13 +709,16 @@ export type Database = {
           propertyId: string
           rentAmount: number
           rentFrequency: string
+          tenantConsentsToElectronicService: boolean | null
         }
         Insert: {
           additionalLeaseTerms?: string | null
+          additionalTenants?: Json | null
           bankAccountHolder?: string | null
           bankReference?: string | null
           bondAmount?: number | null
           bondLodgementDate?: string | null
+          bondPaidTo?: string | null
           bondReceiptNumber?: string | null
           bondTransferFileData?: string | null
           bondTransferFileName?: string | null
@@ -722,6 +731,7 @@ export type Database = {
           id: string
           idProofFileData?: string | null
           idProofFileName?: string | null
+          landlordConsentsToElectronicService?: boolean | null
           lastRentIncreaseDate?: string | null
           leaseDocumentFileData?: string | null
           leaseDocumentFileName?: string | null
@@ -738,13 +748,16 @@ export type Database = {
           propertyId: string
           rentAmount?: number
           rentFrequency?: string
+          tenantConsentsToElectronicService?: boolean | null
         }
         Update: {
           additionalLeaseTerms?: string | null
+          additionalTenants?: Json | null
           bankAccountHolder?: string | null
           bankReference?: string | null
           bondAmount?: number | null
           bondLodgementDate?: string | null
+          bondPaidTo?: string | null
           bondReceiptNumber?: string | null
           bondTransferFileData?: string | null
           bondTransferFileName?: string | null
@@ -757,6 +770,7 @@ export type Database = {
           id?: string
           idProofFileData?: string | null
           idProofFileName?: string | null
+          landlordConsentsToElectronicService?: boolean | null
           lastRentIncreaseDate?: string | null
           leaseDocumentFileData?: string | null
           leaseDocumentFileName?: string | null
@@ -773,6 +787,7 @@ export type Database = {
           propertyId?: string
           rentAmount?: number
           rentFrequency?: string
+          tenantConsentsToElectronicService?: boolean | null
         }
         Relationships: []
       }
