@@ -41,6 +41,7 @@ export interface LedgerRow {
   isDue?: boolean;
   entryId?: string; // if from ledger entry (payment)
   canDelete?: boolean;
+  source?: LedgerEntry["source"];
 }
 
 /**
@@ -92,6 +93,7 @@ export function buildTenantLedger(
         balance: 0,
         entryId: e.id,
         canDelete: true,
+        source: e.source,
       });
     });
 

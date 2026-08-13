@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Trash2,
   Plus,
@@ -35,6 +36,8 @@ import {
   Download,
   FileDown,
   TrendingUp,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   buildTenantLedger,
@@ -44,6 +47,8 @@ import {
   addMonths,
   dailyRentRate,
   paidUpToDetails,
+  ausFinancialYear,
+  fyRange,
   type LedgerRow,
 } from "@/lib/calculations";
 import type { Tenant } from "@/lib/types";
@@ -250,6 +255,122 @@ The Landlord`;
   );
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Manual entry",
+  bank_feed: "Bank feed",
+  rent_statement: "Rent statement",
+};
+
+function formatMonthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+}
+
+function LedgerRowsTable({ rows, onDelete }: { rows: LedgerRow[]; onDelete: (id: string) => void }) {
+  return (
+    <div className="overflow-x-auto rounded border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted">
+          <tr>
+            <th className="px-3 py-2 text-left">Date</th>
+            <th className="px-3 py-2 text-left">Description</th>
+            <th className="px-3 py-2 text-right">Debit</th>
+            <th className="px-3 py-2 text-right">Credit</th>
+            <th className="px-3 py-2 text-right">Balance</th>
+            <th className="px-3 py-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={6} className="p-4 text-center text-muted-foreground">
+                No transactions in this period.
+              </td>
+            </tr>
+          )}
+          {rows.map((r) => (
+            <tr key={r.id} className={"border-t " + (r.isDue ? "bg-muted/30" : "")}>
+              <td className="px-3 py-2 text-xs">{r.date}</td>
+              <td className="px-3 py-2">
+                {r.description}
+                {r.source && r.source !== "manual" && (
+                  <Badge variant="outline" className="ml-2 text-[10px]">
+                    {SOURCE_LABELS[r.source] ?? r.source}
+                  </Badge>
+                )}
+              </td>
+              <td className="px-3 py-2 text-right">{r.debit ? fmtCurrency(r.debit) : ""}</td>
+              <td className="px-3 py-2 text-right text-emerald-600">
+                {r.credit ? fmtCurrency(r.credit) : ""}
+              </td>
+              <td
+                className={
+                  "px-3 py-2 text-right font-medium " +
+                  (r.balance > 0 ? "text-destructive" : "text-emerald-600")
+                }
+              >
+                {fmtCurrency(r.balance)}
+              </td>
+              <td className="px-3 py-2 text-right">
+                {r.canDelete && r.entryId && (
+                  <Button size="icon" variant="ghost" onClick={() => onDelete(r.entryId!)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LedgerGroupSection({
+  label,
+  rows,
+  onDelete,
+}: {
+  label: string;
+  rows: LedgerRow[];
+  onDelete: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const subtotal = rows.reduce(
+    (acc, r) => ({ debit: acc.debit + r.debit, credit: acc.credit + r.credit }),
+    { debit: 0, credit: 0 },
+  );
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
+      <CollapsibleTrigger asChild>
+        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
+          <span className="flex items-center gap-2 font-medium">
+            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {label}
+          </span>
+          <span className="flex gap-3 text-xs text-muted-foreground">
+            <span>Debit {fmtCurrency(subtotal.debit)}</span>
+            <span className="text-emerald-600">Credit {fmtCurrency(subtotal.credit)}</span>
+          </span>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t p-2">
+        <LedgerRowsTable rows={rows} onDelete={onDelete} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function LedgerTotalsFooter({ debit, credit }: { debit: number; credit: number }) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-4 rounded border bg-muted/50 p-3 text-sm font-medium">
+      <span>Total Debit: {fmtCurrency(debit)}</span>
+      <span className="text-emerald-600">Total Credit: {fmtCurrency(credit)}</span>
+      <span>Net: {fmtCurrency(debit - credit)}</span>
+    </div>
+  );
+}
+
 function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const { state, addLedger, deleteLedger } = useStore();
   const { rows, total, outstandingRent, outstandingInvoices } = buildTenantLedger(
@@ -259,10 +380,47 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   );
   const [amount, setAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayISO());
+  const [fy, setFy] = useState<string>("all");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("month");
 
   const nextDue = addDays(tenant.paidUpToDate, 1);
   const propertyAddress = state.properties.find((p) => p.id === tenant.propertyId)?.address ?? "";
   const paidUpTo = paidUpToDetails(tenant, state.ledger);
+
+  const fyOptions = useMemo(() => {
+    const years: string[] = [];
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear - 5; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
+    return years;
+  }, []);
+
+  // Filtering/grouping only affects what's displayed/exported — arrears Stats above always
+  // reflect the tenant's full unfiltered history.
+  const filteredRows = useMemo(() => {
+    if (fy === "all") return rows;
+    const { start, end } = fyRange(fy);
+    return rows.filter((r) => r.date >= start && r.date <= end);
+  }, [rows, fy]);
+
+  const totals = useMemo(
+    () =>
+      filteredRows.reduce(
+        (acc, r) => ({ debit: acc.debit + r.debit, credit: acc.credit + r.credit }),
+        { debit: 0, credit: 0 },
+      ),
+    [filteredRows],
+  );
+
+  const groups = useMemo(() => {
+    if (groupBy === "none") return null;
+    const map = new Map<string, LedgerRow[]>();
+    for (const r of filteredRows) {
+      const key = groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  }, [filteredRows, groupBy]);
 
   const postPayment = () => {
     const val = parseFloat(amount);
@@ -279,6 +437,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
       description: `Payment received (${daysCovered} days)`,
       debit: 0,
       credit: val,
+      source: "manual",
     });
     setAmount("");
     setPaymentDate(todayISO());
@@ -316,7 +475,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
             <LedgerExportButtons
               tenant={tenant}
               propertyAddress={propertyAddress}
-              rows={rows}
+              rows={filteredRows}
               total={total}
             />
           </div>
@@ -360,55 +519,59 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
           <Button onClick={postPayment}>Post Payment</Button>
         </div>
 
-
-        <div className="overflow-x-auto rounded border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted">
-              <tr>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Description</th>
-                <th className="px-3 py-2 text-right">Debit</th>
-                <th className="px-3 py-2 text-right">Credit</th>
-                <th className="px-3 py-2 text-right">Balance</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-4 text-center text-muted-foreground">
-                    No transactions yet.
-                  </td>
-                </tr>
-              )}
-              {rows.map((r) => (
-                <tr key={r.id} className={"border-t " + (r.isDue ? "bg-muted/30" : "")}>
-                  <td className="px-3 py-2 text-xs">{r.date}</td>
-                  <td className="px-3 py-2">{r.description}</td>
-                  <td className="px-3 py-2 text-right">{r.debit ? fmtCurrency(r.debit) : ""}</td>
-                  <td className="px-3 py-2 text-right text-emerald-600">
-                    {r.credit ? fmtCurrency(r.credit) : ""}
-                  </td>
-                  <td
-                    className={
-                      "px-3 py-2 text-right font-medium " +
-                      (r.balance > 0 ? "text-destructive" : "text-emerald-600")
-                    }
-                  >
-                    {fmtCurrency(r.balance)}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {r.canDelete && r.entryId && (
-                      <Button size="icon" variant="ghost" onClick={() => removePayment(r.entryId!)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Financial year</Label>
+            <Select value={fy} onValueChange={setFy}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                {fyOptions.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    FY {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Group by</Label>
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No grouping</SelectItem>
+                <SelectItem value="month">By month</SelectItem>
+                <SelectItem value="fy">By financial year</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+
+        {groupBy === "none" || !groups ? (
+          <LedgerRowsTable rows={filteredRows} onDelete={removePayment} />
+        ) : (
+          <div className="space-y-2">
+            {groups.length === 0 && (
+              <div className="rounded border p-4 text-center text-sm text-muted-foreground">
+                No transactions in this period.
+              </div>
+            )}
+            {groups.map(([key, groupRows]) => (
+              <LedgerGroupSection
+                key={key}
+                label={groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
+                rows={groupRows}
+                onDelete={removePayment}
+              />
+            ))}
+          </div>
+        )}
+
+        <LedgerTotalsFooter debit={totals.debit} credit={totals.credit} />
       </CardContent>
     </Card>
   );
@@ -434,6 +597,7 @@ function AdjustmentDialog({ tenant }: { tenant: Tenant }) {
       debit: kind === "Debit" ? val : 0,
       credit: kind === "Credit" ? val : 0,
       manual: true,
+      source: "manual",
     });
     setOpen(false);
     setAmount("");
@@ -554,6 +718,22 @@ function TemplateModal({
   );
 }
 
+/**
+ * jsPDF's built-in "helvetica" font only supports WinAnsi encoding. Intl.NumberFormat (used by
+ * fmtCurrency) renders negative amounts with a Unicode minus sign (U+2212) rather than an ASCII
+ * hyphen, which that font has no glyph for — it renders as garbled/garbage characters. Normalize
+ * before every doc.text() call rather than changing fmtCurrency itself, which is correct
+ * everywhere else it's used (real HTML, where the browser renders Unicode fine).
+ */
+function pdfSafe(s: string): string {
+  return s.replace(/−/g, "-").replace(/ /g, " ");
+}
+
+function sourceTag(r: LedgerRow): string {
+  if (!r.source || r.source === "manual") return "";
+  return ` [${SOURCE_LABELS[r.source] ?? r.source}]`;
+}
+
 function LedgerExportButtons({
   tenant,
   propertyAddress,
@@ -565,13 +745,17 @@ function LedgerExportButtons({
   rows: LedgerRow[];
   total: number;
 }) {
-  const header = ["Date", "Description", "Debit", "Credit", "Balance"];
+  const header = ["Date", "Description", "Debit", "Credit", "Balance", "Source"];
 
   const toCsv = () => {
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
     return [
       header.map(esc).join(","),
-      ...rows.map((r) => [r.date, r.description, r.debit, r.credit, r.balance].map(esc).join(",")),
+      ...rows.map((r) =>
+        [r.date, r.description, r.debit, r.credit, r.balance, r.source ? SOURCE_LABELS[r.source] ?? r.source : ""]
+          .map(esc)
+          .join(","),
+      ),
     ].join("\n");
   };
 
@@ -595,14 +779,16 @@ function LedgerExportButtons({
 
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(`Tenant Statement - ${tenant.name}`, marginX, y);
+    doc.text(pdfSafe(`Tenant Statement - ${tenant.name}`), marginX, y);
     y += 7;
 
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(85);
     doc.text(
-      `${propertyAddress} - Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} - Paid up to ${tenant.paidUpToDate} - Generated ${todayISO()}`,
+      pdfSafe(
+        `${propertyAddress} - Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} - Paid up to ${tenant.paidUpToDate} - Generated ${todayISO()}`,
+      ),
       marginX,
       y,
     );
@@ -627,17 +813,21 @@ function LedgerExportButtons({
     };
 
     drawHeader();
+    let sumDebit = 0;
+    let sumCredit = 0;
     rows.forEach((r) => {
+      sumDebit += r.debit;
+      sumCredit += r.credit;
       if (y > pageHeight - 20) {
         doc.addPage();
         y = 18;
         drawHeader();
       }
       doc.text(r.date, col.date, y);
-      doc.text(r.description.slice(0, 42), col.desc, y);
-      doc.text(r.debit ? fmtCurrency(r.debit) : "", col.debit, y);
-      doc.text(r.credit ? fmtCurrency(r.credit) : "", col.credit, y);
-      doc.text(fmtCurrency(r.balance), col.balance, y);
+      doc.text(pdfSafe((r.description + sourceTag(r)).slice(0, 48)), col.desc, y);
+      doc.text(r.debit ? pdfSafe(fmtCurrency(r.debit)) : "", col.debit, y);
+      doc.text(r.credit ? pdfSafe(fmtCurrency(r.credit)) : "", col.credit, y);
+      doc.text(pdfSafe(fmtCurrency(r.balance)), col.balance, y);
       y += 6;
     });
 
@@ -647,21 +837,29 @@ function LedgerExportButtons({
     y += 6;
     doc.setFont("helvetica", "bold");
     doc.setTextColor(17);
+    doc.text("Totals", col.desc, y);
+    doc.text(pdfSafe(fmtCurrency(sumDebit)), col.debit, y);
+    doc.text(pdfSafe(fmtCurrency(sumCredit)), col.credit, y);
+    y += 7;
     doc.text("Total outstanding", col.desc, y);
-    doc.text(fmtCurrency(total), col.balance, y);
+    doc.text(pdfSafe(fmtCurrency(total)), col.balance, y);
 
     doc.save(`ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.pdf`);
     toast.success("Ledger PDF downloaded");
   };
 
   const emailLedger = () => {
-    const lines = rows
-      .map((r) => `${r.date} | ${r.description} | Dr ${r.debit} | Cr ${r.credit} | Bal ${r.balance}`)
-      .join("\n");
-    const body = `Dear ${tenant.name},\n\nPlease find your rent ledger for ${propertyAddress} below.\n\n${lines}\n\nTotal outstanding: ${fmtCurrency(total)}\nPaid up to: ${tenant.paidUpToDate}\n\nKind regards,\nThe Landlord`;
-    window.location.href = `mailto:${tenant.email ?? ""}?subject=${encodeURIComponent(
-      `Rent ledger — ${propertyAddress}`,
-    )}&body=${encodeURIComponent(body)}`;
+    // No email link (mailto: or a provider's compose URL) can attach a file — that's a browser
+    // security restriction, not something any web app can work around. Best available flow:
+    // download the PDF so it's ready in Downloads, and open Gmail's web compose (rather than
+    // mailto:, which opens whatever the OS has registered — Outlook here) prefilled with a note
+    // to attach it.
+    downloadPdf();
+    const body = `Dear ${tenant.name},\n\nPlease find your rent ledger statement for ${propertyAddress} attached to this email — I've just downloaded it as a PDF; please attach the file (from your Downloads) before sending.\n\nTotal outstanding: ${fmtCurrency(total)}\nPaid up to: ${tenant.paidUpToDate}\n\nKind regards,\nThe Landlord`;
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+      tenant.email ?? "",
+    )}&su=${encodeURIComponent(`Rent ledger — ${propertyAddress}`)}&body=${encodeURIComponent(body)}`;
+    window.open(gmailUrl, "_blank");
   };
 
   return (
@@ -724,6 +922,7 @@ function BankFeedDialog() {
       description: `Bank feed match (${daysCovered} days)`,
       debit: 0,
       credit: m.amount,
+      source: "bank_feed",
     });
 
     setMatches((ms) => ms.filter((x) => x !== m));

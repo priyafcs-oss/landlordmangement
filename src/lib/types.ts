@@ -96,6 +96,8 @@ export interface LedgerEntry {
   linkedInvoiceId?: string;
   /** Days that this adjustment/payment shifts the paid-up-to date. Used to reverse cleanly on undo. */
   daysShift?: number;
+  /** How this entry was posted — unset for historical rows predating this field. */
+  source?: "manual" | "bank_feed" | "rent_statement";
 }
 
 export interface TenantInvoice {

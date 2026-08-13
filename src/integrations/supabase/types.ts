@@ -263,6 +263,7 @@ export type Database = {
           linkedInvoiceId: string | null
           manual: boolean | null
           newPaidUpToDate: string | null
+          source: string | null
           tenantId: string
           type: string
         }
@@ -277,6 +278,7 @@ export type Database = {
           linkedInvoiceId?: string | null
           manual?: boolean | null
           newPaidUpToDate?: string | null
+          source?: string | null
           tenantId: string
           type?: string
         }
@@ -291,6 +293,7 @@ export type Database = {
           linkedInvoiceId?: string | null
           manual?: boolean | null
           newPaidUpToDate?: string | null
+          source?: string | null
           tenantId?: string
           type?: string
         }

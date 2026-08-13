@@ -271,6 +271,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         description: tx.description,
         debit: 0,
         credit: tx.amount,
+        source: "rent_statement",
       });
     });
     markProposalApplied(proposal.id);
