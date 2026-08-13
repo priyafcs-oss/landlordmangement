@@ -54,6 +54,13 @@ export const LEASE_DATA_FIELDS: { key: string; label: string; group: "Landlord" 
   { key: "additionalLeaseTerms", label: "Additional terms", group: "Tenant" },
 ];
 
+/** This app stores dates as ISO (yyyy-mm-dd); printed tenancy agreements conventionally expect dd/mm/yyyy. */
+export function toDDMMYYYY(iso: string | undefined): string | undefined {
+  if (!iso) return iso;
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
 /** This app stores uploaded files as full data URLs (FileReader.readAsDataURL output). */
 function base64ToBytes(dataUrl: string): Uint8Array {
   const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
@@ -110,6 +117,19 @@ export async function fillLeaseTemplate(
   for (const [ourKey, mapping] of Object.entries(template.mapping)) {
     const rawValue = values[ourKey];
     if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+
+    if (mapping.isChoiceGroup) {
+      const key = typeof rawValue === "boolean" ? (rawValue ? "true" : "false") : rawValue;
+      const targetFieldName = mapping.valueMap?.[key];
+      if (!targetFieldName) continue; // this value has no checkbox assigned in the group — leave all unchecked
+      try {
+        const targetField = form.getField(targetFieldName);
+        if (targetField instanceof PDFCheckBox) targetField.check();
+      } catch (e) {
+        console.warn(`[leaseTemplate] failed to check "${targetFieldName}" (choice group for "${ourKey}")`, e);
+      }
+      continue;
+    }
 
     let field;
     try {

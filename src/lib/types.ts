@@ -275,7 +275,16 @@ export interface LeaseTemplateConfig {
   fileData: string;
   uploadedAt: string;
   fields: LeaseTemplateField[];
-  mapping: Record<string, { pdfField: string; valueMap?: Record<string, string> }>;
+  /**
+   * Most data points map onto a single PDF field (optionally translating our value to that
+   * field's real option string via `valueMap`). Some official forms (e.g. NSW's standard
+   * tenancy agreement) represent a single logical choice — lease term length, rent frequency,
+   * smoke alarm type — as several independent checkboxes rather than one field. For those,
+   * `isChoiceGroup: true` repurposes `valueMap` to point each of our values at the *name* of the
+   * checkbox to tick for that value (all other checkboxes in the group are simply left
+   * unchecked, since filling always starts from the pristine uploaded template).
+   */
+  mapping: Record<string, { pdfField: string; valueMap?: Record<string, string>; isChoiceGroup?: boolean }>;
 }
 
 export type BillType =

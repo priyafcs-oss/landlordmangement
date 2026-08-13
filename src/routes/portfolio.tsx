@@ -58,7 +58,7 @@ import type {
   RentChange,
 } from "@/lib/types";
 import { toast } from "sonner";
-import { fillLeaseTemplate } from "@/lib/leaseTemplate";
+import { fillLeaseTemplate, toDDMMYYYY } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { FileSignature } from "lucide-react";
 
@@ -1131,8 +1131,8 @@ function LeaseAgreementWizard({
     rentAmount: leaseForm.rentAmount || undefined,
     rentFrequency: leaseForm.rentFrequency,
     bondAmount: leaseForm.bondAmount || undefined,
-    leaseStart: leaseForm.leaseStart || undefined,
-    leaseExpiry: leaseForm.leaseExpiry || undefined,
+    leaseStart: toDDMMYYYY(leaseForm.leaseStart) || undefined,
+    leaseExpiry: toDDMMYYYY(leaseForm.leaseExpiry) || undefined,
     leaseDuration: leaseForm.leaseDuration,
     petsAllowed: leaseForm.petsAllowed,
     petsDescription: leaseForm.petsAllowed ? leaseForm.petsDescription || undefined : undefined,

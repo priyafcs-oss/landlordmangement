@@ -167,6 +167,19 @@ function LeaseTemplateSettings() {
     });
   };
 
+  const toggleChoiceGroup = (ourKey: string) => {
+    setMapping((m) => {
+      const current = m[ourKey];
+      const turningOn = !current?.isChoiceGroup;
+      return {
+        ...m,
+        [ourKey]: turningOn
+          ? { pdfField: "", valueMap: current?.valueMap ?? {}, isChoiceGroup: true }
+          : { pdfField: "", valueMap: current?.valueMap ?? {} },
+      };
+    });
+  };
+
   const setValueMapEntry = (ourKey: string, fromValue: string, toOption: string) => {
     setMapping((m) => {
       const current = m[ourKey];
@@ -192,6 +205,7 @@ function LeaseTemplateSettings() {
   };
 
   const fieldByName = (name: string) => template?.fields.find((f) => f.name === name);
+  const checkboxFieldNames = template?.fields.filter((f) => f.type === "checkbox").map((f) => f.name) ?? [];
 
   return (
     <Card>
@@ -267,35 +281,59 @@ function LeaseTemplateSettings() {
                   <div className="text-xs font-medium text-muted-foreground">{group}</div>
                   {LEASE_DATA_FIELDS.filter((f) => f.group === group).map((f) => {
                     const rowMapping = mapping[f.key];
-                    const targetField = rowMapping ? fieldByName(rowMapping.pdfField) : undefined;
+                    const isChoice = rowMapping?.isChoiceGroup ?? false;
+                    const targetField = !isChoice && rowMapping ? fieldByName(rowMapping.pdfField) : undefined;
                     return (
                       <div key={f.key} className="rounded-md border p-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="min-w-[220px] text-xs">{f.label}</span>
-                          <Select
-                            value={rowMapping?.pdfField ?? "__none__"}
-                            onValueChange={(v) => setFieldMapping(f.key, v)}
-                          >
-                            <SelectTrigger className="h-8 w-[260px] text-xs">
-                              <SelectValue placeholder="Not mapped" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">Not on this form</SelectItem>
-                              {template.fields.map((pf) => (
-                                <SelectItem key={pf.name} value={pf.name}>
-                                  {pf.name} ({pf.type})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {!isChoice && (
+                            <Select
+                              value={rowMapping?.pdfField || "__none__"}
+                              onValueChange={(v) => setFieldMapping(f.key, v)}
+                            >
+                              <SelectTrigger className="h-8 w-[260px] text-xs">
+                                <SelectValue placeholder="Not mapped" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">Not on this form</SelectItem>
+                                {template.fields.map((pf) => (
+                                  <SelectItem key={pf.name} value={pf.name}>
+                                    {pf.name} ({pf.type})
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                          {checkboxFieldNames.length > 0 && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px] text-muted-foreground"
+                              onClick={() => toggleChoiceGroup(f.key)}
+                            >
+                              {isChoice ? "Use a single field instead" : "This is several checkboxes, not one field"}
+                            </Button>
+                          )}
                         </div>
-                        {targetField && (targetField.type === "radio" || targetField.type === "dropdown") && (
-                          <ValueMapEditor
-                            targetField={targetField}
+                        {isChoice ? (
+                          <ChoiceGroupEditor
+                            checkboxFieldNames={checkboxFieldNames}
                             valueMap={rowMapping?.valueMap ?? {}}
                             onSet={(from, to) => setValueMapEntry(f.key, from, to)}
                             onRemove={(from) => removeValueMapEntry(f.key, from)}
                           />
+                        ) : (
+                          targetField &&
+                          (targetField.type === "radio" || targetField.type === "dropdown") && (
+                            <ValueMapEditor
+                              targetField={targetField}
+                              valueMap={rowMapping?.valueMap ?? {}}
+                              onSet={(from, to) => setValueMapEntry(f.key, from, to)}
+                              onRemove={(from) => removeValueMapEntry(f.key, from)}
+                            />
+                          )
                         )}
                       </div>
                     );
@@ -376,6 +414,79 @@ function ValueMapEditor({
           </SelectTrigger>
           <SelectContent>
             {options.map((o) => (
+              <SelectItem key={o} value={o}>
+                {o}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
+function ChoiceGroupEditor({
+  checkboxFieldNames,
+  valueMap,
+  onSet,
+  onRemove,
+}: {
+  checkboxFieldNames: string[];
+  valueMap: Record<string, string>;
+  onSet: (from: string, to: string) => void;
+  onRemove: (from: string) => void;
+}) {
+  const [newFrom, setNewFrom] = useState("");
+
+  return (
+    <div className="mt-2 space-y-1 rounded bg-muted/30 p-2">
+      <div className="text-[11px] text-muted-foreground">
+        Map our value → the checkbox to tick for it (e.g. "12 Months" → "Check Box 3.2"). A value
+        left unmapped ticks nothing.
+      </div>
+      {Object.entries(valueMap).map(([from, to]) => (
+        <div key={from} className="flex items-center gap-2 text-xs">
+          <span className="w-28 truncate font-mono">{from}</span>
+          <span>→</span>
+          <Select value={to} onValueChange={(v) => onSet(from, v)}>
+            <SelectTrigger className="h-7 w-[220px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {checkboxFieldNames.map((o) => (
+                <SelectItem key={o} value={o}>
+                  {o}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onRemove(from)}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder="e.g. 12 Months, true, Hardwired"
+          value={newFrom}
+          onChange={(e) => setNewFrom(e.target.value)}
+          className="h-7 w-32 text-xs"
+        />
+        <span className="text-xs">→</span>
+        <Select
+          value=""
+          onValueChange={(v) => {
+            if (newFrom) {
+              onSet(newFrom, v);
+              setNewFrom("");
+            }
+          }}
+        >
+          <SelectTrigger className="h-7 w-[220px] text-xs">
+            <SelectValue placeholder="pick checkbox" />
+          </SelectTrigger>
+          <SelectContent>
+            {checkboxFieldNames.map((o) => (
               <SelectItem key={o} value={o}>
                 {o}
               </SelectItem>
