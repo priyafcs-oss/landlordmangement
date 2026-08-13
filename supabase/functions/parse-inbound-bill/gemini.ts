@@ -68,10 +68,14 @@ export async function callGeminiJSON<T>(
   throw new Error(`Gemini request failed on all model candidates: ${lastError}`);
 }
 
-/** Builds the Gemini request parts for a document (subject/from/body text, plus an optional PDF attachment). */
+/**
+ * Builds the Gemini request parts for a document (subject/from/body text, plus an optional
+ * attachment — PDF or image; Gemini reads both natively as inlineData). `attachmentMimeType`
+ * defaults to "application/pdf" for backward compatibility with callers that only ever sent PDFs.
+ */
 export function buildDocumentParts(
   promptInstructions: string,
-  input: { subject: string; fromEmail: string; textBody?: string; pdfBase64?: string },
+  input: { subject: string; fromEmail: string; textBody?: string; pdfBase64?: string; attachmentMimeType?: string },
 ): Record<string, unknown>[] {
   const parts: Record<string, unknown>[] = [
     {
@@ -80,11 +84,13 @@ export function buildDocumentParts(
 Subject: ${input.subject}
 From: ${input.fromEmail}
 Body:
-${input.textBody ?? "(see attached PDF)"}`,
+${input.textBody ?? "(see attached file)"}`,
     },
   ];
   if (input.pdfBase64) {
-    parts.push({ inlineData: { mimeType: "application/pdf", data: input.pdfBase64 } });
+    parts.push({
+      inlineData: { mimeType: input.attachmentMimeType ?? "application/pdf", data: input.pdfBase64 },
+    });
   }
   return parts;
 }

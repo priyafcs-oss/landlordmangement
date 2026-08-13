@@ -39,6 +39,7 @@ import {
   Video as VideoIcon,
   Mail,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type {
@@ -52,6 +53,7 @@ import type {
   AiIntakeProposal,
   TenantLeaseProposalPayload,
   RentLedgerProposalPayload,
+  RentChange,
 } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -1108,6 +1110,7 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
           </div>
         </div>
         <div className="flex gap-1">
+          <IncreaseRentDialog tenant={tenant} />
           <RenewLeaseDialog tenant={tenant} />
           <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
             <Button size="icon" variant="ghost">
@@ -1169,6 +1172,87 @@ function computeLeaseEnd(start: string, duration: LeaseDuration | ""): string {
   d.setMonth(d.getMonth() + months);
   d.setDate(d.getDate() - 1);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Shared 12-month rent-increase compliance check (most Australian jurisdictions restrict rent
+ * increases to once every 12 months). Used by both the tenant edit form and the dedicated
+ * "Increase Rent" action so the rule can't drift between the two entry points.
+ */
+function checkRentIncreaseCompliance(tenant: Tenant, newRent: number, rentChanges: RentChange[]): boolean {
+  if (newRent === tenant.rentAmount) return true;
+  const last = rentChanges
+    .filter((r) => r.tenantId === tenant.id)
+    .sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
+  const baseDate = last?.changeDate ?? tenant.lastRentIncreaseDate ?? tenant.leaseStart ?? "";
+  if (!baseDate) return true;
+  const daysSince = Math.round((Date.now() - new Date(baseDate).getTime()) / 86400000);
+  if (daysSince < 365) {
+    return confirm(
+      "Compliance Notice: Rent increases are legally restricted to once every 12 months in most Australian jurisdictions. Continue anyway?",
+    );
+  }
+  return true;
+}
+
+/**
+ * A standalone rent bump — distinct from lease renewal, since periodic/rolling tenancies get
+ * rent increases without a formal renewal in most Australian jurisdictions.
+ */
+function IncreaseRentDialog({ tenant }: { tenant: Tenant }) {
+  const { state, updateTenant } = useStore();
+  const [open, setOpen] = useState(false);
+  const [newRent, setNewRent] = useState(tenant.rentAmount.toString());
+  const [effectiveDate, setEffectiveDate] = useState(todayISO());
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setNewRent(tenant.rentAmount.toString());
+          setEffectiveDate(todayISO());
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="icon" variant="ghost" title="Increase rent">
+          <TrendingUp className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Increase rent — {tenant.name}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Current rent">
+            <Input value={`${fmtCurrency(tenant.rentAmount)}/${tenant.rentFrequency}`} readOnly className="bg-muted" />
+          </Field>
+          <Field label="New rent (AUD)">
+            <Input type="number" value={newRent} onChange={(e) => setNewRent(e.target.value)} />
+          </Field>
+          <Field label="Effective date">
+            <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              const rent = parseFloat(newRent) || 0;
+              if (rent <= tenant.rentAmount) return toast.error("New rent must be higher than the current rent");
+              if (!checkRentIncreaseCompliance(tenant, rent, state.rentChanges)) return;
+              updateTenant(tenant.id, { rentAmount: rent, lastRentIncreaseDate: effectiveDate });
+              setOpen(false);
+              toast.success("Rent increased. Previous rent recorded in history.");
+            }}
+          >
+            Confirm Increase
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
@@ -1361,21 +1445,7 @@ export function TenantDialog({
 
   const check12Months = () => {
     if (!tenant) return true;
-    const oldRent = tenant.rentAmount;
-    const newRent = parseFloat(form.rentAmount);
-    if (oldRent === newRent) return true;
-    const last = state.rentChanges
-      .filter((r) => r.tenantId === tenant.id)
-      .sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
-    const baseDate = last?.changeDate ?? tenant.lastRentIncreaseDate ?? tenant.leaseStart ?? "";
-    if (!baseDate) return true;
-    const daysSince = Math.round((Date.now() - new Date(baseDate).getTime()) / 86400000);
-    if (daysSince < 365) {
-      return confirm(
-        "Compliance Notice: Rent increases are legally restricted to once every 12 months in most Australian jurisdictions. Continue anyway?",
-      );
-    }
-    return true;
+    return checkRentIncreaseCompliance(tenant, parseFloat(form.rentAmount), state.rentChanges);
   };
 
   return (

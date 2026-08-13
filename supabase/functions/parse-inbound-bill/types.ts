@@ -2,8 +2,11 @@
 export interface NormalizedBillInput {
   fromEmail: string;
   subject: string;
+  /** Base64 attachment content — despite the name, may be a PDF or an image (see attachmentMimeType). */
   pdfBase64?: string;
   pdfFileName?: string;
+  /** MIME type of pdfBase64, e.g. "application/pdf" or "image/png". Defaults to "application/pdf" if unset. */
+  attachmentMimeType?: string;
   textBody?: string;
 }
 

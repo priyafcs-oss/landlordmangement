@@ -3,10 +3,12 @@ import { matchProperty } from "./property-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedLedgerFields, ProposalParseResult } from "./types.ts";
 
-const LEDGER_PROMPT = `You are extracting rent payment transactions from a managing agent's rent statement / ledger / remittance advice email for an Australian rental property.
+const LEDGER_PROMPT = `You are extracting rent payment transactions from a rent statement/ledger for an Australian rental property. This may come as a narrative remittance advice from a managing agent, OR as a spreadsheet-style weekly table a landlord keeps themselves (columns like Week Start Date, Week End Date, Rent Due, Rent Paid, Paid Date, Balance, Status). Handle both shapes.
 Extract the fields defined in the response schema as strict JSON.
-- transactions is every individual rent payment line in the statement: date (YYYY-MM-DD), amount (the rent payment amount, positive number), and a short description (e.g. "Rent payment w/e 12/07/2026").
-- Do not include agent fees, deductions, or the net-remittance total as a transaction — only the tenant's rent payments themselves.
+- transactions is every individual rent payment actually recorded: date (YYYY-MM-DD), amount (the rent payment amount, positive number), and a short description.
+- If the source is a weekly table: emit ONE transaction per row where "Rent Paid" (or equivalent) has an actual non-blank, non-zero amount — use that row's Week Start Date (or Paid Date if present) as the transaction date. SKIP rows where the paid amount is blank/zero, even if a "Status" column says "paid" — a blank amount is not a confirmed transaction, regardless of what an adjacent status label claims.
+- A single row's paid amount may be larger than one week's normal rent (a lump-sum catch-up payment covering several weeks, e.g. $5000 against a $900/week rent) — extract it as ONE transaction for that row's date and its full amount; do not try to split it across multiple weeks.
+- Do not include agent fees, deductions, or a net-remittance total as a transaction — only the tenant's actual rent payments.
 - periodStart, periodEnd should be the statement's covering period in YYYY-MM-DD, or null if not stated.
 - tenantName should be the tenant's name if stated, else null.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;

@@ -65,15 +65,27 @@ async function fetchAttachmentBase64(emailId: string, attachmentId: string, apiK
   return btoa(binary);
 }
 
+/** Gemini reads PDFs and common image formats natively as inlineData — anything else (xlsx, docx, csv, ...) is skipped. */
+function isSupportedAttachment(contentType: string): boolean {
+  return contentType === "application/pdf" || contentType.startsWith("image/");
+}
+
 async function normalize(email: ResendReceivedEmail, apiKey: string): Promise<NormalizedBillInput> {
-  const pdfMeta = email.attachments?.find((a) => a.content_type === "application/pdf");
-  const pdfBase64 = pdfMeta ? await fetchAttachmentBase64(email.id, pdfMeta.id, apiKey) : undefined;
+  const attachmentMeta = email.attachments?.find((a) => isSupportedAttachment(a.content_type));
+  const unsupported = email.attachments?.filter((a) => !isSupportedAttachment(a.content_type)) ?? [];
+  if (unsupported.length > 0) {
+    console.warn(
+      `[parse-inbound-bill] skipping unsupported attachment type(s): ${unsupported.map((a) => `${a.filename} (${a.content_type})`).join(", ")} — only PDF and image attachments can be read`,
+    );
+  }
+  const pdfBase64 = attachmentMeta ? await fetchAttachmentBase64(email.id, attachmentMeta.id, apiKey) : undefined;
   return {
     fromEmail: email.from,
     subject: email.subject,
     textBody: email.text ?? undefined,
     pdfBase64,
-    pdfFileName: pdfMeta?.filename,
+    pdfFileName: attachmentMeta?.filename,
+    attachmentMimeType: attachmentMeta?.content_type,
   };
 }
 
@@ -122,6 +134,18 @@ Deno.serve(async (req) => {
   try {
     const email = await fetchReceivedEmail(emailId, apiKey);
     const input = await normalize(email, apiKey);
+
+    if (!input.pdfBase64 && !input.textBody?.trim()) {
+      const attachmentSummary = email.attachments?.length
+        ? email.attachments.map((a) => `${a.filename} (${a.content_type})`).join(", ")
+        : "none";
+      const error = `No readable content: no PDF/image attachment and no email body text. Attachments received: ${attachmentSummary}`;
+      console.error(`[parse-inbound-bill] ${error}`);
+      return new Response(JSON.stringify({ error }), {
+        status: 422,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
