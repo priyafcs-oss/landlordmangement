@@ -88,6 +88,8 @@ interface StoreCtx {
       newLeaseDocumentFileData?: string;
     },
   ) => void;
+  /** Ends a fixed-term lease (archiving it to history) and continues the tenancy periodically on the same terms. */
+  convertToPeriodic: (tenantId: string) => void;
 
   addLedger: (e: Omit<LedgerEntry, "id">) => void;
   deleteLedger: (id: string) => void;
@@ -365,6 +367,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           s.ledger,
         );
         return { ...s, leaseHistory: [...s.leaseHistory, history], rentChanges, tenants };
+      }),
+
+    convertToPeriodic: (tenantId) =>
+      set((s) => {
+        const prev = s.tenants.find((t) => t.id === tenantId);
+        if (!prev) return s;
+        const originalStart =
+          s.leaseHistory.find((h) => h.tenantId === tenantId)?.originalStartDate ?? prev.leaseStart ?? "";
+        const history: LeaseHistory = {
+          id: uid("lh"),
+          tenantId,
+          originalStartDate: originalStart,
+          pastStartDate: prev.leaseStart ?? "",
+          pastEndDate: prev.leaseExpiry ?? "",
+          pastRent: prev.rentAmount,
+          pastFrequency: prev.rentFrequency,
+          leaseDocumentFileName: prev.leaseDocumentFileName,
+          leaseDocumentFileData: prev.leaseDocumentFileData,
+        };
+        void upsertRow(TABLES.leaseHistory, history as unknown as Record<string, unknown>);
+        // leaseStart and rentAmount are left untouched — the tenancy continues uninterrupted on
+        // the same terms, it just no longer has a fixed end date.
+        void updateRow(TABLES.tenants, tenantId, { leaseDuration: "Periodic", leaseExpiry: null });
+        const tenants = s.tenants.map((t) =>
+          t.id === tenantId ? { ...t, leaseDuration: "Periodic" as const, leaseExpiry: undefined } : t,
+        );
+        return { ...s, leaseHistory: [...s.leaseHistory, history], tenants };
       }),
 
     addLedger: (e) =>

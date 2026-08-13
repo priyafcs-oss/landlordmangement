@@ -150,9 +150,20 @@ export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[]): PaidUpT
   const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
   const start = tenant.leaseStart ?? tenant.paidUpToDate;
   if (rate <= 0) return { date: start, extra: 0 };
+  // Rent Payment and Adjustment/Manual credits all advance the paid-up date; an Adjustment
+  // Debit (e.g. a clawed-back shortfall) pulls it back — previously only "Rent Payment" counted,
+  // so adjustments silently had no effect on this date at all.
   const totalPaid = entries
-    .filter((e) => e.tenantId === tenant.id && e.type === "Rent Payment")
-    .reduce((s, e) => s + e.credit, 0);
+    .filter((e) => e.tenantId === tenant.id)
+    .reduce((s, e) => {
+      if (e.type === "Rent Payment" || e.type === "Adjustment Credit" || e.type === "Manual Credit") {
+        return s + e.credit;
+      }
+      if (e.type === "Adjustment Debit") {
+        return s - e.debit;
+      }
+      return s;
+    }, 0);
 
   const EPS = 1e-8;
   const rawDaysCovered = totalPaid / rate;
@@ -165,7 +176,10 @@ export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[]): PaidUpT
   }
 
   const extra = Math.round(Math.max(0, leftover) * 100) / 100;
-  return { date: addDays(start, Math.max(0, fullDays - 1)), extra };
+  // Floor at "nothing paid" (start - 1 day, matching the tenant's initial default), not at
+  // `start` itself — the previous Math.max(0, ...) clamp meant zero payment still advanced the
+  // paid-up date by one free day the moment any ledger entry triggered a recompute.
+  return { date: addDays(start, Math.max(-1, fullDays - 1)), extra };
 }
 
 export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[]): string {

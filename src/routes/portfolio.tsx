@@ -40,6 +40,8 @@ import {
   Mail,
   Sparkles,
   TrendingUp,
+  TriangleAlert,
+  IdCard,
 } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type {
@@ -230,6 +232,8 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
               leaseExpiry: payload.leaseExpiry,
               leaseDuration: payload.leaseDuration,
               bondAmount: payload.bondAmount,
+              leaseDocumentFileName: proposal.sourceFileName,
+              leaseDocumentFileData: proposal.sourceFileData,
             }}
             onSaved={() => markProposalApplied(proposal.id)}
           >
@@ -1072,11 +1076,13 @@ function BillRow({ bill, onPaid, onDelete }: { bill: PropertyBill; onPaid: () =>
 
 
 function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void }) {
-  const { state } = useStore();
+  const { state, convertToPeriodic } = useStore();
   const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
   const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
   const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
   const [showHist, setShowHist] = useState(false);
+  const isExpiredFixedTerm =
+    !!tenant.leaseExpiry && tenant.leaseExpiry < todayISO() && tenant.leaseDuration !== "Periodic";
 
   return (
     <div className="mb-2 rounded border p-3">
@@ -1106,6 +1112,20 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
                 </Badge>
               </a>
             )}
+            {tenant.idProofFileName && tenant.idProofFileData && (
+              <a href={tenant.idProofFileData} download={tenant.idProofFileName}>
+                <Badge variant="outline" className="gap-1">
+                  <IdCard className="h-3 w-3" /> ID Proof
+                </Badge>
+              </a>
+            )}
+            {tenant.bondTransferFileName && tenant.bondTransferFileData && (
+              <a href={tenant.bondTransferFileData} download={tenant.bondTransferFileName}>
+                <Badge variant="outline" className="gap-1">
+                  <FileText className="h-3 w-3" /> Bond Transfer
+                </Badge>
+              </a>
+            )}
             {!tenant.leaseExpiry && <Badge variant="outline">Periodic</Badge>}
           </div>
         </div>
@@ -1122,6 +1142,30 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
           </Button>
         </div>
       </div>
+      {isExpiredFixedTerm && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
+          <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+          <span>Fixed-term lease ended {tenant.leaseExpiry}.</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-xs"
+            onClick={() => {
+              if (
+                confirm(
+                  `Continue ${tenant.name} on a periodic (rolling) tenancy at the same rent? The fixed term will be archived to lease history — you can still renew into a new fixed term later.`,
+                )
+              ) {
+                convertToPeriodic(tenant.id);
+                toast.success("Converted to periodic tenancy. Fixed-term lease archived to history.");
+              }
+            }}
+          >
+            Convert to Periodic
+          </Button>
+          <span className="text-muted-foreground">or use Renew Lease above for a new fixed term.</span>
+        </div>
+      )}
       {(history.length > 0 || rentChanges.length > 0) && (
         <div className="mt-2">
           <Button
@@ -1372,6 +1416,9 @@ export interface TenantInitialValues {
   leaseExpiry?: string;
   leaseDuration?: LeaseDuration;
   bondAmount?: number;
+  /** The original lease PDF, carried over so it doesn't have to be re-uploaded after AI extraction. */
+  leaseDocumentFileName?: string;
+  leaseDocumentFileData?: string;
 }
 
 export function TenantDialog({
@@ -1411,8 +1458,8 @@ export function TenantDialog({
     bondAmount: tenant?.bondAmount?.toString() ?? initialValues?.bondAmount?.toString() ?? "",
     bondLodgementDate: tenant?.bondLodgementDate ?? "",
     bondReceiptNumber: tenant?.bondReceiptNumber ?? "",
-    leaseDocumentFileName: tenant?.leaseDocumentFileName ?? "",
-    leaseDocumentFileData: tenant?.leaseDocumentFileData ?? "",
+    leaseDocumentFileName: tenant?.leaseDocumentFileName ?? initialValues?.leaseDocumentFileName ?? "",
+    leaseDocumentFileData: tenant?.leaseDocumentFileData ?? initialValues?.leaseDocumentFileData ?? "",
     idProofFileName: tenant?.idProofFileName ?? "",
     idProofFileData: tenant?.idProofFileData ?? "",
     bondTransferFileName: tenant?.bondTransferFileName ?? "",
