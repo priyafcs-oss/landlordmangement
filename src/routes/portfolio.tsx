@@ -58,6 +58,9 @@ import type {
   RentChange,
 } from "@/lib/types";
 import { toast } from "sonner";
+import { fillLeaseTemplate } from "@/lib/leaseTemplate";
+import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
+import { FileSignature } from "lucide-react";
 
 
 export const Route = createFileRoute("/portfolio")({
@@ -853,13 +856,20 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
               )}
 
               <div>
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm font-medium">Tenants</div>
-                  <TenantDialog propertyId={prop.id}>
-                    <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
-                      <Plus className="h-3 w-3" /> Add
-                    </Button>
-                  </TenantDialog>
+                  <div className="flex gap-2">
+                    <LeaseAgreementWizard property={prop}>
+                      <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
+                        <FileSignature className="h-3 w-3" /> Create Tenancy Agreement
+                      </Button>
+                    </LeaseAgreementWizard>
+                    <TenantDialog propertyId={prop.id}>
+                      <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
+                        <Plus className="h-3 w-3" /> Add
+                      </Button>
+                    </TenantDialog>
+                  </div>
                 </div>
                 {tenants.length === 0 && <div className="text-muted-foreground">No tenants linked.</div>}
                 {tenants.map((t) => (
@@ -929,6 +939,557 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+function YesNoSelect({
+  value,
+  onChange,
+  allowNA,
+}: {
+  value: boolean | undefined;
+  onChange: (v: boolean | undefined) => void;
+  allowNA?: boolean;
+}) {
+  const strValue = value === undefined ? "na" : value ? "yes" : "no";
+  return (
+    <Select value={strValue} onValueChange={(v) => onChange(v === "na" ? undefined : v === "yes")}>
+      <SelectTrigger className="h-8 w-[160px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {allowNA && <SelectItem value="na">Not applicable</SelectItem>}
+        <SelectItem value="yes">Yes</SelectItem>
+        <SelectItem value="no">No</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+/**
+ * 3-step "Create Tenancy Agreement" wizard (Premises → Lease & Tenant → Review/Generate),
+ * mirroring the RentBetter-style flow the user referenced. Premises questions write to
+ * Property (reused automatically for future tenants at the same address); lease/tenant
+ * questions write to Tenant. Generation fills the landlord's own uploaded template
+ * (Settings → Lease Agreement Template) via the file-agnostic field mapping — nothing here
+ * invents legal wording. Works both for a brand-new tenant (no `tenant` prop) and for adding
+ * agreement details to an existing one (`tenant` provided, pre-fills and skips re-asking).
+ */
+function LeaseAgreementWizard({
+  property,
+  tenant,
+  children,
+}: {
+  property: Property;
+  tenant?: Tenant;
+  children: React.ReactNode;
+}) {
+  const { state, updateProperty, addTenant, updateTenant } = useStore();
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [generating, setGenerating] = useState(false);
+  const [generatedBlob, setGeneratedBlob] = useState<Blob | null>(null);
+
+  const buildPremises = () => ({
+    maxOccupants: property.maxOccupants?.toString() ?? "",
+    premisesInclusions: property.premisesInclusions ?? "",
+    smokeAlarmType: (property.smokeAlarmType ?? "Battery") as "Hardwired" | "Battery",
+    smokeAlarmBatteryReplaceable: property.smokeAlarmBatteryReplaceable,
+    smokeAlarmBatteryType: property.smokeAlarmBatteryType ?? "",
+    smokeAlarmBackupBatteryReplaceable: property.smokeAlarmBackupBatteryReplaceable,
+    smokeAlarmBackupBatteryType: property.smokeAlarmBackupBatteryType ?? "",
+    strataResponsibleForSmokeAlarms: property.strataResponsibleForSmokeAlarms,
+    strataBylawsApply: property.strataBylawsApply,
+    electricalRepairsContactName: property.electricalRepairsContactName ?? "",
+    electricalRepairsContactPhone: property.electricalRepairsContactPhone ?? "",
+    plumbingRepairsContactName: property.plumbingRepairsContactName ?? "",
+    plumbingRepairsContactPhone: property.plumbingRepairsContactPhone ?? "",
+    otherRepairsContactName: property.otherRepairsContactName ?? "",
+    otherRepairsContactPhone: property.otherRepairsContactPhone ?? "",
+    waterUsagePaidSeparately: property.waterUsagePaidSeparately,
+    electricityEmbeddedNetwork: property.electricityEmbeddedNetwork,
+    gasEmbeddedNetwork: property.gasEmbeddedNetwork,
+  });
+  const [premises, setPremises] = useState(buildPremises);
+
+  const buildLeaseForm = () => ({
+    name: tenant?.name ?? "",
+    email: tenant?.email ?? "",
+    phone: tenant?.phone ?? "",
+    rentAmount: tenant?.rentAmount?.toString() ?? "",
+    rentFrequency: (tenant?.rentFrequency ?? "Weekly") as RentFrequency,
+    bondAmount: tenant?.bondAmount?.toString() ?? "",
+    leaseStart: tenant?.leaseStart ?? todayISO(),
+    leaseDuration: (tenant?.leaseDuration ?? "12 Months") as LeaseDuration,
+    leaseExpiry: tenant?.leaseExpiry ?? "",
+    petsAllowed: tenant?.petsAllowed,
+    petsDescription: tenant?.petsDescription ?? "",
+    additionalLeaseTerms: tenant?.additionalLeaseTerms ?? "",
+  });
+  const [leaseForm, setLeaseForm] = useState(buildLeaseForm);
+
+  const onOpenChange = (o: boolean) => {
+    setOpen(o);
+    if (o) {
+      setStep(1);
+      setPremises(buildPremises());
+      setLeaseForm(buildLeaseForm());
+      setGeneratedBlob(null);
+    }
+  };
+
+  const onStartChange = (v: string) => {
+    setLeaseForm((s) => ({
+      ...s,
+      leaseStart: v,
+      leaseExpiry: s.leaseDuration !== "Periodic" ? computeLeaseEnd(v, s.leaseDuration) : s.leaseExpiry,
+    }));
+  };
+  const onDurationChange = (v: LeaseDuration) => {
+    setLeaseForm((s) => ({
+      ...s,
+      leaseDuration: v,
+      leaseExpiry: v === "Periodic" ? "" : computeLeaseEnd(s.leaseStart, v),
+    }));
+  };
+
+  const saveStep1 = () => {
+    updateProperty(property.id, {
+      maxOccupants: premises.maxOccupants ? parseInt(premises.maxOccupants, 10) : undefined,
+      premisesInclusions: premises.premisesInclusions || undefined,
+      smokeAlarmType: premises.smokeAlarmType,
+      smokeAlarmBatteryReplaceable: premises.smokeAlarmBatteryReplaceable,
+      smokeAlarmBatteryType: premises.smokeAlarmBatteryType || undefined,
+      smokeAlarmBackupBatteryReplaceable: premises.smokeAlarmBackupBatteryReplaceable,
+      smokeAlarmBackupBatteryType: premises.smokeAlarmBackupBatteryType || undefined,
+      strataResponsibleForSmokeAlarms: premises.strataResponsibleForSmokeAlarms,
+      strataBylawsApply: premises.strataBylawsApply,
+      electricalRepairsContactName: premises.electricalRepairsContactName || undefined,
+      electricalRepairsContactPhone: premises.electricalRepairsContactPhone || undefined,
+      plumbingRepairsContactName: premises.plumbingRepairsContactName || undefined,
+      plumbingRepairsContactPhone: premises.plumbingRepairsContactPhone || undefined,
+      otherRepairsContactName: premises.otherRepairsContactName || undefined,
+      otherRepairsContactPhone: premises.otherRepairsContactPhone || undefined,
+      waterUsagePaidSeparately: premises.waterUsagePaidSeparately,
+      electricityEmbeddedNetwork: premises.electricityEmbeddedNetwork,
+      gasEmbeddedNetwork: premises.gasEmbeddedNetwork,
+    });
+    setStep(2);
+  };
+
+  const saveStep2 = () => {
+    if (!leaseForm.name) return toast.error("Tenant name required");
+    if (!leaseForm.rentAmount) return toast.error("Rent amount required");
+    const patch = {
+      name: leaseForm.name,
+      email: leaseForm.email || undefined,
+      phone: leaseForm.phone || undefined,
+      rentAmount: parseFloat(leaseForm.rentAmount) || 0,
+      rentFrequency: leaseForm.rentFrequency,
+      bondAmount: leaseForm.bondAmount ? parseFloat(leaseForm.bondAmount) : undefined,
+      leaseStart: leaseForm.leaseStart || undefined,
+      leaseExpiry: leaseForm.leaseExpiry || undefined,
+      leaseDuration: leaseForm.leaseDuration,
+      petsAllowed: leaseForm.petsAllowed,
+      petsDescription: leaseForm.petsAllowed ? leaseForm.petsDescription || undefined : undefined,
+      additionalLeaseTerms: leaseForm.additionalLeaseTerms || undefined,
+      propertyId: property.id,
+    };
+    if (tenant) updateTenant(tenant.id, patch);
+    else addTenant(patch);
+    setStep(3);
+  };
+
+  const buildValues = (): Record<string, string | boolean | undefined> => ({
+    landlordName: state.landlordProfile.fullName || undefined,
+    landlordEmail: state.landlordProfile.email || undefined,
+    landlordPhone: state.landlordProfile.phone || undefined,
+
+    propertyAddress: property.address,
+    maxOccupants: premises.maxOccupants || undefined,
+    premisesInclusions: premises.premisesInclusions || undefined,
+    smokeAlarmType: premises.smokeAlarmType,
+    smokeAlarmBatteryReplaceable: premises.smokeAlarmBatteryReplaceable,
+    smokeAlarmBatteryType: premises.smokeAlarmBatteryType || undefined,
+    smokeAlarmBackupBatteryReplaceable: premises.smokeAlarmBackupBatteryReplaceable,
+    smokeAlarmBackupBatteryType: premises.smokeAlarmBackupBatteryType || undefined,
+    strataResponsibleForSmokeAlarms: premises.strataResponsibleForSmokeAlarms,
+    strataBylawsApply: premises.strataBylawsApply,
+    electricalRepairsContactName: premises.electricalRepairsContactName || undefined,
+    electricalRepairsContactPhone: premises.electricalRepairsContactPhone || undefined,
+    plumbingRepairsContactName: premises.plumbingRepairsContactName || undefined,
+    plumbingRepairsContactPhone: premises.plumbingRepairsContactPhone || undefined,
+    otherRepairsContactName: premises.otherRepairsContactName || undefined,
+    otherRepairsContactPhone: premises.otherRepairsContactPhone || undefined,
+    waterUsagePaidSeparately: premises.waterUsagePaidSeparately,
+    electricityEmbeddedNetwork: premises.electricityEmbeddedNetwork,
+    gasEmbeddedNetwork: premises.gasEmbeddedNetwork,
+
+    tenantName: leaseForm.name || undefined,
+    tenantEmail: leaseForm.email || undefined,
+    tenantPhone: leaseForm.phone || undefined,
+    rentAmount: leaseForm.rentAmount || undefined,
+    rentFrequency: leaseForm.rentFrequency,
+    bondAmount: leaseForm.bondAmount || undefined,
+    leaseStart: leaseForm.leaseStart || undefined,
+    leaseExpiry: leaseForm.leaseExpiry || undefined,
+    leaseDuration: leaseForm.leaseDuration,
+    petsAllowed: leaseForm.petsAllowed,
+    petsDescription: leaseForm.petsAllowed ? leaseForm.petsDescription || undefined : undefined,
+    additionalLeaseTerms: leaseForm.additionalLeaseTerms || undefined,
+  });
+
+  const fileName = `lease-agreement-${(leaseForm.name || "tenant").replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.pdf`;
+
+  const generate = async () => {
+    if (!state.leaseTemplate) {
+      return toast.error("Upload a lease agreement template in Settings first");
+    }
+    setGenerating(true);
+    try {
+      const bytes = await fillLeaseTemplate(state.leaseTemplate, buildValues());
+      setGeneratedBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }));
+      toast.success("Lease agreement generated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate the document");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const download = () => {
+    if (generatedBlob) downloadBlob(generatedBlob, fileName);
+  };
+
+  const emailToTenant = () => {
+    if (!generatedBlob) return;
+    const propertyLabel = property.alias || property.address;
+    const body = `Dear ${leaseForm.name},\n\nPlease find your tenancy agreement for ${propertyLabel} attached to this email — I've just downloaded it as a PDF; please attach the file (from your Downloads) before sending.\n\nKind regards,\n${state.landlordProfile.fullName || "The Landlord"}`;
+    downloadPdfAndEmailViaGmail({
+      blob: generatedBlob,
+      fileName,
+      to: leaseForm.email,
+      subject: `Tenancy agreement — ${propertyLabel}`,
+      body,
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Create Tenancy Agreement — Step {step} of 3:{" "}
+            {step === 1 ? "Premises Details" : step === 2 ? "Lease & Tenant Details" : "Review & Generate"}
+          </DialogTitle>
+        </DialogHeader>
+
+        {step === 1 && (
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground">
+              These describe the property itself — captured once, reused automatically next time
+              you onboard a tenant here.
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Maximum occupants">
+                <Input
+                  type="number"
+                  value={premises.maxOccupants}
+                  onChange={(e) => setPremises({ ...premises, maxOccupants: e.target.value })}
+                />
+              </Field>
+              <Field label="Inclusions">
+                <Input
+                  placeholder="e.g. 1 car space, dishwasher"
+                  value={premises.premisesInclusions}
+                  onChange={(e) => setPremises({ ...premises, premisesInclusions: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 text-sm font-medium">Smoke alarms</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Type">
+                  <Select
+                    value={premises.smokeAlarmType}
+                    onValueChange={(v) => setPremises({ ...premises, smokeAlarmType: v as "Hardwired" | "Battery" })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Battery">Battery operated</SelectItem>
+                      <SelectItem value="Hardwired">Hardwired</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                {premises.smokeAlarmType === "Battery" ? (
+                  <>
+                    <Field label="Battery tenant-replaceable?">
+                      <YesNoSelect
+                        value={premises.smokeAlarmBatteryReplaceable}
+                        onChange={(v) => setPremises({ ...premises, smokeAlarmBatteryReplaceable: v })}
+                      />
+                    </Field>
+                    {premises.smokeAlarmBatteryReplaceable && (
+                      <Field label="Battery type">
+                        <Input
+                          value={premises.smokeAlarmBatteryType}
+                          onChange={(e) => setPremises({ ...premises, smokeAlarmBatteryType: e.target.value })}
+                        />
+                      </Field>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Field label="Backup battery tenant-replaceable?">
+                      <YesNoSelect
+                        value={premises.smokeAlarmBackupBatteryReplaceable}
+                        onChange={(v) => setPremises({ ...premises, smokeAlarmBackupBatteryReplaceable: v })}
+                      />
+                    </Field>
+                    {premises.smokeAlarmBackupBatteryReplaceable && (
+                      <Field label="Backup battery type">
+                        <Input
+                          value={premises.smokeAlarmBackupBatteryType}
+                          onChange={(e) =>
+                            setPremises({ ...premises, smokeAlarmBackupBatteryType: e.target.value })
+                          }
+                        />
+                      </Field>
+                    )}
+                  </>
+                )}
+                <Field label="Owners corp. responsible for smoke alarms?">
+                  <YesNoSelect
+                    allowNA
+                    value={premises.strataResponsibleForSmokeAlarms}
+                    onChange={(v) => setPremises({ ...premises, strataResponsibleForSmokeAlarms: v })}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Strata/community by-laws apply?">
+                <YesNoSelect
+                  value={premises.strataBylawsApply}
+                  onChange={(v) => setPremises({ ...premises, strataBylawsApply: v })}
+                />
+              </Field>
+              <Field label="Tenant pays water usage separately?">
+                <YesNoSelect
+                  value={premises.waterUsagePaidSeparately}
+                  onChange={(v) => setPremises({ ...premises, waterUsagePaidSeparately: v })}
+                />
+              </Field>
+              <Field label="Electricity from embedded network?">
+                <YesNoSelect
+                  value={premises.electricityEmbeddedNetwork}
+                  onChange={(v) => setPremises({ ...premises, electricityEmbeddedNetwork: v })}
+                />
+              </Field>
+              <Field label="Gas from embedded network?">
+                <YesNoSelect
+                  value={premises.gasEmbeddedNetwork}
+                  onChange={(v) => setPremises({ ...premises, gasEmbeddedNetwork: v })}
+                />
+              </Field>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 text-sm font-medium">Nominated repairs contacts (optional)</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Electrical — contact name">
+                  <Input
+                    value={premises.electricalRepairsContactName}
+                    onChange={(e) => setPremises({ ...premises, electricalRepairsContactName: e.target.value })}
+                  />
+                </Field>
+                <Field label="Electrical — phone">
+                  <Input
+                    value={premises.electricalRepairsContactPhone}
+                    onChange={(e) => setPremises({ ...premises, electricalRepairsContactPhone: e.target.value })}
+                  />
+                </Field>
+                <Field label="Plumbing — contact name">
+                  <Input
+                    value={premises.plumbingRepairsContactName}
+                    onChange={(e) => setPremises({ ...premises, plumbingRepairsContactName: e.target.value })}
+                  />
+                </Field>
+                <Field label="Plumbing — phone">
+                  <Input
+                    value={premises.plumbingRepairsContactPhone}
+                    onChange={(e) => setPremises({ ...premises, plumbingRepairsContactPhone: e.target.value })}
+                  />
+                </Field>
+                <Field label="Other — contact name">
+                  <Input
+                    value={premises.otherRepairsContactName}
+                    onChange={(e) => setPremises({ ...premises, otherRepairsContactName: e.target.value })}
+                  />
+                </Field>
+                <Field label="Other — phone">
+                  <Input
+                    value={premises.otherRepairsContactPhone}
+                    onChange={(e) => setPremises({ ...premises, otherRepairsContactPhone: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-3">
+            {tenant ? (
+              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                Using existing tenant details for <span className="font-medium text-foreground">{tenant.name}</span>{" "}
+                — edit via the pencil icon on their row if these need to change.
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Tenant name *">
+                  <Input value={leaseForm.name} onChange={(e) => setLeaseForm({ ...leaseForm, name: e.target.value })} />
+                </Field>
+                <Field label="Email">
+                  <Input value={leaseForm.email} onChange={(e) => setLeaseForm({ ...leaseForm, email: e.target.value })} />
+                </Field>
+                <Field label="Phone">
+                  <Input value={leaseForm.phone} onChange={(e) => setLeaseForm({ ...leaseForm, phone: e.target.value })} />
+                </Field>
+                <Field label="Rent amount (AUD) *">
+                  <Input
+                    type="number"
+                    value={leaseForm.rentAmount}
+                    onChange={(e) => setLeaseForm({ ...leaseForm, rentAmount: e.target.value })}
+                  />
+                </Field>
+                <Field label="Rent frequency">
+                  <Select
+                    value={leaseForm.rentFrequency}
+                    onValueChange={(v) => setLeaseForm({ ...leaseForm, rentFrequency: v as RentFrequency })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Weekly">Weekly</SelectItem>
+                      <SelectItem value="Fortnightly">Fortnightly</SelectItem>
+                      <SelectItem value="Monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Bond amount (AUD)">
+                  <Input
+                    type="number"
+                    value={leaseForm.bondAmount}
+                    onChange={(e) => setLeaseForm({ ...leaseForm, bondAmount: e.target.value })}
+                  />
+                </Field>
+                <Field label="Lease start date">
+                  <Input type="date" value={leaseForm.leaseStart} onChange={(e) => onStartChange(e.target.value)} />
+                </Field>
+                <Field label="Lease duration">
+                  <Select value={leaseForm.leaseDuration} onValueChange={(v) => onDurationChange(v as LeaseDuration)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="6 Months">6 Months</SelectItem>
+                      <SelectItem value="12 Months">12 Months</SelectItem>
+                      <SelectItem value="Periodic">Periodic / Ongoing</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+            )}
+
+            <div className="rounded-md border p-3">
+              <div className="mb-2 text-sm font-medium">Pets on the premises</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Tenant may keep a pet?">
+                  <YesNoSelect
+                    value={leaseForm.petsAllowed}
+                    onChange={(v) => setLeaseForm({ ...leaseForm, petsAllowed: v })}
+                  />
+                </Field>
+                {leaseForm.petsAllowed && (
+                  <Field label="Breed / size / details">
+                    <Input
+                      value={leaseForm.petsDescription}
+                      onChange={(e) => setLeaseForm({ ...leaseForm, petsDescription: e.target.value })}
+                    />
+                  </Field>
+                )}
+              </div>
+            </div>
+
+            <Field label="Additional terms">
+              <Textarea
+                value={leaseForm.additionalLeaseTerms}
+                onChange={(e) => setLeaseForm({ ...leaseForm, additionalLeaseTerms: e.target.value })}
+                placeholder="Any additional terms or conditions, added as a separate section."
+              />
+            </Field>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-3 text-sm">
+            <div className="rounded-md border p-3">
+              <div className="mb-2 font-medium">{property.alias || property.address}</div>
+              <div className="text-xs text-muted-foreground">
+                {leaseForm.name} — {fmtCurrency(parseFloat(leaseForm.rentAmount) || 0)}/{leaseForm.rentFrequency} •{" "}
+                {leaseForm.leaseDuration} from {leaseForm.leaseStart}
+                {leaseForm.leaseExpiry && ` to ${leaseForm.leaseExpiry}`}
+              </div>
+            </div>
+
+            {!state.leaseTemplate ? (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+                No lease agreement template uploaded yet. Go to Settings → Lease Agreement Template
+                to upload your fillable tenancy agreement and map its fields, then come back here
+                to generate.
+              </div>
+            ) : (
+              <>
+                <Button onClick={generate} disabled={generating} className="gap-2">
+                  <FileSignature className="h-4 w-4" />
+                  {generating ? "Generating…" : "Generate Lease Agreement PDF"}
+                </Button>
+                {generatedBlob && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={download}>
+                      Download
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={emailToTenant} disabled={!leaseForm.email}>
+                      Email to tenant
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <Button variant="ghost" disabled={step === 1} onClick={() => setStep((s) => (s - 1) as 1 | 2)}>
+            Back
+          </Button>
+          {step < 3 ? (
+            <Button onClick={step === 1 ? saveStep1 : saveStep2}>Next</Button>
+          ) : (
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Done
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1078,6 +1639,7 @@ function BillRow({ bill, onPaid, onDelete }: { bill: PropertyBill; onPaid: () =>
 
 function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void }) {
   const { state, convertToPeriodic } = useStore();
+  const property = state.properties.find((p) => p.id === tenant.propertyId);
   const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
   const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
   const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
@@ -1131,6 +1693,13 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
           </div>
         </div>
         <div className="flex gap-1">
+          {property && (
+            <LeaseAgreementWizard property={property} tenant={tenant}>
+              <Button size="icon" variant="ghost" title="Generate tenancy agreement">
+                <FileSignature className="h-4 w-4" />
+              </Button>
+            </LeaseAgreementWizard>
+          )}
           <IncreaseRentDialog tenant={tenant} />
           <RenewLeaseDialog tenant={tenant} />
           <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>

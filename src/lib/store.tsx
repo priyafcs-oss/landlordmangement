@@ -15,6 +15,7 @@ import type {
   LandlordProfile,
   PropertyBill,
   AiIntakeProposal,
+  LeaseTemplateConfig,
 } from "./types";
 import {
   TABLES,
@@ -59,6 +60,7 @@ const empty: AppState = {
   landlordProfile: defaultProfile,
   bills: [],
   aiProposals: [],
+  leaseTemplate: null,
 };
 
 interface StoreCtx {
@@ -118,6 +120,7 @@ interface StoreCtx {
   deleteMaintenanceRequest: (id: string) => void;
 
   updateLandlordProfile: (p: Partial<LandlordProfile>) => void;
+  updateLeaseTemplate: (t: LeaseTemplateConfig | null) => void;
 
   addBill: (b: Omit<PropertyBill, "id">) => void;
   updateBill: (id: string, b: Partial<PropertyBill>) => void;
@@ -191,6 +194,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       aiProposals,
       aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
       landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
+      leaseTemplate: (settings?.leaseTemplate as LeaseTemplateConfig | undefined) ?? null,
     });
     setLoading(false);
   };
@@ -509,6 +513,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const landlordProfile = { ...s.landlordProfile, ...p };
         void saveSettings({ landlordProfile });
         return { ...s, landlordProfile };
+      }),
+    updateLeaseTemplate: (t) =>
+      set((s) => {
+        void saveSettings({ leaseTemplate: t });
+        return { ...s, leaseTemplate: t };
       }),
 
     addBill: (b) => {

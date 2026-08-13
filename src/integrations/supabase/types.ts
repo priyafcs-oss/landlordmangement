@@ -70,18 +70,21 @@ export type Database = {
           aiConfig: Json
           id: string
           landlordProfile: Json
+          leaseTemplate: Json | null
           updated_at: string
         }
         Insert: {
           aiConfig?: Json
           id: string
           landlordProfile?: Json
+          leaseTemplate?: Json | null
           updated_at?: string
         }
         Update: {
           aiConfig?: Json
           id?: string
           landlordProfile?: Json
+          leaseTemplate?: Json | null
           updated_at?: string
         }
         Relationships: []
@@ -404,6 +407,10 @@ export type Database = {
           created_at: string
           currentValue: number
           deposit: number | null
+          electricalRepairsContactName: string | null
+          electricalRepairsContactPhone: string | null
+          electricityEmbeddedNetwork: boolean | null
+          gasEmbeddedNetwork: boolean | null
           id: string
           insuranceAnnual: number | null
           interestRate: number | null
@@ -415,20 +422,34 @@ export type Database = {
           managerEmail: string | null
           managerName: string | null
           managerPhone: string | null
+          maxOccupants: number | null
           notes: string | null
+          otherRepairsContactName: string | null
+          otherRepairsContactPhone: string | null
           photos: Json | null
           physicalAttributes: string | null
+          plumbingRepairsContactName: string | null
+          plumbingRepairsContactPhone: string | null
+          premisesInclusions: string | null
           pmFeePercent: number | null
           purchaseDate: string | null
           purchasePrice: number
           repairsMaintenanceAnnual: number | null
           repaymentFrequency: string | null
+          smokeAlarmBackupBatteryReplaceable: boolean | null
+          smokeAlarmBackupBatteryType: string | null
+          smokeAlarmBatteryReplaceable: boolean | null
+          smokeAlarmBatteryType: string | null
+          smokeAlarmType: string | null
           stampDuty: number | null
+          strataBylawsApply: boolean | null
           strataFeesAnnual: number | null
+          strataResponsibleForSmokeAlarms: boolean | null
           tenantCode: string | null
           videos: Json | null
           waterAccountRef: string | null
           waterRatesAnnual: number | null
+          waterUsagePaidSeparately: boolean | null
         }
         Insert: {
           address?: string
@@ -438,6 +459,10 @@ export type Database = {
           created_at?: string
           currentValue?: number
           deposit?: number | null
+          electricalRepairsContactName?: string | null
+          electricalRepairsContactPhone?: string | null
+          electricityEmbeddedNetwork?: boolean | null
+          gasEmbeddedNetwork?: boolean | null
           id: string
           insuranceAnnual?: number | null
           interestRate?: number | null
@@ -449,20 +474,34 @@ export type Database = {
           managerEmail?: string | null
           managerName?: string | null
           managerPhone?: string | null
+          maxOccupants?: number | null
           notes?: string | null
+          otherRepairsContactName?: string | null
+          otherRepairsContactPhone?: string | null
           photos?: Json | null
           physicalAttributes?: string | null
+          plumbingRepairsContactName?: string | null
+          plumbingRepairsContactPhone?: string | null
+          premisesInclusions?: string | null
           pmFeePercent?: number | null
           purchaseDate?: string | null
           purchasePrice?: number
           repairsMaintenanceAnnual?: number | null
           repaymentFrequency?: string | null
+          smokeAlarmBackupBatteryReplaceable?: boolean | null
+          smokeAlarmBackupBatteryType?: string | null
+          smokeAlarmBatteryReplaceable?: boolean | null
+          smokeAlarmBatteryType?: string | null
+          smokeAlarmType?: string | null
           stampDuty?: number | null
+          strataBylawsApply?: boolean | null
           strataFeesAnnual?: number | null
+          strataResponsibleForSmokeAlarms?: boolean | null
           tenantCode?: string | null
           videos?: Json | null
           waterAccountRef?: string | null
           waterRatesAnnual?: number | null
+          waterUsagePaidSeparately?: boolean | null
         }
         Update: {
           address?: string
@@ -472,6 +511,10 @@ export type Database = {
           created_at?: string
           currentValue?: number
           deposit?: number | null
+          electricalRepairsContactName?: string | null
+          electricalRepairsContactPhone?: string | null
+          electricityEmbeddedNetwork?: boolean | null
+          gasEmbeddedNetwork?: boolean | null
           id?: string
           insuranceAnnual?: number | null
           interestRate?: number | null
@@ -483,20 +526,34 @@ export type Database = {
           managerEmail?: string | null
           managerName?: string | null
           managerPhone?: string | null
+          maxOccupants?: number | null
           notes?: string | null
+          otherRepairsContactName?: string | null
+          otherRepairsContactPhone?: string | null
           photos?: Json | null
           physicalAttributes?: string | null
+          plumbingRepairsContactName?: string | null
+          plumbingRepairsContactPhone?: string | null
+          premisesInclusions?: string | null
           pmFeePercent?: number | null
           purchaseDate?: string | null
           purchasePrice?: number
           repairsMaintenanceAnnual?: number | null
           repaymentFrequency?: string | null
+          smokeAlarmBackupBatteryReplaceable?: boolean | null
+          smokeAlarmBackupBatteryType?: string | null
+          smokeAlarmBatteryReplaceable?: boolean | null
+          smokeAlarmBatteryType?: string | null
+          smokeAlarmType?: string | null
           stampDuty?: number | null
+          strataBylawsApply?: boolean | null
           strataFeesAnnual?: number | null
+          strataResponsibleForSmokeAlarms?: boolean | null
           tenantCode?: string | null
           videos?: Json | null
           waterAccountRef?: string | null
           waterRatesAnnual?: number | null
+          waterUsagePaidSeparately?: boolean | null
         }
         Relationships: []
       }
@@ -613,6 +670,7 @@ export type Database = {
       }
       tenants: {
         Row: {
+          additionalLeaseTerms: string | null
           bankAccountHolder: string | null
           bankReference: string | null
           bondAmount: number | null
@@ -639,12 +697,15 @@ export type Database = {
           noticePeriod: string | null
           paidUpToDate: string
           permanentAddress: string | null
+          petsAllowed: boolean | null
+          petsDescription: string | null
           phone: string | null
           propertyId: string
           rentAmount: number
           rentFrequency: string
         }
         Insert: {
+          additionalLeaseTerms?: string | null
           bankAccountHolder?: string | null
           bankReference?: string | null
           bondAmount?: number | null
@@ -671,12 +732,15 @@ export type Database = {
           noticePeriod?: string | null
           paidUpToDate?: string
           permanentAddress?: string | null
+          petsAllowed?: boolean | null
+          petsDescription?: string | null
           phone?: string | null
           propertyId: string
           rentAmount?: number
           rentFrequency?: string
         }
         Update: {
+          additionalLeaseTerms?: string | null
           bankAccountHolder?: string | null
           bankReference?: string | null
           bondAmount?: number | null
@@ -703,6 +767,8 @@ export type Database = {
           noticePeriod?: string | null
           paidUpToDate?: string
           permanentAddress?: string | null
+          petsAllowed?: boolean | null
+          petsDescription?: string | null
           phone?: string | null
           propertyId?: string
           rentAmount?: number

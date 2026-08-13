@@ -64,7 +64,7 @@ export async function deleteWhereIn(table: string, column: string, values: strin
 export async function loadSettings() {
   const { data, error } = await db.from(SETTINGS_TABLE).select("*").eq("id", SETTINGS_ID).maybeSingle();
   report("load settings", error);
-  return data as { aiConfig?: unknown; landlordProfile?: unknown } | null;
+  return data as { aiConfig?: unknown; landlordProfile?: unknown; leaseTemplate?: unknown } | null;
 }
 
 export async function saveSettings(patch: Record<string, unknown>) {

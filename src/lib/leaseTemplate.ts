@@ -1,0 +1,137 @@
+import { PDFDocument, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown } from "pdf-lib";
+import type { LeaseTemplateConfig, LeaseTemplateField } from "./types";
+
+/**
+ * The canonical list of data points we can offer to map onto a lease template — shared by the
+ * Settings mapping UI (which field key goes to which real PDF field) and the wizard (which
+ * builds a `values` object keyed exactly like this). Keeping one source of truth means the two
+ * can never silently drift apart.
+ */
+export const LEASE_DATA_FIELDS: { key: string; label: string; group: "Landlord" | "Property" | "Tenant" }[] = [
+  { key: "landlordName", label: "Landlord / rental provider name", group: "Landlord" },
+  { key: "landlordEmail", label: "Landlord email", group: "Landlord" },
+  { key: "landlordPhone", label: "Landlord phone", group: "Landlord" },
+
+  { key: "propertyAddress", label: "Property address", group: "Property" },
+  { key: "maxOccupants", label: "Maximum occupants", group: "Property" },
+  { key: "premisesInclusions", label: "Inclusions", group: "Property" },
+  { key: "smokeAlarmType", label: "Smoke alarm type (Hardwired/Battery)", group: "Property" },
+  { key: "smokeAlarmBatteryReplaceable", label: "Smoke alarm battery tenant-replaceable", group: "Property" },
+  { key: "smokeAlarmBatteryType", label: "Smoke alarm battery type", group: "Property" },
+  {
+    key: "smokeAlarmBackupBatteryReplaceable",
+    label: "Smoke alarm backup battery tenant-replaceable",
+    group: "Property",
+  },
+  { key: "smokeAlarmBackupBatteryType", label: "Smoke alarm backup battery type", group: "Property" },
+  {
+    key: "strataResponsibleForSmokeAlarms",
+    label: "Owners corporation responsible for smoke alarms",
+    group: "Property",
+  },
+  { key: "strataBylawsApply", label: "Strata/community by-laws apply", group: "Property" },
+  { key: "electricalRepairsContactName", label: "Electrical repairs — contact name", group: "Property" },
+  { key: "electricalRepairsContactPhone", label: "Electrical repairs — phone", group: "Property" },
+  { key: "plumbingRepairsContactName", label: "Plumbing repairs — contact name", group: "Property" },
+  { key: "plumbingRepairsContactPhone", label: "Plumbing repairs — phone", group: "Property" },
+  { key: "otherRepairsContactName", label: "Other repairs — contact name", group: "Property" },
+  { key: "otherRepairsContactPhone", label: "Other repairs — phone", group: "Property" },
+  { key: "waterUsagePaidSeparately", label: "Tenant pays water usage separately", group: "Property" },
+  { key: "electricityEmbeddedNetwork", label: "Electricity from an embedded network", group: "Property" },
+  { key: "gasEmbeddedNetwork", label: "Gas from an embedded network", group: "Property" },
+
+  { key: "tenantName", label: "Tenant name", group: "Tenant" },
+  { key: "tenantEmail", label: "Tenant email", group: "Tenant" },
+  { key: "tenantPhone", label: "Tenant phone", group: "Tenant" },
+  { key: "rentAmount", label: "Rent amount", group: "Tenant" },
+  { key: "rentFrequency", label: "Rent frequency", group: "Tenant" },
+  { key: "bondAmount", label: "Bond amount", group: "Tenant" },
+  { key: "leaseStart", label: "Lease start date", group: "Tenant" },
+  { key: "leaseExpiry", label: "Lease end date", group: "Tenant" },
+  { key: "leaseDuration", label: "Lease duration", group: "Tenant" },
+  { key: "petsAllowed", label: "Pets allowed", group: "Tenant" },
+  { key: "petsDescription", label: "Pet details", group: "Tenant" },
+  { key: "additionalLeaseTerms", label: "Additional terms", group: "Tenant" },
+];
+
+/** This app stores uploaded files as full data URLs (FileReader.readAsDataURL output). */
+function base64ToBytes(dataUrl: string): Uint8Array {
+  const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Loads a fillable PDF and lists its real AcroForm fields — the basis of the file-agnostic
+ * mapping approach: we never hardcode a field name, we only ever show/use what's actually here.
+ */
+export async function inspectLeaseTemplate(fileData: string): Promise<LeaseTemplateField[]> {
+  const pdfDoc = await PDFDocument.load(base64ToBytes(fileData), { ignoreEncryption: true });
+  const form = pdfDoc.getForm();
+  const fields: LeaseTemplateField[] = [];
+
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    if (field instanceof PDFTextField) {
+      fields.push({ name, type: "text" });
+    } else if (field instanceof PDFCheckBox) {
+      fields.push({ name, type: "checkbox" });
+    } else if (field instanceof PDFRadioGroup) {
+      fields.push({ name, type: "radio", options: field.getOptions() });
+    } else if (field instanceof PDFDropdown) {
+      fields.push({ name, type: "dropdown", options: field.getOptions() });
+    }
+    // Buttons/signature/list-box fields are skipped — not meaningful targets for data mapping.
+  }
+
+  return fields;
+}
+
+/**
+ * Fills the stored template from `values` (keyed by our own field keys, e.g. "maxOccupants"),
+ * via the landlord's saved mapping to that PDF's real field names. Unmapped or empty values are
+ * skipped — this works usefully even before every field has been wired up. Does not flatten the
+ * form, so the result stays a live fillable PDF the landlord/tenant can still adjust.
+ */
+export async function fillLeaseTemplate(
+  template: LeaseTemplateConfig,
+  values: Record<string, string | boolean | undefined>,
+): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.load(base64ToBytes(template.fileData), { ignoreEncryption: true });
+  const form = pdfDoc.getForm();
+
+  const resolveOption = (mapping: { valueMap?: Record<string, string> }, v: string | boolean) => {
+    const key = typeof v === "boolean" ? (v ? "true" : "false") : v;
+    return mapping.valueMap?.[key] ?? key;
+  };
+
+  for (const [ourKey, mapping] of Object.entries(template.mapping)) {
+    const rawValue = values[ourKey];
+    if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+
+    let field;
+    try {
+      field = form.getField(mapping.pdfField);
+    } catch {
+      continue; // mapped field no longer exists (e.g. the template was re-uploaded/revised)
+    }
+
+    try {
+      if (field instanceof PDFTextField) {
+        field.setText(String(rawValue));
+      } else if (field instanceof PDFCheckBox) {
+        const shouldCheck = typeof rawValue === "boolean" ? rawValue : rawValue === "true" || rawValue === "Yes";
+        if (shouldCheck) field.check();
+        else field.uncheck();
+      } else if (field instanceof PDFRadioGroup || field instanceof PDFDropdown) {
+        field.select(resolveOption(mapping, rawValue));
+      }
+    } catch (e) {
+      console.warn(`[leaseTemplate] failed to fill "${mapping.pdfField}" (for "${ourKey}")`, e);
+    }
+  }
+
+  return pdfDoc.save();
+}

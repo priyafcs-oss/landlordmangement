@@ -39,6 +39,26 @@ export interface Property {
   notes?: string;
   photos?: { name: string; data: string }[];
   videos?: { name: string; data: string }[];
+  // Premises-level disclosures required on a standard NSW residential tenancy agreement —
+  // captured once per property, reused automatically for every future tenant.
+  maxOccupants?: number;
+  premisesInclusions?: string;
+  smokeAlarmType?: "Hardwired" | "Battery";
+  smokeAlarmBatteryReplaceable?: boolean;
+  smokeAlarmBatteryType?: string;
+  smokeAlarmBackupBatteryReplaceable?: boolean;
+  smokeAlarmBackupBatteryType?: string;
+  strataResponsibleForSmokeAlarms?: boolean;
+  strataBylawsApply?: boolean;
+  electricalRepairsContactName?: string;
+  electricalRepairsContactPhone?: string;
+  plumbingRepairsContactName?: string;
+  plumbingRepairsContactPhone?: string;
+  otherRepairsContactName?: string;
+  otherRepairsContactPhone?: string;
+  waterUsagePaidSeparately?: boolean;
+  electricityEmbeddedNetwork?: boolean;
+  gasEmbeddedNetwork?: boolean;
 }
 
 export interface Tenant {
@@ -72,6 +92,11 @@ export interface Tenant {
   idProofFileData?: string;
   bondTransferFileName?: string;
   bondTransferFileData?: string;
+  // Tenancy-specific lease terms (unlike premises disclosures on Property, these can genuinely
+  // differ per tenancy at the same property).
+  petsAllowed?: boolean;
+  petsDescription?: string;
+  additionalLeaseTerms?: string;
 }
 
 export type LedgerType =
@@ -231,6 +256,28 @@ export interface LandlordProfile {
   notifySms: boolean;
 }
 
+export type LeaseTemplateFieldType = "text" | "checkbox" | "radio" | "dropdown";
+
+export interface LeaseTemplateField {
+  name: string;
+  type: LeaseTemplateFieldType;
+  /** Real option strings, for radio/dropdown fields. */
+  options?: string[];
+}
+
+/**
+ * A landlord-uploaded fillable lease agreement PDF (e.g. the official NSW Fair Trading standard
+ * form), the last field-inspection result, and the saved mapping from our captured data points
+ * to that PDF's actual field names — file-agnostic by design, no field name is ever hardcoded.
+ */
+export interface LeaseTemplateConfig {
+  fileName: string;
+  fileData: string;
+  uploadedAt: string;
+  fields: LeaseTemplateField[];
+  mapping: Record<string, { pdfField: string; valueMap?: Record<string, string> }>;
+}
+
 export type BillType =
   | "Water"
   | "Council Rates"
@@ -310,6 +357,7 @@ export interface AppState {
   landlordProfile: LandlordProfile;
   bills: PropertyBill[];
   aiProposals: AiIntakeProposal[];
+  leaseTemplate: LeaseTemplateConfig | null;
 }
 
 export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {

@@ -55,6 +55,7 @@ import type { Tenant } from "@/lib/types";
 
 import { toast } from "sonner";
 import jsPDF from "jspdf";
+import { downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { TenantDialog, IncreaseRentDialog } from "./portfolio";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 
@@ -770,7 +771,9 @@ function LedgerExportButtons({
     toast.success("Ledger CSV downloaded");
   };
 
-  const downloadPdf = () => {
+  const ledgerFileName = `ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.pdf`;
+
+  const buildPdf = () => {
     const doc = new jsPDF();
     const marginX = 14;
     const rightEdge = 196;
@@ -844,7 +847,11 @@ function LedgerExportButtons({
     doc.text("Total outstanding", col.desc, y);
     doc.text(pdfSafe(fmtCurrency(total)), col.balance, y);
 
-    doc.save(`ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.pdf`);
+    return doc;
+  };
+
+  const downloadPdf = () => {
+    buildPdf().save(ledgerFileName);
     toast.success("Ledger PDF downloaded");
   };
 
@@ -854,12 +861,15 @@ function LedgerExportButtons({
     // download the PDF so it's ready in Downloads, and open Gmail's web compose (rather than
     // mailto:, which opens whatever the OS has registered — Outlook here) prefilled with a note
     // to attach it.
-    downloadPdf();
+    const blob = buildPdf().output("blob");
     const body = `Dear ${tenant.name},\n\nPlease find your rent ledger statement for ${propertyAddress} attached to this email — I've just downloaded it as a PDF; please attach the file (from your Downloads) before sending.\n\nTotal outstanding: ${fmtCurrency(total)}\nPaid up to: ${tenant.paidUpToDate}\n\nKind regards,\nThe Landlord`;
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-      tenant.email ?? "",
-    )}&su=${encodeURIComponent(`Rent ledger — ${propertyAddress}`)}&body=${encodeURIComponent(body)}`;
-    window.open(gmailUrl, "_blank");
+    downloadPdfAndEmailViaGmail({
+      blob,
+      fileName: ledgerFileName,
+      to: tenant.email,
+      subject: `Rent ledger — ${propertyAddress}`,
+      body,
+    });
   };
 
   return (
