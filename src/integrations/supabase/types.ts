@@ -414,6 +414,7 @@ export type Database = {
           electricalRepairsContactPhone: string | null
           electricityEmbeddedNetwork: boolean | null
           gasEmbeddedNetwork: boolean | null
+          hasSwimmingPool: boolean | null
           id: string
           insuranceAnnual: number | null
           interestRate: number | null
@@ -466,6 +467,7 @@ export type Database = {
           electricalRepairsContactPhone?: string | null
           electricityEmbeddedNetwork?: boolean | null
           gasEmbeddedNetwork?: boolean | null
+          hasSwimmingPool?: boolean | null
           id: string
           insuranceAnnual?: number | null
           interestRate?: number | null
@@ -518,6 +520,7 @@ export type Database = {
           electricalRepairsContactPhone?: string | null
           electricityEmbeddedNetwork?: boolean | null
           gasEmbeddedNetwork?: boolean | null
+          hasSwimmingPool?: boolean | null
           id?: string
           insuranceAnnual?: number | null
           interestRate?: number | null

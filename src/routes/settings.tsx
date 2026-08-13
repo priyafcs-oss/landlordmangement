@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
 import { User, FileText, ChevronDown, ChevronUp, X, Plus } from "lucide-react";
-import { inspectLeaseTemplate, LEASE_DATA_FIELDS } from "@/lib/leaseTemplate";
+import { inspectLeaseTemplate, LEASE_DATA_FIELDS, carryOverMapping } from "@/lib/leaseTemplate";
 import type { LeaseTemplateConfig, LeaseTemplateField, ContactPerson } from "@/lib/types";
 
 export const Route = createFileRoute("/settings")({
@@ -234,16 +234,26 @@ function LeaseTemplateSettings() {
         if (fields.length === 0) {
           toast.error("No fillable form fields found — this PDF may not be a fillable template.");
         }
+        // Most field names survive between revisions of the same form — only re-map what
+        // actually changed, instead of making the landlord redo everything from scratch.
+        const { mapping: carried, carriedCount, droppedCount } = carryOverMapping(template?.mapping ?? {}, fields);
         const next: LeaseTemplateConfig = {
           fileName: f.name,
           fileData,
           uploadedAt: new Date().toISOString(),
           fields,
-          mapping: {}, // reset — field names may differ between template versions
+          mapping: carried,
         };
         updateLeaseTemplate(next);
-        setMapping({});
-        toast.success(`Template uploaded — found ${fields.length} fillable field(s)`);
+        setMapping(carried);
+        if (Object.keys(template?.mapping ?? {}).length > 0) {
+          toast.success(
+            `Template uploaded — carried over ${carriedCount} field mapping(s)` +
+              (droppedCount ? `, ${droppedCount} need re-mapping` : ""),
+          );
+        } else {
+          toast.success(`Template uploaded — found ${fields.length} fillable field(s)`);
+        }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Could not read this PDF");
       } finally {

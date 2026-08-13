@@ -1013,6 +1013,7 @@ function LeaseAgreementWizard({
     waterUsagePaidSeparately: property.waterUsagePaidSeparately ?? false,
     electricityEmbeddedNetwork: property.electricityEmbeddedNetwork ?? false,
     gasEmbeddedNetwork: property.gasEmbeddedNetwork ?? false,
+    hasSwimmingPool: property.hasSwimmingPool ?? false,
   });
   const [premises, setPremises] = useState(buildPremises);
 
@@ -1099,6 +1100,7 @@ function LeaseAgreementWizard({
       waterUsagePaidSeparately: premises.waterUsagePaidSeparately,
       electricityEmbeddedNetwork: premises.electricityEmbeddedNetwork,
       gasEmbeddedNetwork: premises.gasEmbeddedNetwork,
+      hasSwimmingPool: premises.hasSwimmingPool,
     });
     setStep(2);
   };
@@ -1142,10 +1144,13 @@ function LeaseAgreementWizard({
     landlordName: state.landlordProfile.fullName || undefined,
     landlordEmail: leaseForm.landlordConsentsToElectronicService ? state.landlordProfile.email || undefined : undefined,
     landlordPhone: state.landlordProfile.phone || undefined,
+    landlordContactDetails:
+      [state.landlordProfile.phone, state.landlordProfile.email].filter(Boolean).join(" / ") || undefined,
     landlordName2: additionalLandlords[0]?.name || undefined,
     landlordConsentsToElectronicService: leaseForm.landlordConsentsToElectronicService,
 
     propertyAddress: property.address,
+    hasSwimmingPool: premises.hasSwimmingPool,
     maxOccupants: premises.maxOccupants || undefined,
     premisesInclusions: premises.premisesInclusions || undefined,
     smokeAlarmType: premises.smokeAlarmType,
@@ -1168,6 +1173,7 @@ function LeaseAgreementWizard({
     tenantName: leaseForm.name || undefined,
     tenantEmail: leaseForm.tenantConsentsToElectronicService ? leaseForm.email || undefined : undefined,
     tenantPhone: leaseForm.phone || undefined,
+    tenantContactDetails: [leaseForm.phone, leaseForm.email].filter(Boolean).join(" / ") || undefined,
     tenantName2: additionalTenants[0]?.name || undefined,
     tenantName3: additionalTenants[1]?.name || undefined,
     tenantNameOthers: additionalTenants.slice(2).map((t) => t.name).filter(Boolean).join(", ") || undefined,
@@ -1181,7 +1187,13 @@ function LeaseAgreementWizard({
     leaseDuration: leaseForm.leaseDuration,
     petsAllowed: leaseForm.petsAllowed,
     petsDescription: leaseForm.petsAllowed ? leaseForm.petsDescription || undefined : undefined,
-    additionalLeaseTerms: leaseForm.additionalLeaseTerms || undefined,
+    additionalLeaseTerms:
+      [
+        leaseForm.petsAllowed === false ? "No pets are permitted at this property." : "",
+        leaseForm.additionalLeaseTerms,
+      ]
+        .filter(Boolean)
+        .join("\n\n") || undefined,
   });
 
   const fileName = `lease-agreement-${(leaseForm.name || "tenant").replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.pdf`;
@@ -1358,6 +1370,12 @@ function LeaseAgreementWizard({
                 <YesNoSelect
                   value={premises.gasEmbeddedNetwork}
                   onChange={(v) => setPremises({ ...premises, gasEmbeddedNetwork: v ?? false })}
+                />
+              </Field>
+              <Field label="Swimming pool on the premises? (Required)">
+                <YesNoSelect
+                  value={premises.hasSwimmingPool}
+                  onChange={(v) => setPremises({ ...premises, hasSwimmingPool: v ?? false })}
                 />
               </Field>
             </div>
@@ -1650,6 +1668,21 @@ function LeaseAgreementWizard({
                 {leaseForm.leaseExpiry && ` to ${leaseForm.leaseExpiry}`}
               </div>
             </div>
+
+            {(premises.hasSwimmingPool === false || leaseForm.petsAllowed === false) && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs space-y-1">
+                <div className="font-medium">Before signing, review these printed clauses:</div>
+                {premises.hasSwimmingPool === false && (
+                  <div>• No pool at this property — consider crossing out the swimming pool section on page 13.</div>
+                )}
+                {leaseForm.petsAllowed === false && (
+                  <div>
+                    • No pets — consider crossing out "Additional Terms – Pets" (clauses 57–59) on page 15. A note
+                    has also been added to Additional Terms.
+                  </div>
+                )}
+              </div>
+            )}
 
             {!state.leaseTemplate ? (
               <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">

@@ -59,6 +59,7 @@ export interface Property {
   waterUsagePaidSeparately?: boolean;
   electricityEmbeddedNetwork?: boolean;
   gasEmbeddedNetwork?: boolean;
+  hasSwimmingPool?: boolean;
 }
 
 export interface Tenant {

@@ -19,9 +19,11 @@ export const LEASE_DATA_FIELDS: {
   { key: "landlordEmail", label: "Landlord email", group: "Landlord" },
   { key: "landlordPhone", label: "Landlord phone", group: "Landlord" },
   { key: "landlordName2", label: "Co-landlord name (2nd landlord)", group: "Landlord" },
+  { key: "landlordContactDetails", label: "Landlord contact details (phone + email combined)", group: "Landlord" },
   { key: "landlordConsentsToElectronicService", label: "Landlord consents to electronic service", group: "Landlord" },
 
   { key: "propertyAddress", label: "Property address", group: "Property" },
+  { key: "hasSwimmingPool", label: "Swimming pool on the premises", group: "Property" },
   { key: "maxOccupants", label: "Maximum occupants", group: "Property" },
   { key: "premisesInclusions", label: "Inclusions", group: "Property" },
   { key: "smokeAlarmType", label: "Smoke alarm type (Hardwired/Battery)", group: "Property" },
@@ -55,6 +57,7 @@ export const LEASE_DATA_FIELDS: {
   { key: "tenantName2", label: "Co-tenant name (2nd tenant)", group: "Tenant" },
   { key: "tenantName3", label: "Co-tenant name (3rd tenant)", group: "Tenant" },
   { key: "tenantNameOthers", label: "Further co-tenant names (4th onward, combined)", group: "Tenant" },
+  { key: "tenantContactDetails", label: "Tenant contact details (phone + email combined)", group: "Tenant" },
   { key: "rentAmount", label: "Rent amount", group: "Tenant" },
   { key: "rentFrequency", label: "Rent frequency", group: "Tenant" },
   { key: "bondAmount", label: "Bond amount", group: "Tenant" },
@@ -76,6 +79,34 @@ export function toDDMMYYYY(iso: string | undefined): string | undefined {
   if (!iso) return iso;
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
+/**
+ * When a template is re-uploaded (e.g. a revised government form), most field *names* usually
+ * survive from one revision to the next — only the sections that actually got restructured get
+ * renamed. Rather than wiping the whole mapping and making the landlord redo all of it, carry
+ * over any entry whose referenced field name(s) still exist in the freshly-inspected field list,
+ * and drop only the ones that no longer resolve (so they show up as unmapped for review).
+ */
+export function carryOverMapping(
+  previousMapping: LeaseTemplateConfig["mapping"],
+  newFields: LeaseTemplateField[],
+): { mapping: LeaseTemplateConfig["mapping"]; carriedCount: number; droppedCount: number } {
+  const newFieldNames = new Set(newFields.map((f) => f.name));
+  const next: LeaseTemplateConfig["mapping"] = {};
+  let droppedCount = 0;
+
+  for (const [ourKey, entry] of Object.entries(previousMapping)) {
+    const stillValid = entry.isChoiceGroup
+      ? Object.values(entry.valueMap ?? {}).length > 0 &&
+        Object.values(entry.valueMap ?? {}).every((name) => newFieldNames.has(name))
+      : newFieldNames.has(entry.pdfField);
+
+    if (stillValid) next[ourKey] = entry;
+    else droppedCount++;
+  }
+
+  return { mapping: next, carriedCount: Object.keys(next).length, droppedCount };
 }
 
 /** This app stores uploaded files as full data URLs (FileReader.readAsDataURL output). */
