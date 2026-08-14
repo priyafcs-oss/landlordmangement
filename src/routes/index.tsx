@@ -25,7 +25,7 @@ import {
   fmtCurrency,
   daysUntil,
   todayISO,
-  daysBetween,
+  inspectionDueStatus,
 } from "@/lib/calculations";
 import {
   AlertTriangle,
@@ -86,13 +86,7 @@ function DashboardPage() {
     return d >= 0 && d <= 90;
   });
 
-  const complianceAlerts = state.properties.filter((p) => {
-    const insp = state.inspections
-      .filter((i) => i.propertyId === p.id && i.status === "Completed")
-      .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-    if (!insp) return true;
-    return daysBetween(insp.date, todayISO()) > 180;
-  });
+  const complianceAlerts = state.properties.filter((p) => inspectionDueStatus(p.id, state.inspections).overdue);
 
   // Chart data: last 6 months synthetic based on ledger + emis
   const months: { name: string; cashflow: number; equity: number }[] = [];
@@ -223,12 +217,24 @@ function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {complianceAlerts.length === 0 && <div className="text-muted-foreground">All properties inspected recently.</div>}
-            {complianceAlerts.map((p) => (
-              <div key={p.id} className="rounded-md border p-3">
-                <div className="font-medium">{p.address}</div>
-                <div className="text-xs text-muted-foreground">No inspection logged in the last 6 months.</div>
-              </div>
-            ))}
+            {complianceAlerts.map((p) => {
+              const status = inspectionDueStatus(p.id, state.inspections);
+              return (
+                <div key={p.id} className="rounded-md border p-3">
+                  <div className="font-medium">{p.address}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {status.last ? `Last inspected ${status.last.date} — overdue` : "No inspection on record"}
+                  </div>
+                </div>
+              );
+            })}
+            {complianceAlerts.length > 0 && (
+              <Button asChild variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+                <Link to="/inspections">
+                  Book inspections <ArrowRight className="h-3 w-3" />
+                </Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>

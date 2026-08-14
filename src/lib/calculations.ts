@@ -1,4 +1,4 @@
-import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice } from "./types";
+import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice, Inspection } from "./types";
 
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;
@@ -29,6 +29,30 @@ export function daysBetween(a: string, b: string): number {
 
 export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Routine inspection cadence — kept as one constant so the Dashboard alert and the Inspections page never disagree. */
+export const INSPECTION_CADENCE_DAYS = 180;
+
+export function lastCompletedInspection(propertyId: string, inspections: Inspection[]): Inspection | undefined {
+  return inspections
+    .filter((i) => i.propertyId === propertyId && i.status === "Completed")
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+}
+
+export interface InspectionDueStatus {
+  last: Inspection | undefined;
+  daysSinceLast: number | null;
+  dueDate: string | null;
+  overdue: boolean;
+}
+
+export function inspectionDueStatus(propertyId: string, inspections: Inspection[]): InspectionDueStatus {
+  const last = lastCompletedInspection(propertyId, inspections);
+  if (!last) return { last: undefined, daysSinceLast: null, dueDate: null, overdue: true };
+  const daysSinceLast = daysBetween(last.date, todayISO());
+  const dueDate = addDays(last.date, INSPECTION_CADENCE_DAYS);
+  return { last, daysSinceLast, dueDate, overdue: daysSinceLast > INSPECTION_CADENCE_DAYS };
 }
 
 export interface LedgerRow {

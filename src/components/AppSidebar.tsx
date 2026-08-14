@@ -10,12 +10,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, Building2, Wallet, Wrench, Sparkles, Home, Settings } from "lucide-react";
+import { LayoutDashboard, Building2, Wallet, Wrench, Sparkles, Home, Settings, ClipboardCheck } from "lucide-react";
 
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Portfolio Manager", url: "/portfolio", icon: Building2 },
   { title: "Rental Hub", url: "/rental", icon: Wallet },
+  { title: "Inspections", url: "/inspections", icon: ClipboardCheck },
   { title: "Expenses", url: "/expenses", icon: Wrench },
   { title: "AI Co-Pilot", url: "/copilot", icon: Sparkles },
   { title: "Settings", url: "/settings", icon: Settings },
