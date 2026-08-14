@@ -33,3 +33,6 @@ dist-ssr
 .vercel
 .vercel.env
 .env*
+
+# Local scratch space — may contain data exports/backups, never commit
+.scratch/
