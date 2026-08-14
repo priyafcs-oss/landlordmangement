@@ -422,6 +422,7 @@ export type Database = {
           gasEmbeddedNetwork: boolean | null
           hasSwimmingPool: boolean | null
           id: string
+          inspectionFrequencyMonths: number | null
           insuranceAnnual: number | null
           interestRate: number | null
           landTaxAnnual: number | null
@@ -475,6 +476,7 @@ export type Database = {
           gasEmbeddedNetwork?: boolean | null
           hasSwimmingPool?: boolean | null
           id: string
+          inspectionFrequencyMonths?: number | null
           insuranceAnnual?: number | null
           interestRate?: number | null
           landTaxAnnual?: number | null
@@ -528,6 +530,7 @@ export type Database = {
           gasEmbeddedNetwork?: boolean | null
           hasSwimmingPool?: boolean | null
           id?: string
+          inspectionFrequencyMonths?: number | null
           insuranceAnnual?: number | null
           interestRate?: number | null
           landTaxAnnual?: number | null

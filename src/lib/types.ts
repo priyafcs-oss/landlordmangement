@@ -60,6 +60,8 @@ export interface Property {
   electricityEmbeddedNetwork?: boolean;
   gasEmbeddedNetwork?: boolean;
   hasSwimmingPool?: boolean;
+  /** How often this property should be routinely inspected. Unset falls back to the app default (6 months). */
+  inspectionFrequencyMonths?: number;
 }
 
 export interface Tenant {

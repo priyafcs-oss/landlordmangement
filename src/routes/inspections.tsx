@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Plus,
   Trash2,
@@ -34,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { todayISO, daysUntil, inspectionDueStatus } from "@/lib/calculations";
+import { todayISO, daysUntil, inspectionDueStatus, addMonths, propertyInspectionCadenceDays } from "@/lib/calculations";
 import { openGmailCompose } from "@/lib/emailPdf";
 import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Property, Tenant } from "@/lib/types";
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
@@ -61,7 +62,10 @@ function InspectionsPage() {
   );
   const overdueProperties = state.properties.filter((p) => {
     if (overdueScheduled.some((i) => i.propertyId === p.id)) return false; // already counted above
-    return inspectionDueStatus(p.id, state.inspections).overdue && !hasFutureScheduled(p.id, state.inspections);
+    return (
+      inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue &&
+      !hasFutureScheduled(p.id, state.inspections)
+    );
   });
 
   const upcoming = state.inspections
@@ -95,7 +99,7 @@ function InspectionsPage() {
             <InspectionRow key={i.id} inspection={i} overdue />
           ))}
           {overdueProperties.map((p) => {
-            const status = inspectionDueStatus(p.id, state.inspections);
+            const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
             const tenant = currentTenantOf(p.id, state.tenants);
             return (
               <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
@@ -128,6 +132,8 @@ function InspectionsPage() {
         </CardContent>
       </Card>
 
+      <CalendarOverview />
+
       <div className="space-y-3">
         {state.properties.map((property) => (
           <PropertyInspectionGroup key={property.id} property={property} />
@@ -137,20 +143,118 @@ function InspectionsPage() {
   );
 }
 
+/** Month-grid view — each day is colour-coded by the "worst" status among that day's inspections (overdue > scheduled > completed), so clustering and gaps are visible at a glance. Click a day to see (and act on) what's booked. */
+function CalendarOverview() {
+  const { state } = useStore();
+  const [selected, setSelected] = useState<Date | undefined>(undefined);
+
+  const byDay = new Map<string, Inspection[]>();
+  for (const i of state.inspections) {
+    if (!i.date) continue;
+    const list = byDay.get(i.date) ?? [];
+    list.push(i);
+    byDay.set(i.date, list);
+  }
+
+  const overdueDates: Date[] = [];
+  const scheduledDates: Date[] = [];
+  const completedDates: Date[] = [];
+  for (const [date, items] of byDay) {
+    const d = new Date(date);
+    if (items.some((i) => i.status === "Scheduled" && i.date < todayISO())) overdueDates.push(d);
+    else if (items.some((i) => i.status === "Scheduled")) scheduledDates.push(d);
+    else completedDates.push(d);
+  }
+
+  // Local-date formatting, not toISOString(): the calendar hands back a local-midnight Date, and
+  // converting that to UTC would roll it back a day for any positive UTC offset (e.g. Australia).
+  const selectedIso = selected
+    ? `${selected.getFullYear()}-${String(selected.getMonth() + 1).padStart(2, "0")}-${String(selected.getDate()).padStart(2, "0")}`
+    : undefined;
+  const selectedInspections = selectedIso ? (byDay.get(selectedIso) ?? []) : [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <CalendarClock className="h-4 w-4" />
+          Calendar
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4 lg:flex-row">
+        <div>
+          <Calendar
+            mode="single"
+            selected={selected}
+            onSelect={setSelected}
+            modifiers={{ overdue: overdueDates, scheduled: scheduledDates, completed: completedDates }}
+            modifiersClassNames={{
+              overdue: "bg-destructive/20 rounded-md",
+              scheduled: "bg-blue-500/15 rounded-md",
+              completed: "bg-emerald-500/15 rounded-md",
+            }}
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-destructive/60" /> Overdue
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-blue-500/60" /> Scheduled
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/60" /> Completed
+            </span>
+          </div>
+        </div>
+        <div className="flex-1 space-y-2">
+          <div className="text-sm font-medium">{selected ? selected.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" }) : "Select a day to see what's booked"}</div>
+          {selected && selectedInspections.length === 0 && (
+            <div className="text-sm text-muted-foreground">Nothing booked this day.</div>
+          )}
+          {selectedInspections.map((i) => (
+            <InspectionRow key={i.id} inspection={i} overdue={i.status === "Scheduled" && i.date < todayISO()} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function hasFutureScheduled(propertyId: string, inspections: Inspection[]): boolean {
   return inspections.some((i) => i.propertyId === propertyId && i.status === "Scheduled" && i.date >= todayISO());
 }
 
+/** When a property has an inspection frequency set, completing an inspection books the next one automatically. */
+function autoBookNext(
+  completed: Inspection,
+  properties: Property[],
+  inspections: Inspection[],
+  addInspection: (i: Omit<Inspection, "id">) => void,
+) {
+  const property = properties.find((p) => p.id === completed.propertyId);
+  const freq = property?.inspectionFrequencyMonths;
+  if (!freq || hasFutureScheduled(completed.propertyId, inspections)) return;
+  addInspection({
+    propertyId: completed.propertyId,
+    tenantId: completed.tenantId,
+    date: addMonths(completed.date, freq),
+    type: completed.type,
+    status: "Scheduled",
+  });
+  toast.success(`Next inspection auto-booked for ${addMonths(completed.date, freq)}`);
+}
+
 /** One line in the Overdue/Upcoming lists — property, tenant, date, and the three actions the user asked for: done, reschedule, view. */
 function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdue?: boolean }) {
-  const { state, updateInspection } = useStore();
+  const { state, updateInspection, addInspection } = useStore();
   const property = state.properties.find((p) => p.id === inspection.propertyId);
   const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenantOf(inspection.propertyId, state.tenants);
   const [rescheduling, setRescheduling] = useState(false);
   const [newDate, setNewDate] = useState(inspection.date);
 
   const markDone = () => {
-    updateInspection(inspection.id, { status: "Completed", date: todayISO() });
+    updateInspection(inspection.id, { status: "Completed" });
+    autoBookNext(inspection, state.properties, state.inspections, addInspection);
     toast.success("Marked as done");
   };
 
@@ -159,6 +263,18 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
     setRescheduling(false);
     toast.success(`Rescheduled to ${newDate}`);
   };
+
+  const emailTenant = () => {
+    if (!tenant?.email) return toast.error("This tenant has no email on file");
+    const propertyLabel = property?.alias || property?.address || "";
+    openGmailCompose(
+      tenant.email,
+      `Upcoming ${inspection.type.toLowerCase()} inspection — ${propertyLabel}`,
+      `Hi ${tenant.name},\n\nJust a heads up that a ${inspection.type.toLowerCase()} inspection is scheduled for ${inspection.date} at ${propertyLabel}.\n\nPlease let us know if this time doesn't work.\n\nThanks,\n${state.landlordProfile.fullName || "The Landlord"}`,
+    );
+  };
+
+  const daysAway = daysUntil(inspection.date);
 
   return (
     <div className={`rounded-md border p-3 text-sm ${overdue ? "border-destructive/40 bg-destructive/5" : ""}`}>
@@ -171,12 +287,21 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          <Badge variant={overdue ? "destructive" : "outline"}>{overdue ? "Overdue" : "Scheduled"}</Badge>
+          {overdue ? (
+            <Badge variant="destructive">Overdue</Badge>
+          ) : (
+            <Badge variant={daysAway <= 7 ? "destructive" : "outline"}>
+              {daysAway === 0 ? "Today" : daysAway === 1 ? "Tomorrow" : `In ${daysAway} days`}
+            </Badge>
+          )}
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={markDone}>
             <CheckCircle2 className="h-3 w-3" /> Done
           </Button>
           <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setRescheduling((r) => !r)}>
             <CalendarClock className="h-3 w-3" /> Reschedule
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={emailTenant}>
+            <Mail className="h-3 w-3" /> Email tenant
           </Button>
           <InspectionDetailDialog inspection={inspection}>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs">
@@ -202,7 +327,7 @@ function PropertyInspectionGroup({ property }: { property: Property }) {
   const inspections = state.inspections
     .filter((i) => i.propertyId === property.id)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
-  const status = inspectionDueStatus(property.id, state.inspections);
+  const status = inspectionDueStatus(property.id, state.inspections, propertyInspectionCadenceDays(property));
   const [open, setOpen] = useState(false);
 
   if (inspections.length === 0) return null;
@@ -291,7 +416,9 @@ function BookInspectionDialog({
     if (o) {
       const preselect = defaultPropertyId
         ? [defaultPropertyId]
-        : state.properties.filter((p) => inspectionDueStatus(p.id, state.inspections).overdue).map((p) => p.id);
+        : state.properties
+            .filter((p) => inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue)
+            .map((p) => p.id);
       setSelected(new Set(preselect));
       setDate(todayISO());
       setType("Routine");
@@ -350,7 +477,7 @@ function BookInspectionDialog({
           <div className="text-sm font-medium">Properties (overdue ones pre-selected)</div>
           <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
             {state.properties.map((p) => {
-              const status = inspectionDueStatus(p.id, state.inspections);
+              const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
               const tenant = currentTenantOf(p.id, state.tenants);
               return (
                 <label key={p.id} className="flex items-center gap-2 rounded p-1.5 text-sm hover:bg-muted/50">
@@ -379,7 +506,7 @@ function BookInspectionDialog({
 
 /** View/act on an existing inspection: mark done, reschedule, upload a report, flag issues (create maintenance items / follow up with the tenant), and — optionally — fill in a full room-by-room checklist. */
 function InspectionDetailDialog({ inspection, children }: { inspection: Inspection; children: React.ReactNode }) {
-  const { state, updateInspection, addMaintenanceRequest, consumeAiBudget } = useStore();
+  const { state, updateInspection, addInspection, addMaintenanceRequest, consumeAiBudget } = useStore();
   const [open, setOpen] = useState(false);
   const property = state.properties.find((p) => p.id === inspection.propertyId);
   const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenantOf(inspection.propertyId, state.tenants);
@@ -499,8 +626,8 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
 
   const markDone = () => {
     setStatus("Completed");
-    setDate(todayISO());
-    persist({ status: "Completed", date: todayISO() });
+    persist({ status: "Completed" });
+    autoBookNext({ ...inspection, date }, state.properties, state.inspections, addInspection);
     toast.success("Marked as done");
   };
 
@@ -580,6 +707,26 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
               <CheckCircle2 className="h-3 w-3" /> Mark done
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 text-xs"
+            onClick={() => {
+              if (!tenant?.email) return toast.error("This tenant has no email on file");
+              const propertyLabel = property?.alias || property?.address || "";
+              openGmailCompose(
+                tenant.email,
+                `${status === "Completed" ? "Inspection" : "Upcoming inspection"} — ${propertyLabel}`,
+                `Hi ${tenant.name},\n\n${
+                  status === "Completed"
+                    ? `Following up on the ${inspection.type.toLowerCase()} inspection on ${date}.`
+                    : `Just a heads up that a ${inspection.type.toLowerCase()} inspection is scheduled for ${date} at ${propertyLabel}.`
+                }\n\nThanks,\n${state.landlordProfile.fullName || "The Landlord"}`,
+              );
+            }}
+          >
+            <Mail className="h-3 w-3" /> Email tenant
+          </Button>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

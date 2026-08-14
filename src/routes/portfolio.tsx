@@ -470,6 +470,7 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
     landTaxAnnual: property?.landTaxAnnual?.toString() ?? "",
     repairsMaintenanceAnnual: property?.repairsMaintenanceAnnual?.toString() ?? "",
     pmFeePercent: property?.pmFeePercent?.toString() ?? "",
+    inspectionFrequencyMonths: property?.inspectionFrequencyMonths?.toString() ?? "",
     notes: property?.notes ?? "",
   });
   const [photos, setPhotos] = useState<{ name: string; data: string }[]>(property?.photos ?? []);
@@ -674,6 +675,23 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
                   <Field label="PM fee (%)">
                     <Input type="number" step="0.01" value={form.pmFeePercent} onChange={(e) => setForm({ ...form, pmFeePercent: e.target.value })} />
                   </Field>
+                  <Field label="Inspection frequency">
+                    <Select
+                      value={form.inspectionFrequencyMonths || "__default__"}
+                      onValueChange={(v) => setForm({ ...form, inspectionFrequencyMonths: v === "__default__" ? "" : v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">Default (6 months)</SelectItem>
+                        <SelectItem value="3">Every 3 months</SelectItem>
+                        <SelectItem value="4">Every 4 months</SelectItem>
+                        <SelectItem value="6">Every 6 months</SelectItem>
+                        <SelectItem value="12">Every 12 months</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
                 </div>
               </div>
 
@@ -763,6 +781,9 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
                   ? parseFloat(form.repairsMaintenanceAnnual)
                   : undefined,
                 pmFeePercent: form.pmFeePercent ? parseFloat(form.pmFeePercent) : undefined,
+                inspectionFrequencyMonths: form.inspectionFrequencyMonths
+                  ? parseInt(form.inspectionFrequencyMonths, 10)
+                  : undefined,
                 notes: form.notes || undefined,
                 photos: photos.length > 0 ? photos : undefined,
                 videos: videos.length > 0 ? videos : undefined,

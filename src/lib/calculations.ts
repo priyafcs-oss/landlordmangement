@@ -1,4 +1,4 @@
-import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice, Inspection } from "./types";
+import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice, Inspection, Property } from "./types";
 
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;
@@ -34,6 +34,11 @@ export function todayISO(): string {
 /** Routine inspection cadence — kept as one constant so the Dashboard alert and the Inspections page never disagree. */
 export const INSPECTION_CADENCE_DAYS = 180;
 
+/** A property's configured inspection frequency (months), converted to days — falls back to the app default. */
+export function propertyInspectionCadenceDays(property: Property | undefined): number {
+  return property?.inspectionFrequencyMonths ? property.inspectionFrequencyMonths * 30 : INSPECTION_CADENCE_DAYS;
+}
+
 export function lastCompletedInspection(propertyId: string, inspections: Inspection[]): Inspection | undefined {
   return inspections
     .filter((i) => i.propertyId === propertyId && i.status === "Completed")
@@ -47,12 +52,17 @@ export interface InspectionDueStatus {
   overdue: boolean;
 }
 
-export function inspectionDueStatus(propertyId: string, inspections: Inspection[]): InspectionDueStatus {
+/** `cadenceDays` lets a property override the default 6-month routine-inspection cadence (see Property.inspectionFrequencyMonths). */
+export function inspectionDueStatus(
+  propertyId: string,
+  inspections: Inspection[],
+  cadenceDays: number = INSPECTION_CADENCE_DAYS,
+): InspectionDueStatus {
   const last = lastCompletedInspection(propertyId, inspections);
   if (!last) return { last: undefined, daysSinceLast: null, dueDate: null, overdue: true };
   const daysSinceLast = daysBetween(last.date, todayISO());
-  const dueDate = addDays(last.date, INSPECTION_CADENCE_DAYS);
-  return { last, daysSinceLast, dueDate, overdue: daysSinceLast > INSPECTION_CADENCE_DAYS };
+  const dueDate = addDays(last.date, cadenceDays);
+  return { last, daysSinceLast, dueDate, overdue: daysSinceLast > cadenceDays };
 }
 
 export interface LedgerRow {

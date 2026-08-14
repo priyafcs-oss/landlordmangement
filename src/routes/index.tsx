@@ -26,6 +26,7 @@ import {
   daysUntil,
   todayISO,
   inspectionDueStatus,
+  propertyInspectionCadenceDays,
 } from "@/lib/calculations";
 import {
   AlertTriangle,
@@ -86,7 +87,9 @@ function DashboardPage() {
     return d >= 0 && d <= 90;
   });
 
-  const complianceAlerts = state.properties.filter((p) => inspectionDueStatus(p.id, state.inspections).overdue);
+  const complianceAlerts = state.properties.filter(
+    (p) => inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue,
+  );
 
   // Chart data: last 6 months synthetic based on ledger + emis
   const months: { name: string; cashflow: number; equity: number }[] = [];
@@ -218,7 +221,7 @@ function DashboardPage() {
           <CardContent className="space-y-2 text-sm">
             {complianceAlerts.length === 0 && <div className="text-muted-foreground">All properties inspected recently.</div>}
             {complianceAlerts.map((p) => {
-              const status = inspectionDueStatus(p.id, state.inspections);
+              const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
               return (
                 <div key={p.id} className="rounded-md border p-3">
                   <div className="font-medium">{p.address}</div>
