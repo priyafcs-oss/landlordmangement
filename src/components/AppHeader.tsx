@@ -18,10 +18,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { User, ShieldAlert, Lock } from "lucide-react";
+import { User, ShieldAlert, Lock, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { TenantPortal } from "./TenantPortal";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { supabase } from "@/integrations/supabase/client";
 
 export function AppHeader() {
   const { state } = useStore();
@@ -98,6 +99,9 @@ export function AppHeader() {
             </div>
           </>
         )}
+        <Button size="icon" variant="ghost" title="Log out" onClick={() => void supabase.auth.signOut()}>
+          <LogOut className="h-4 w-4" />
+        </Button>
       </div>
     </header>
   );

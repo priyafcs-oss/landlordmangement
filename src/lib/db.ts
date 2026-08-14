@@ -35,6 +35,25 @@ export async function selectAll<T>(table: string): Promise<T[]> {
   return (data ?? []) as T[];
 }
 
+export interface PublicProperty {
+  id: string;
+  address: string;
+  alias: string | null;
+  tenantCode: string | null;
+}
+
+/**
+ * Minimal, anonymous-readable property lookup for the public maintenance-request form — only
+ * the columns needed to match a typed address/tenant-code to a property id. Deliberately not
+ * `selectAll`: that pulls every column (purchase price, loan balance, etc.) from the full
+ * `properties` table, which anon can no longer read since Phase 1 auth was added.
+ */
+export async function selectPublicProperties(): Promise<PublicProperty[]> {
+  const { data, error } = await db.from("properties_public").select("*");
+  report("select properties_public", error);
+  return (data ?? []) as PublicProperty[];
+}
+
 export async function upsertRow(table: string, row: Record<string, unknown>) {
   const { error } = await db.from(table).upsert(stripUndefined(row));
   report(`upsert ${table}`, error);

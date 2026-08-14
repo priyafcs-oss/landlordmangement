@@ -15,6 +15,7 @@ import { StoreProvider } from "@/lib/store";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppHeader } from "@/components/AppHeader";
+import { AuthGate } from "@/components/AuthGate";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -98,31 +99,39 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const isPublic = pathname.startsWith("/maintenance");
+  // StoreProvider's initial data fetch only runs once, on mount — it must sit INSIDE AuthGate so
+  // it mounts fresh (and actually fetches) only once a session exists, rather than firing once
+  // pre-login (denied by RLS, silently empty) and never retrying after sign-in. The public
+  // /maintenance route has no gate at all, so StoreProvider sits directly under it there.
+  if (isPublic) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <StoreProvider>
+          <main className="min-h-screen bg-background">
+            <Outlet />
+          </main>
+          <Toaster richColors position="top-right" />
+        </StoreProvider>
+      </QueryClientProvider>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
-      <StoreProvider>
-        {isPublic ? (
-          <>
-            <main className="min-h-screen bg-background">
-              <Outlet />
-            </main>
-            <Toaster richColors position="top-right" />
-          </>
-        ) : (
-          <>
-            <SidebarProvider>
-              <AppSidebar />
-              <SidebarInset className="min-w-0">
-                <AppHeader />
-                <main className="flex-1 overflow-x-hidden">
-                  <Outlet />
-                </main>
-              </SidebarInset>
-            </SidebarProvider>
-            <Toaster richColors position="top-right" />
-          </>
-        )}
-      </StoreProvider>
+      <AuthGate>
+        <StoreProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset className="min-w-0">
+              <AppHeader />
+              <main className="flex-1 overflow-x-hidden">
+                <Outlet />
+              </main>
+            </SidebarInset>
+          </SidebarProvider>
+          <Toaster richColors position="top-right" />
+        </StoreProvider>
+      </AuthGate>
     </QueryClientProvider>
   );
 }

@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
+import { selectPublicProperties, type PublicProperty } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,11 @@ export const Route = createFileRoute("/maintenance")({
 const CATEGORIES = ["Plumbing", "Electrical", "Heating / Cooling", "Appliance", "Structural", "Pest", "Other"];
 
 function MaintenancePage() {
-  const { state, addMaintenanceRequest } = useStore();
+  const { addMaintenanceRequest } = useStore();
+  const [properties, setProperties] = useState<PublicProperty[]>([]);
+  useEffect(() => {
+    void selectPublicProperties().then(setProperties);
+  }, []);
   const [addressOrCode, setAddressOrCode] = useState("");
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
@@ -41,13 +46,13 @@ function MaintenancePage() {
       const q = input.trim().toLowerCase();
       if (!q) return undefined;
       // Exact tenant code first
-      const byCode = state.properties.find((p) => p.tenantCode?.toLowerCase() === q);
+      const byCode = properties.find((p) => p.tenantCode?.toLowerCase() === q);
       if (byCode) return byCode.id;
       // Substring match on address
-      const byAddr = state.properties.find((p) => p.address.toLowerCase().includes(q));
+      const byAddr = properties.find((p) => p.address.toLowerCase().includes(q));
       return byAddr?.id;
     };
-  }, [state.properties]);
+  }, [properties]);
 
   const onPhoto = (files: FileList | null) => {
     if (!files) return;
