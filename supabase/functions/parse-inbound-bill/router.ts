@@ -17,7 +17,18 @@ export async function routeInboundDocument(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<RouteResult> {
-  const classification = await classifyDocument(input);
+  let classification;
+  try {
+    classification = await classifyDocument(input);
+  } catch (e) {
+    // Unlike every downstream extractor, classification previously had no guard here — a
+    // Gemini failure (bad/oversized attachment, quota, transient outage) propagated all the way
+    // up as an unhandled exception, surfacing to the webhook caller as an opaque 500 instead of
+    // a clear, retriable-looking 422 with the actual reason.
+    const error = e instanceof Error ? e.message : "Document classification failed";
+    console.error(`[parse-inbound-bill] classification failed for "${input.pdfFileName ?? "(no attachment)"}": ${error}`);
+    return { ok: false, error: `Classification failed: ${error}` };
+  }
 
   switch (classification.document_type) {
     case "bill":
