@@ -114,7 +114,11 @@ interface StoreCtx {
   deleteInspection: (id: string) => void;
 
   addRentChange: (r: Omit<RentChange, "id">) => void;
+  updateRentChange: (id: string, r: Partial<RentChange>) => void;
+  deleteRentChange: (id: string) => void;
   addLeaseHistory: (h: Omit<LeaseHistory, "id">) => void;
+  updateLeaseHistory: (id: string, h: Partial<LeaseHistory>) => void;
+  deleteLeaseHistory: (id: string) => void;
 
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
@@ -494,10 +498,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void upsertRow(TABLES.rentChanges, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, rentChanges: [...s.rentChanges, row] }));
     },
+    updateRentChange: (id, patch) => {
+      void updateRow(TABLES.rentChanges, id, patch as Record<string, unknown>);
+      set((s) => {
+        const rentChanges = s.rentChanges.map((r) => (r.id === id ? { ...r, ...patch } : r));
+        const changed = rentChanges.find((r) => r.id === id);
+        const tenants = changed
+          ? recomputePaidUp(changed.tenantId, s.tenants, s.ledger, rentChanges)
+          : s.tenants;
+        return { ...s, rentChanges, tenants };
+      });
+    },
+    deleteRentChange: (id) => {
+      void deleteRow(TABLES.rentChanges, id);
+      set((s) => {
+        const removed = s.rentChanges.find((r) => r.id === id);
+        const rentChanges = s.rentChanges.filter((r) => r.id !== id);
+        const tenants = removed
+          ? recomputePaidUp(removed.tenantId, s.tenants, s.ledger, rentChanges)
+          : s.tenants;
+        return { ...s, rentChanges, tenants };
+      });
+    },
     addLeaseHistory: (h) => {
       const row: LeaseHistory = { ...h, id: uid("lh") };
       void upsertRow(TABLES.leaseHistory, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, leaseHistory: [...s.leaseHistory, row] }));
+    },
+    updateLeaseHistory: (id, patch) => {
+      void updateRow(TABLES.leaseHistory, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, leaseHistory: s.leaseHistory.map((h) => (h.id === id ? { ...h, ...patch } : h)) }));
+    },
+    deleteLeaseHistory: (id) => {
+      void deleteRow(TABLES.leaseHistory, id);
+      set((s) => ({ ...s, leaseHistory: s.leaseHistory.filter((h) => h.id !== id) }));
     },
 
     addMaintenanceRequest: async (m) => {

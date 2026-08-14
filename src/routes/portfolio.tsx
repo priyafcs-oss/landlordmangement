@@ -56,6 +56,7 @@ import type {
   TenantLeaseProposalPayload,
   RentLedgerProposalPayload,
   RentChange,
+  LeaseHistory,
   ContactPerson,
 } from "@/lib/types";
 import { toast } from "sonner";
@@ -805,7 +806,7 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
 
 
 function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; onClose: () => void }) {
-  const { state, deleteTenant } = useStore();
+  const { state } = useStore();
   const prop = state.properties.find((p) => p.id === propertyId);
   const tenants = state.tenants.filter((t) => t.propertyId === propertyId);
   const loan = state.loans.find((l) => l.propertyId === propertyId);
@@ -895,16 +896,7 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
                 </div>
                 {tenants.length === 0 && <div className="text-muted-foreground">No tenants linked.</div>}
                 {tenants.map((t) => (
-                  <TenantRow
-                    key={t.id}
-                    tenant={t}
-                    onDelete={() => {
-                      if (confirm("Delete tenant and their ledger history?")) {
-                        deleteTenant(t.id);
-                        toast.success("Tenant removed");
-                      }
-                    }}
-                  />
+                  <TenantRow key={t.id} tenant={t} />
                 ))}
               </div>
 
@@ -1893,7 +1885,7 @@ function BillRow({ bill, onPaid, onDelete }: { bill: PropertyBill; onPaid: () =>
 
 
 
-function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void }) {
+function TenantRow({ tenant }: { tenant: Tenant }) {
   const { state, convertToPeriodic } = useStore();
   const property = state.properties.find((p) => p.id === tenant.propertyId);
   const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
@@ -1914,7 +1906,8 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
           </div>
           {latestRentChange && (
             <div className="mt-0.5 text-xs text-muted-foreground">
-              Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (increased{" "}
+              Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (
+              {latestRentChange.newRent > latestRentChange.oldRent ? "increased" : "decreased"}{" "}
               {latestRentChange.changeDate})
             </div>
           )}
@@ -1963,9 +1956,7 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
               <Pencil className="h-4 w-4" />
             </Button>
           </TenantDialog>
-          <Button size="icon" variant="ghost" onClick={onDelete}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <DeleteTenantDialog tenant={tenant} />
         </div>
       </div>
       {isExpiredFixedTerm && (
@@ -2006,32 +1997,227 @@ function TenantRow({ tenant, onDelete }: { tenant: Tenant; onDelete: () => void 
           {showHist && (
             <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
               {history.map((h) => (
-                <div key={h.id} className="flex flex-wrap items-center gap-2">
-                  <span>
-                    Previous lease: {h.pastStartDate} → {h.pastEndDate || "Periodic"} @ {fmtCurrency(h.pastRent)}/
-                    {h.pastFrequency}
-                  </span>
-                  {h.leaseDocumentFileData && (
-                    <a
-                      href={h.leaseDocumentFileData}
-                      download={h.leaseDocumentFileName || "lease.pdf"}
-                      className="text-primary underline"
-                    >
-                      View lease
-                    </a>
-                  )}
-                </div>
+                <LeaseHistoryRow key={h.id} entry={h} />
               ))}
               {rentChanges.map((r) => (
-                <div key={r.id}>
-                  {r.changeDate}: rent {fmtCurrency(r.oldRent)} → {fmtCurrency(r.newRent)}
-                </div>
+                <RentChangeRow key={r.id} entry={r} />
               ))}
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function RentChangeRow({ entry }: { entry: RentChange }) {
+  const { updateRentChange, deleteRentChange } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [changeDate, setChangeDate] = useState(entry.changeDate);
+  const [oldRent, setOldRent] = useState(entry.oldRent.toString());
+  const [newRent, setNewRent] = useState(entry.newRent.toString());
+
+  if (!editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span>
+          {entry.changeDate}: rent {fmtCurrency(entry.oldRent)} → {fmtCurrency(entry.newRent)}
+        </span>
+        <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEditing(true)}>
+          <Pencil className="h-3 w-3" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-5 w-5"
+          onClick={() => {
+            if (confirm("Delete this rent-change record? Paid-up-to date will be recalculated.")) {
+              deleteRentChange(entry.id);
+              toast.success("Rent-change record deleted");
+            }
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input type="date" value={changeDate} onChange={(e) => setChangeDate(e.target.value)} className="h-6 w-32 text-xs" />
+      <Input
+        type="number"
+        value={oldRent}
+        onChange={(e) => setOldRent(e.target.value)}
+        className="h-6 w-20 text-xs"
+        title="Old rent"
+      />
+      <span>→</span>
+      <Input
+        type="number"
+        value={newRent}
+        onChange={(e) => setNewRent(e.target.value)}
+        className="h-6 w-20 text-xs"
+        title="New rent"
+      />
+      <Button
+        size="sm"
+        className="h-6 px-2 text-xs"
+        onClick={() => {
+          updateRentChange(entry.id, {
+            changeDate,
+            oldRent: parseFloat(oldRent) || 0,
+            newRent: parseFloat(newRent) || 0,
+          });
+          setEditing(false);
+          toast.success("Rent-change record updated");
+        }}
+      >
+        Save
+      </Button>
+      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setEditing(false)}>
+        <X className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}
+
+function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
+  const { updateLeaseHistory, deleteLeaseHistory } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [pastStartDate, setPastStartDate] = useState(entry.pastStartDate);
+  const [pastEndDate, setPastEndDate] = useState(entry.pastEndDate ?? "");
+  const [pastRent, setPastRent] = useState(entry.pastRent.toString());
+
+  if (!editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span>
+          Previous lease: {entry.pastStartDate} → {entry.pastEndDate || "Periodic"} @ {fmtCurrency(entry.pastRent)}/
+          {entry.pastFrequency}
+        </span>
+        {entry.leaseDocumentFileData && (
+          <a
+            href={entry.leaseDocumentFileData}
+            download={entry.leaseDocumentFileName || "lease.pdf"}
+            className="text-primary underline"
+          >
+            View lease
+          </a>
+        )}
+        <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEditing(true)}>
+          <Pencil className="h-3 w-3" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-5 w-5"
+          onClick={() => {
+            if (confirm("Delete this lease-history record?")) {
+              deleteLeaseHistory(entry.id);
+              toast.success("Lease-history record deleted");
+            }
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input type="date" value={pastStartDate} onChange={(e) => setPastStartDate(e.target.value)} className="h-6 w-32 text-xs" />
+      <span>→</span>
+      <Input
+        type="date"
+        value={pastEndDate}
+        onChange={(e) => setPastEndDate(e.target.value)}
+        className="h-6 w-32 text-xs"
+        placeholder="Periodic"
+      />
+      <span>@</span>
+      <Input type="number" value={pastRent} onChange={(e) => setPastRent(e.target.value)} className="h-6 w-20 text-xs" />
+      <Button
+        size="sm"
+        className="h-6 px-2 text-xs"
+        onClick={() => {
+          updateLeaseHistory(entry.id, { pastStartDate, pastEndDate: pastEndDate || undefined, pastRent: parseFloat(pastRent) || 0 });
+          setEditing(false);
+          toast.success("Lease-history record updated");
+        }}
+      >
+        Save
+      </Button>
+      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setEditing(false)}>
+        <X className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Deleting a tenant cascades to their entire ledger, invoices, rent-change history and
+ * lease-history — a single-click browser confirm() was too easy to fire by accident given how
+ * much data disappears. Requires typing the tenant's exact name before the button unlocks.
+ */
+function DeleteTenantDialog({ tenant }: { tenant: Tenant }) {
+  const { state, deleteTenant } = useStore();
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
+  const ledgerCount = state.ledger.filter((e) => e.tenantId === tenant.id).length;
+  const invoiceCount = state.invoices.filter((i) => i.tenantId === tenant.id).length;
+  const rentChangeCount = state.rentChanges.filter((r) => r.tenantId === tenant.id).length;
+  const leaseHistoryCount = state.leaseHistory.filter((h) => h.tenantId === tenant.id).length;
+
+  const canDelete = confirmText.trim() === tenant.name;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setConfirmText("");
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="icon" variant="ghost" title="Delete tenant">
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete {tenant.name}?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+            <div className="font-medium text-destructive">This cannot be undone.</div>
+            <div className="mt-1 text-muted-foreground">
+              Deletes the tenant record and everything tied to it: {ledgerCount} ledger entr{ledgerCount === 1 ? "y" : "ies"},{" "}
+              {invoiceCount} invoice(s), {rentChangeCount} rent-change record(s), {leaseHistoryCount} lease-history record(s).
+            </div>
+          </div>
+          <Field label={`Type "${tenant.name}" to confirm`}>
+            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoComplete="off" />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="destructive"
+            disabled={!canDelete}
+            onClick={() => {
+              deleteTenant(tenant.id);
+              setOpen(false);
+              toast.success("Tenant removed");
+            }}
+          >
+            Delete tenant
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2046,11 +2232,11 @@ function computeLeaseEnd(start: string, duration: LeaseDuration | ""): string {
 
 /**
  * Shared 12-month rent-increase compliance check (most Australian jurisdictions restrict rent
- * increases to once every 12 months). Used by both the tenant edit form and the dedicated
- * "Increase Rent" action so the rule can't drift between the two entry points.
+ * increases — but not decreases — to once every 12 months). Used by both the tenant edit form
+ * and the dedicated "Change Rent" action so the rule can't drift between the two entry points.
  */
 function checkRentIncreaseCompliance(tenant: Tenant, newRent: number, rentChanges: RentChange[]): boolean {
-  if (newRent === tenant.rentAmount) return true;
+  if (newRent <= tenant.rentAmount) return true;
   const last = rentChanges
     .filter((r) => r.tenantId === tenant.id)
     .sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
@@ -2066,8 +2252,9 @@ function checkRentIncreaseCompliance(tenant: Tenant, newRent: number, rentChange
 }
 
 /**
- * A standalone rent bump — distinct from lease renewal, since periodic/rolling tenancies get
- * rent increases without a formal renewal in most Australian jurisdictions.
+ * A standalone rent change — distinct from lease renewal, since periodic/rolling tenancies get
+ * rent changes without a formal renewal in most Australian jurisdictions. Covers increases and
+ * decreases; only increases are subject to the 12-month compliance check.
  */
 export function IncreaseRentDialog({ tenant, trigger }: { tenant: Tenant; trigger?: React.ReactNode }) {
   const { state, updateTenant } = useStore();
@@ -2088,14 +2275,14 @@ export function IncreaseRentDialog({ tenant, trigger }: { tenant: Tenant; trigge
     >
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button size="icon" variant="ghost" title="Increase rent">
+          <Button size="icon" variant="ghost" title="Change rent">
             <TrendingUp className="h-4 w-4" />
           </Button>
         )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Increase rent — {tenant.name}</DialogTitle>
+          <DialogTitle>Change rent — {tenant.name}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Current rent">
@@ -2112,14 +2299,17 @@ export function IncreaseRentDialog({ tenant, trigger }: { tenant: Tenant; trigge
           <Button
             onClick={() => {
               const rent = parseFloat(newRent) || 0;
-              if (rent <= tenant.rentAmount) return toast.error("New rent must be higher than the current rent");
+              if (rent === tenant.rentAmount) return toast.error("New rent must be different from the current rent");
+              if (rent <= 0) return toast.error("Rent must be greater than zero");
               if (!checkRentIncreaseCompliance(tenant, rent, state.rentChanges)) return;
               updateTenant(tenant.id, { rentAmount: rent, lastRentIncreaseDate: effectiveDate });
               setOpen(false);
-              toast.success("Rent increased. Previous rent recorded in history.");
+              toast.success(
+                rent > tenant.rentAmount ? "Rent increased. Previous rent recorded in history." : "Rent decreased. Previous rent recorded in history.",
+              );
             }}
           >
-            Confirm Increase
+            Confirm Change
           </Button>
         </DialogFooter>
       </DialogContent>

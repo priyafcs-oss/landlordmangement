@@ -469,7 +469,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
               tenant={tenant}
               trigger={
                 <Button size="sm" variant="outline" className="gap-1">
-                  <TrendingUp className="h-3.5 w-3.5" /> Increase Rent
+                  <TrendingUp className="h-3.5 w-3.5" /> Change Rent
                 </Button>
               }
             />

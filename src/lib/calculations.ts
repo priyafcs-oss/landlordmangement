@@ -118,9 +118,24 @@ export function buildTenantLedger(
     while (cursor <= today && cursor <= cap) {
       // Cycle spans `period` calendar days: cursor (day 1) ... cursor+period-1 (day 7 for weekly).
       const cycleEnd = addDays(cursor, period - 1);
-      // Charge the rent that was actually in effect at the start of this cycle — not today's
-      // rate applied retroactively to every past cycle.
-      const cycleAmount = rentAmountOnDate(tenant, rentChanges, cursor);
+      // Charge the rent actually in effect during this cycle — not today's rate applied
+      // retroactively to every past cycle. Most cycles have one constant rate throughout, so
+      // charge the flat nominal amount (avoids float drift from daily-rate rounding); only when
+      // a rent change actually falls inside this cycle do we pro-rate day by day, so a mid-week
+      // change lands in the week it actually took effect rather than being pushed to the next
+      // whole cycle.
+      const rateAtStart = rentAmountOnDate(tenant, rentChanges, cursor);
+      const rateAtEnd = rentAmountOnDate(tenant, rentChanges, cycleEnd);
+      let cycleAmount: number;
+      if (rateAtStart === rateAtEnd) {
+        cycleAmount = rateAtStart;
+      } else {
+        let sum = 0;
+        for (let d = cursor; d <= cycleEnd; d = addDays(d, 1)) {
+          sum += dailyRentRate(rentAmountOnDate(tenant, rentChanges, d), tenant.rentFrequency);
+        }
+        cycleAmount = Math.round(sum * 100) / 100;
+      }
       rows.push({
         id: `due-${tenant.id}-${cursor}`,
         date: cursor,
