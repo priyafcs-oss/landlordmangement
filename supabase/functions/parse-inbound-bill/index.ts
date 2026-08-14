@@ -7,6 +7,8 @@ interface ResendAttachmentMeta {
   id: string;
   filename: string;
   content_type: string;
+  /** "inline" = embedded in the email body (signature logos, tracking pixels) — not the actual document. */
+  content_disposition?: string;
 }
 
 interface ResendReceivedEmail {
@@ -70,8 +72,26 @@ function isSupportedAttachment(contentType: string): boolean {
   return contentType === "application/pdf" || contentType.startsWith("image/");
 }
 
+/**
+ * Picks the attachment most likely to actually BE the bill, not just the first supported one.
+ * Forwarded emails often carry inline images (signature logos, tracking pixels) ahead of the
+ * real document in the attachments array — a naive "first supported" pick grabs those instead
+ * of the PDF, feeding Gemini a signature image and getting a correctly-empty extraction back.
+ * Preference order: non-inline PDF > non-inline image > any PDF > any image.
+ */
+function pickAttachment(attachments: ResendAttachmentMeta[]): ResendAttachmentMeta | undefined {
+  const supported = attachments.filter((a) => isSupportedAttachment(a.content_type));
+  const notInline = supported.filter((a) => a.content_disposition !== "inline");
+  return (
+    notInline.find((a) => a.content_type === "application/pdf") ??
+    notInline[0] ??
+    supported.find((a) => a.content_type === "application/pdf") ??
+    supported[0]
+  );
+}
+
 async function normalize(email: ResendReceivedEmail, apiKey: string): Promise<NormalizedBillInput> {
-  const attachmentMeta = email.attachments?.find((a) => isSupportedAttachment(a.content_type));
+  const attachmentMeta = pickAttachment(email.attachments ?? []);
   const unsupported = email.attachments?.filter((a) => !isSupportedAttachment(a.content_type)) ?? [];
   if (unsupported.length > 0) {
     console.warn(
