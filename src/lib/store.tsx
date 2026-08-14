@@ -16,6 +16,9 @@ import type {
   PropertyBill,
   AiIntakeProposal,
   LeaseTemplateConfig,
+  Provider,
+  Entity,
+  ReportHistoryEntry,
 } from "./types";
 import {
   TABLES,
@@ -48,6 +51,8 @@ const defaultProfile: LandlordProfile = {
 const empty: AppState = {
   properties: [],
   tenants: [],
+  providers: [],
+  entities: [],
   ledger: [],
   invoices: [],
   loans: [],
@@ -62,6 +67,7 @@ const empty: AppState = {
   aiProposals: [],
   leaseTemplate: null,
   tenantInfoStatement: null,
+  reportHistory: [],
 };
 
 interface StoreCtx {
@@ -120,12 +126,21 @@ interface StoreCtx {
   updateLeaseHistory: (id: string, h: Partial<LeaseHistory>) => void;
   deleteLeaseHistory: (id: string) => void;
 
+  addProvider: (p: Omit<Provider, "id">) => void;
+  updateProvider: (id: string, p: Partial<Provider>) => void;
+  deleteProvider: (id: string) => void;
+
+  addEntity: (e: Omit<Entity, "id">) => void;
+  updateEntity: (id: string, e: Partial<Entity>) => void;
+  deleteEntity: (id: string) => void;
+
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
 
   updateLandlordProfile: (p: Partial<LandlordProfile>) => void;
   updateLeaseTemplate: (t: LeaseTemplateConfig | null) => void;
+  addReportHistoryEntry: (entry: ReportHistoryEntry) => void;
   updateTenantInfoStatement: (t: AppState["tenantInfoStatement"]) => void;
 
   addBill: (b: Omit<PropertyBill, "id">) => void;
@@ -159,6 +174,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const [
       properties,
       tenants,
+      providers,
+      entities,
       ledger,
       invoices,
       loans,
@@ -173,6 +190,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ] = await Promise.all([
       selectAll<Property>(TABLES.properties),
       selectAll<Tenant>(TABLES.tenants),
+      selectAll<Provider>(TABLES.providers),
+      selectAll<Entity>(TABLES.entities),
       selectAll<LedgerEntry>(TABLES.ledger),
       selectAll<TenantInvoice>(TABLES.invoices),
       selectAll<Loan>(TABLES.loans),
@@ -188,6 +207,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState({
       properties,
       tenants,
+      providers,
+      entities,
       ledger,
       invoices,
       loans,
@@ -203,6 +224,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       leaseTemplate: (settings?.leaseTemplate as LeaseTemplateConfig | undefined) ?? null,
       tenantInfoStatement:
         (settings?.tenantInfoStatement as AppState["tenantInfoStatement"] | undefined) ?? null,
+      reportHistory: (settings?.reportHistory as ReportHistoryEntry[] | undefined) ?? [],
     });
     setLoading(false);
   };
@@ -256,6 +278,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteWhere(TABLES.expenses, "propertyId", id);
       void deleteWhere(TABLES.inspections, "propertyId", id);
       void deleteWhere(TABLES.bills, "propertyId", id);
+      void deleteWhere(TABLES.providers, "propertyId", id);
       void deleteWhereIn(TABLES.ledger, "tenantId", tenantIds);
       void deleteWhereIn(TABLES.invoices, "tenantId", tenantIds);
       set((s) => ({
@@ -266,6 +289,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         expenses: s.expenses.filter((e) => e.propertyId !== id),
         inspections: s.inspections.filter((i) => i.propertyId !== id),
         bills: s.bills.filter((b) => b.propertyId !== id),
+        providers: s.providers.filter((p) => p.propertyId !== id),
         ledger: s.ledger.filter((e) => !tenantIds.includes(e.tenantId)),
         invoices: s.invoices.filter((i) => !tenantIds.includes(i.tenantId)),
       }));
@@ -534,6 +558,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({ ...s, leaseHistory: s.leaseHistory.filter((h) => h.id !== id) }));
     },
 
+    addProvider: (p) => {
+      const row: Provider = { ...p, id: uid("prov") };
+      void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, providers: [...s.providers, row] }));
+    },
+    updateProvider: (id, patch) => {
+      void updateRow(TABLES.providers, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, providers: s.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+    },
+    deleteProvider: (id) => {
+      void deleteRow(TABLES.providers, id);
+      set((s) => ({ ...s, providers: s.providers.filter((p) => p.id !== id) }));
+    },
+
+    addEntity: (e) => {
+      const row: Entity = { ...e, id: uid("ent") };
+      void upsertRow(TABLES.entities, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, entities: [...s.entities, row] }));
+    },
+    updateEntity: (id, patch) => {
+      void updateRow(TABLES.entities, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, entities: s.entities.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+    },
+    deleteEntity: (id) => {
+      const linkedPropertyIds = state.properties.filter((p) => p.entityId === id).map((p) => p.id);
+      void deleteRow(TABLES.entities, id);
+      linkedPropertyIds.forEach((pid) => void updateRow(TABLES.properties, pid, { entityId: null }));
+      set((s) => ({
+        ...s,
+        entities: s.entities.filter((e) => e.id !== id),
+        properties: s.properties.map((p) => (p.entityId === id ? { ...p, entityId: undefined } : p)),
+      }));
+    },
+
     addMaintenanceRequest: async (m) => {
       const row: MaintenanceRequest = {
         ...m,
@@ -571,6 +629,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => {
         void saveSettings({ tenantInfoStatement: t });
         return { ...s, tenantInfoStatement: t };
+      }),
+    addReportHistoryEntry: (entry) =>
+      set((s) => {
+        const reportHistory = [entry, ...s.reportHistory].slice(0, 10);
+        void saveSettings({ reportHistory });
+        return { ...s, reportHistory };
       }),
 
     addBill: (b) => {

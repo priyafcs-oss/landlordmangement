@@ -39,6 +39,11 @@ import {
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
 import type { Expense } from "@/lib/types";
+import jsPDF from "jspdf";
+
+function pdfSafe(s: string): string {
+  return s.replace(/−/g, "-").replace(/ /g, " ");
+}
 
 
 export const Route = createFileRoute("/expenses")({
@@ -69,6 +74,7 @@ function ExpensesPage() {
         <TabsList>
           <TabsTrigger value="expenses">Expenses</TabsTrigger>
           <TabsTrigger value="eofy">EOFY Report</TabsTrigger>
+          <TabsTrigger value="loans">Loan Summary</TabsTrigger>
         </TabsList>
 
         <TabsContent value="expenses" className="mt-4">
@@ -76,6 +82,9 @@ function ExpensesPage() {
         </TabsContent>
         <TabsContent value="eofy" className="mt-4">
           <EofyReport />
+        </TabsContent>
+        <TabsContent value="loans" className="mt-4">
+          <LoanSummaryTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -635,9 +644,9 @@ function ExpenseDialog({
 }
 
 function EofyReport() {
-  const { state } = useStore();
+  const { state, addReportHistoryEntry } = useStore();
   const currentFY = ausFinancialYear(todayISO());
-  const [propertyId, setPropertyId] = useState(state.properties[0]?.id ?? "");
+  const [scope, setScope] = useState("all");
   const [fy, setFy] = useState(currentFY);
   const [report, setReport] = useState<null | {
     gross: number;
@@ -645,140 +654,247 @@ function EofyReport() {
     interest: number;
     total: number;
     net: number;
-    property: string;
+    scopeLabel: string;
   }>(null);
 
-  const generate = () => {
-    const prop = state.properties.find((p) => p.id === propertyId);
-    if (!prop) return toast.error("Select a property");
-    const { start, end } = fyRange(fy);
-    const tenants = state.tenants.filter((t) => t.propertyId === propertyId);
-    const tenantIds = tenants.map((t) => t.id);
-    const gross = state.ledger
-      .filter((e) => tenantIds.includes(e.tenantId) && e.date >= start && e.date <= end && e.type === "Rent Payment")
-      .reduce((s, e) => s + e.credit, 0);
-    const expenses = state.expenses.filter(
-      (e) => e.propertyId === propertyId && e.date >= start && e.date <= end,
-    );
-    const byCategory: Record<string, number> = {};
-    for (const e of expenses) {
-      byCategory[e.taxCategory] = (byCategory[e.taxCategory] ?? 0) + e.cost;
+  const scopeProperties = () => {
+    if (scope === "all") return state.properties;
+    if (scope.startsWith("entity:")) {
+      const entityId = scope.slice("entity:".length);
+      return state.properties.filter((p) => p.entityId === entityId);
     }
-    const totalExp = expenses.reduce((s, e) => s + e.cost, 0);
-    const loan = state.loans.find((l) => l.propertyId === propertyId);
-    const interest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
-    setReport({
-      gross,
-      byCategory,
-      interest,
-      total: totalExp,
-      net: gross - totalExp - interest,
-      property: prop.address,
-    });
+    const propertyId = scope.slice("property:".length);
+    return state.properties.filter((p) => p.id === propertyId);
   };
 
-  const download = () => {
-    if (!report) return;
-    const lines = [
-      "EOFY Tax Summary",
-      `Property: ${report.property}`,
-      `Financial Year: ${fy}`,
-      "",
-      `Gross Rent Collected: ${fmtCurrency(report.gross)}`,
-      "",
-      "Expenses by ATO Category:",
-      ...Object.entries(report.byCategory).map(([k, v]) => `  ${k}: ${fmtCurrency(v)}`),
-      `Total Expenses: ${fmtCurrency(report.total)}`,
-      "",
-      `Estimated Loan Interest Paid: ${fmtCurrency(report.interest)}`,
-      "",
-      `Net Taxable Profit/Loss: ${fmtCurrency(report.net)}`,
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `EOFY-${fy}-${report.property.slice(0, 20)}.txt`;
-    a.click();
+  const scopeLabel = () => {
+    if (scope === "all") return "All properties";
+    if (scope.startsWith("entity:")) {
+      const entityId = scope.slice("entity:".length);
+      return state.entities.find((e) => e.id === entityId)?.name ?? "Entity";
+    }
+    const propertyId = scope.slice("property:".length);
+    const p = state.properties.find((x) => x.id === propertyId);
+    return p?.alias || p?.address || "Property";
   };
+
+  const generate = () => {
+    const properties = scopeProperties();
+    if (properties.length === 0) return toast.error("No properties in this scope");
+    const { start, end } = fyRange(fy);
+    let gross = 0;
+    let totalExp = 0;
+    let interest = 0;
+    const byCategory: Record<string, number> = {};
+    for (const prop of properties) {
+      const tenantIds = state.tenants.filter((t) => t.propertyId === prop.id).map((t) => t.id);
+      gross += state.ledger
+        .filter((e) => tenantIds.includes(e.tenantId) && e.date >= start && e.date <= end && e.type === "Rent Payment")
+        .reduce((s, e) => s + e.credit, 0);
+      const expenses = state.expenses.filter((e) => e.propertyId === prop.id && e.date >= start && e.date <= end);
+      for (const e of expenses) byCategory[e.taxCategory] = (byCategory[e.taxCategory] ?? 0) + e.cost;
+      totalExp += expenses.reduce((s, e) => s + e.cost, 0);
+      const loan = state.loans.find((l) => l.propertyId === prop.id);
+      if (loan) interest += (loan.totalBalance * loan.interestRate) / 100;
+    }
+    const label = scopeLabel();
+    setReport({ gross, byCategory, interest, total: totalExp, net: gross - totalExp - interest, scopeLabel: label });
+    addReportHistoryEntry({ fy, scopeLabel: label, generatedAt: todayISO() });
+  };
+
+  const downloadPdf = () => {
+    if (!report) return;
+    const doc = new jsPDF();
+    const marginX = 14;
+    let y = 18;
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(pdfSafe("EOFY Tax Summary"), marginX, y);
+    y += 7;
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(85);
+    doc.text(pdfSafe(`${report.scopeLabel} - Financial Year ${fy} - Generated ${todayISO()}`), marginX, y);
+    y += 10;
+
+    const line = (label: string, value: string, bold = false) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setTextColor(17);
+      doc.setFontSize(10);
+      doc.text(pdfSafe(label), marginX, y);
+      doc.text(pdfSafe(value), marginX + 90, y);
+      y += 7;
+    };
+
+    line("Gross rent collected", fmtCurrency(report.gross), true);
+    y += 2;
+    doc.setFont("helvetica", "bold");
+    doc.text("Expenses by ATO category", marginX, y);
+    y += 6;
+    for (const [k, v] of Object.entries(report.byCategory)) {
+      line(`  ${k}`, fmtCurrency(v));
+    }
+    line("Total expenses", fmtCurrency(report.total), true);
+    y += 2;
+    line("Estimated loan interest paid", fmtCurrency(report.interest));
+    y += 2;
+    line("Net taxable profit / loss", fmtCurrency(report.net), true);
+
+    doc.save(`EOFY-${fy}-${report.scopeLabel.replace(/\s+/g, "-").toLowerCase().slice(0, 30)}.pdf`);
+    toast.success("EOFY PDF downloaded");
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">EOFY Statement Generator</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Scope">
+              <Select value={scope} onValueChange={setScope}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All properties</SelectItem>
+                  {state.entities.map((e) => (
+                    <SelectItem key={e.id} value={`entity:${e.id}`}>
+                      {e.name}
+                    </SelectItem>
+                  ))}
+                  {state.properties.map((p) => (
+                    <SelectItem key={p.id} value={`property:${p.id}`}>
+                      {p.alias || p.address}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Financial year">
+              <Select value={fy} onValueChange={setFy}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 5 }).map((_, i) => {
+                    const y = new Date().getFullYear() - 2 + i;
+                    const v = `${y}-${y + 1}`;
+                    return (
+                      <SelectItem key={v} value={v}>
+                        FY {v}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </Field>
+            <div className="flex items-end">
+              <Button onClick={generate}>Generate</Button>
+            </div>
+          </div>
+
+          {report && (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4 text-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-muted-foreground">Scope</div>
+                  <div className="font-medium">{report.scopeLabel}</div>
+                </div>
+                <Button size="sm" variant="outline" className="gap-1" onClick={downloadPdf}>
+                  <Download className="h-4 w-4" /> Download PDF
+                </Button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Stat label="Gross rent collected" value={fmtCurrency(report.gross)} />
+                <Stat label="Total expenses" value={fmtCurrency(report.total)} />
+                <Stat label="Loan interest (est.)" value={fmtCurrency(report.interest)} />
+                <Stat
+                  label="Net taxable profit / loss"
+                  value={fmtCurrency(report.net)}
+                  strong
+                  negative={report.net < 0}
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium">Expenses by category</div>
+                {Object.entries(report.byCategory).map(([k, v]) => (
+                  <div key={k} className="flex justify-between border-t py-1">
+                    <span>{k}</span>
+                    <span>{fmtCurrency(v)}</span>
+                  </div>
+                ))}
+                {Object.keys(report.byCategory).length === 0 && (
+                  <div className="text-xs text-muted-foreground">No expenses in this period.</div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {state.reportHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Recent reports</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {state.reportHistory.map((r, i) => (
+              <div key={i} className="flex justify-between border-t py-1 first:border-t-0">
+                <span>
+                  FY {r.fy} — {r.scopeLabel}
+                </span>
+                <span className="text-muted-foreground">{r.generatedAt}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function LoanSummaryTab() {
+  const { state } = useStore();
+  const totalBalance = state.loans.reduce((s, l) => s + l.totalBalance, 0);
+  const totalEmi = state.loans.reduce((s, l) => s + l.monthlyEmi, 0);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">EOFY Statement Generator</CardTitle>
+        <CardTitle className="text-base">Loan Summary</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Property">
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Financial year">
-            <Select value={fy} onValueChange={setFy}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Array.from({ length: 5 }).map((_, i) => {
-                  const y = new Date().getFullYear() - 2 + i;
-                  const v = `${y}-${y + 1}`;
-                  return (
-                    <SelectItem key={v} value={v}>
-                      FY {v}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="flex items-end">
-            <Button onClick={generate}>Generate</Button>
-          </div>
-        </div>
-
-        {report && (
-          <div className="space-y-3 rounded-lg border bg-muted/30 p-4 text-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs text-muted-foreground">Property</div>
-                <div className="font-medium">{report.property}</div>
+      <CardContent className="space-y-3">
+        {state.loans.length === 0 && <div className="text-sm text-muted-foreground">No loans on file.</div>}
+        {state.loans.map((l) => {
+          const prop = state.properties.find((p) => p.id === l.propertyId);
+          return (
+            <div key={l.id} className="rounded-md border p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">
+                  {l.bankName} — {prop?.alias || prop?.address || "Unlinked"}
+                </span>
+                <Badge variant={l.status === "Paid Off" ? "secondary" : l.status === "In Arrears" ? "destructive" : "outline"}>
+                  {l.status ?? "Active"}
+                </Badge>
               </div>
-              <Button size="sm" variant="outline" className="gap-1" onClick={download}>
-                <Download className="h-4 w-4" /> Download PDF
-              </Button>
+              <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                <span>Balance: {fmtCurrency(l.totalBalance)}</span>
+                <span>Rate: {l.interestRate}%</span>
+                <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
+              </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Stat label="Gross rent collected" value={fmtCurrency(report.gross)} />
-              <Stat label="Total expenses" value={fmtCurrency(report.total)} />
-              <Stat label="Loan interest (est.)" value={fmtCurrency(report.interest)} />
-              <Stat
-                label="Net taxable profit / loss"
-                value={fmtCurrency(report.net)}
-                strong
-                negative={report.net < 0}
-              />
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium">Expenses by category</div>
-              {Object.entries(report.byCategory).map(([k, v]) => (
-                <div key={k} className="flex justify-between border-t py-1">
-                  <span>{k}</span>
-                  <span>{fmtCurrency(v)}</span>
-                </div>
-              ))}
-              {Object.keys(report.byCategory).length === 0 && (
-                <div className="text-xs text-muted-foreground">No expenses in this period.</div>
-              )}
-            </div>
+          );
+        })}
+        {state.loans.length > 0 && (
+          <div className="flex justify-between border-t pt-2 text-sm font-medium">
+            <span>Total</span>
+            <span>
+              {fmtCurrency(totalBalance)} balance • {fmtCurrency(totalEmi)}/mo
+            </span>
           </div>
         )}
       </CardContent>

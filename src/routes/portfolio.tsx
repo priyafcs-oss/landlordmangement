@@ -58,8 +58,11 @@ import type {
   RentChange,
   LeaseHistory,
   ContactPerson,
+  Provider,
+  ProviderRole,
 } from "@/lib/types";
 import { toast } from "sonner";
+import { BillRow } from "@/components/BillRow";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { FileSignature } from "lucide-react";
@@ -256,14 +259,20 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
 }
 
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addLedger, markProposalApplied } = useStore();
+  const { state, addLedger, addExpense, markProposalApplied } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [tenantId, setTenantId] = useState(proposal.matchedTenantId ?? "");
   const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => true));
+  const expenseLines = payload.expenseLines ?? [];
+  const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() => expenseLines.map(() => true));
 
   const tenantsAtProperty = proposal.propertyId
     ? state.tenants.filter((t) => t.propertyId === proposal.propertyId)
     : state.tenants;
+
+  const includedIncome = payload.transactions.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
+  const includedExpenses = expenseLines.reduce((s, e, i) => (expensesIncluded[i] ? s + e.amount : s), 0);
+  const computedNet = includedIncome - includedExpenses;
 
   const confirm = () => {
     if (!tenantId) return toast.error("Select a tenant first");
@@ -279,8 +288,29 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         source: "rent_statement",
       });
     });
+    expenseLines.forEach((e, i) => {
+      if (!expensesIncluded[i]) return;
+      addExpense({
+        itemName: e.vendor,
+        cost: e.amount,
+        date: e.date,
+        propertyId: proposal.propertyId ?? undefined,
+        taxCategory: "Immediate Deduction",
+        hasWarranty: false,
+        rechargeToTenant: false,
+        status: "approved",
+        source: "email_auto",
+        rawPropertyAddress: proposal.rawPropertyAddress,
+        sourceSubject: proposal.sourceSubject,
+        sourceEmailBody: proposal.sourceEmailBody,
+        invoiceFileName: proposal.sourceFileName,
+        invoiceFileData: proposal.sourceFileData,
+      });
+    });
     markProposalApplied(proposal.id);
-    toast.success("Rent payments added");
+    toast.success(
+      expenseLines.some((_, i) => expensesIncluded[i]) ? "Rent payments and expenses added" : "Rent payments added",
+    );
   };
 
   return (
@@ -314,6 +344,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         </div>
 
         <div className="space-y-1 rounded border p-2">
+          <div className="text-[11px] font-medium text-muted-foreground">Rent income → ledger</div>
           {payload.transactions.map((tx, i) => (
             <label key={i} className="flex items-center gap-2 text-xs">
               <input
@@ -326,6 +357,43 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               <span className="truncate text-muted-foreground">{tx.description}</span>
             </label>
           ))}
+        </div>
+
+        {expenseLines.length > 0 && (
+          <div className="space-y-1 rounded border p-2">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              Deductions on this statement → expenses
+            </div>
+            {expenseLines.map((e, i) => (
+              <label key={i} className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={expensesIncluded[i]}
+                  onChange={(ev) => setExpensesIncluded((inc) => inc.map((v, j) => (j === i ? ev.target.checked : v)))}
+                />
+                <span className="w-24 shrink-0">{e.date}</span>
+                <span className="w-20 shrink-0 font-medium">{fmtCurrency(e.amount)}</span>
+                <span className="w-28 shrink-0 truncate">{e.vendor}</span>
+                <span className="truncate text-muted-foreground">{e.description}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3 rounded border bg-muted/30 p-2 text-xs">
+          <span>
+            Net (income − deductions): <span className="font-medium">{fmtCurrency(computedNet)}</span>
+          </span>
+          {payload.netToOwner !== undefined && (
+            <span
+              className={
+                Math.abs(computedNet - payload.netToOwner) < 0.01 ? "text-emerald-600" : "text-destructive"
+              }
+            >
+              Statement says {fmtCurrency(payload.netToOwner)}
+              {Math.abs(computedNet - payload.netToOwner) < 0.01 ? " ✓ matches" : " — doesn't match, check inclusions"}
+            </span>
+          )}
         </div>
 
         <DocumentViewLinks
@@ -472,6 +540,8 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
     repairsMaintenanceAnnual: property?.repairsMaintenanceAnnual?.toString() ?? "",
     pmFeePercent: property?.pmFeePercent?.toString() ?? "",
     inspectionFrequencyMonths: property?.inspectionFrequencyMonths?.toString() ?? "",
+    entityId: property?.entityId ?? "",
+    occupancyType: (property?.occupancyType ?? "") as Property["occupancyType"] | "",
     notes: property?.notes ?? "",
   });
   const [photos, setPhotos] = useState<{ name: string; data: string }[]>(property?.photos ?? []);
@@ -569,6 +639,44 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
               {fmtCurrency(currentTenant.rentAmount)}/{currentTenant.rentFrequency}
             </div>
           )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Entity (ownership)">
+              <Select
+                value={form.entityId || "__none__"}
+                onValueChange={(v) => setForm({ ...form, entityId: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Unassigned</SelectItem>
+                  {state.entities.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Occupancy">
+              <Select
+                value={form.occupancyType || "__unset__"}
+                onValueChange={(v) =>
+                  setForm({ ...form, occupancyType: v === "__unset__" ? "" : (v as Property["occupancyType"]) })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unset__">Not set</SelectItem>
+                  <SelectItem value="Investment">Investment</SelectItem>
+                  <SelectItem value="PPOR">PPOR (main residence)</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
 
           <div className="rounded-md border p-3">
             <div className="mb-2 text-sm font-medium">Property manager / primary contact</div>
@@ -785,6 +893,8 @@ function PropertyDialog({ property, onDone }: { property: Property | null; onDon
                 inspectionFrequencyMonths: form.inspectionFrequencyMonths
                   ? parseInt(form.inspectionFrequencyMonths, 10)
                   : undefined,
+                entityId: form.entityId || undefined,
+                occupancyType: form.occupancyType || undefined,
                 notes: form.notes || undefined,
                 photos: photos.length > 0 ? photos : undefined,
                 videos: videos.length > 0 ? videos : undefined,
@@ -823,12 +933,18 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
             <TabsList>
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="housekeeping">Housekeeping &amp; Bills</TabsTrigger>
+              <TabsTrigger value="providers">Providers</TabsTrigger>
               <TabsTrigger value="media">Media</TabsTrigger>
             </TabsList>
             <TabsContent value="details" className="space-y-4 text-sm">
               <div>
                 <div className="mb-2 text-xs font-medium text-muted-foreground">Operational</div>
                 <div className="grid grid-cols-2 gap-3">
+                  <Stat
+                    label="Entity"
+                    value={state.entities.find((e) => e.id === prop.entityId)?.name || "Unassigned"}
+                  />
+                  <Stat label="Occupancy" value={prop.occupancyType || "—"} />
                   <Stat label="Tenant code" value={prop.tenantCode || "—"} />
                   <Stat label="Property manager" value={prop.managerName || "—"} />
                   <Stat label="Manager phone" value={prop.managerPhone || "—"} />
@@ -921,6 +1037,9 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
             </TabsContent>
             <TabsContent value="housekeeping">
               <PropertyBillsTab propertyId={prop.id} />
+            </TabsContent>
+            <TabsContent value="providers">
+              <PropertyProvidersTab propertyId={prop.id} />
             </TabsContent>
             <TabsContent value="media" className="space-y-4 text-sm">
               <div>
@@ -1838,51 +1957,6 @@ function PropertyBillsTab({ propertyId }: { propertyId: string }) {
   );
 }
 
-function BillRow({ bill, onPaid, onDelete }: { bill: PropertyBill; onPaid: () => void; onDelete: () => void }) {
-  const overdue = bill.status === "Unpaid" && bill.dueDate < todayISO();
-  return (
-    <div className="rounded-md border p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Receipt className="h-4 w-4 text-muted-foreground" />
-            <span className="font-medium">{bill.billType}</span>
-            <Badge variant={bill.status === "Paid" ? "secondary" : overdue ? "destructive" : "outline"}>
-              {overdue ? "Overdue" : bill.status}
-            </Badge>
-            {bill.recurrenceMonths ? <Badge variant="outline">Every {bill.recurrenceMonths}mo</Badge> : null}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            Due {bill.dueDate} • {fmtCurrency(bill.amount)}
-          </div>
-          {bill.portalUrl && (
-            <a href={bill.portalUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-primary">
-              Open portal <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-          {(bill.portalUsername || bill.passwordNote) && (
-            <div className="mt-1 text-xs text-muted-foreground">
-              {bill.portalUsername && <>User: <span className="font-mono">{bill.portalUsername}</span></>}
-              {bill.passwordNote && <> • Note: <span className="font-mono">{bill.passwordNote}</span></>}
-            </div>
-          )}
-          {bill.notes && <div className="mt-1 text-xs">{bill.notes}</div>}
-        </div>
-        <div className="flex gap-1">
-          {bill.status !== "Paid" && (
-            <Button size="sm" variant="outline" className="gap-1" onClick={onPaid}>
-              <CheckCircle2 className="h-3 w-3" /> Mark Paid
-            </Button>
-          )}
-          <Button size="icon" variant="ghost" onClick={onDelete}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 
 
 function TenantRow({ tenant }: { tenant: Tenant }) {
@@ -2153,6 +2227,178 @@ function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
       <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setEditing(false)}>
         <X className="h-3 w-3" />
       </Button>
+    </div>
+  );
+}
+
+const PROVIDER_ROLES: ProviderRole[] = ["Council", "Agent", "Insurer", "Trade", "Other"];
+
+function ProviderDialog({
+  propertyId,
+  provider,
+  children,
+}: {
+  propertyId: string;
+  provider?: Provider;
+  children: React.ReactNode;
+}) {
+  const { addProvider, updateProvider } = useStore();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    name: provider?.name ?? "",
+    role: provider?.role ?? ("Other" as ProviderRole),
+    email: provider?.email ?? "",
+    phone: provider?.phone ?? "",
+    website: provider?.website ?? "",
+    abn: provider?.abn ?? "",
+    address: provider?.address ?? "",
+    notes: provider?.notes ?? "",
+  });
+
+  const save = () => {
+    if (!form.name.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+    const payload = {
+      name: form.name.trim(),
+      role: form.role,
+      email: form.email.trim() || undefined,
+      phone: form.phone.trim() || undefined,
+      website: form.website.trim() || undefined,
+      abn: form.abn.trim() || undefined,
+      address: form.address.trim() || undefined,
+      notes: form.notes.trim() || undefined,
+    };
+    if (provider) {
+      updateProvider(provider.id, payload);
+      toast.success("Contact updated");
+    } else {
+      addProvider({ propertyId, ...payload });
+      toast.success("Contact added");
+    }
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{provider ? "Edit contact" : "Add contact"}</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Name">
+            <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          </Field>
+          <Field label="Role">
+            <Select value={form.role} onValueChange={(v) => setForm((f) => ({ ...f, role: v as ProviderRole }))}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDER_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Email">
+            <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
+          </Field>
+          <Field label="Phone">
+            <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+          </Field>
+          <Field label="Website">
+            <Input value={form.website} onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} />
+          </Field>
+          <Field label="ABN">
+            <Input value={form.abn} onChange={(e) => setForm((f) => ({ ...f, abn: e.target.value }))} />
+          </Field>
+          <div className="col-span-2">
+            <Field label="Address">
+              <Input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+            </Field>
+          </div>
+          <div className="col-span-2">
+            <Field label="Notes">
+              <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={2} />
+            </Field>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={save}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProviderRow({ provider }: { provider: Provider }) {
+  const { deleteProvider } = useStore();
+  const details = [provider.email, provider.phone, provider.website].filter(Boolean).join(" · ");
+  return (
+    <div className="flex items-start justify-between gap-2 rounded border p-2 text-xs">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{provider.name}</span>
+          <Badge variant="secondary" className="text-[10px]">
+            {provider.role}
+          </Badge>
+        </div>
+        {details && <div className="mt-0.5 text-muted-foreground">{details}</div>}
+        {provider.address && <div className="text-muted-foreground">{provider.address}</div>}
+        {provider.abn && <div className="text-muted-foreground">ABN {provider.abn}</div>}
+        {provider.notes && <div className="mt-1 whitespace-pre-wrap">{provider.notes}</div>}
+      </div>
+      <div className="flex shrink-0 gap-1">
+        <ProviderDialog propertyId={provider.propertyId ?? ""} provider={provider}>
+          <Button size="icon" variant="ghost" className="h-6 w-6">
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </ProviderDialog>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6"
+          onClick={() => {
+            if (confirm(`Delete contact "${provider.name}"?`)) {
+              deleteProvider(provider.id);
+              toast.success("Contact deleted");
+            }
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
+  const { state } = useStore();
+  const providers = state.providers.filter((p) => p.propertyId === propertyId);
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          Council, agent, insurer and trade contacts for this property. Bills processed by email auto-fill these when a
+          notice prints vendor details.
+        </div>
+        <ProviderDialog propertyId={propertyId}>
+          <Button size="sm" variant="outline" className="h-7 shrink-0 gap-1 text-xs">
+            <Plus className="h-3 w-3" /> Add
+          </Button>
+        </ProviderDialog>
+      </div>
+      {providers.length === 0 && <div className="text-xs text-muted-foreground">No contacts yet.</div>}
+      <div className="space-y-2">
+        {providers.map((p) => (
+          <ProviderRow key={p.id} provider={p} />
+        ))}
+      </div>
     </div>
   );
 }

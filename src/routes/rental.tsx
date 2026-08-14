@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,7 @@ import type { Tenant } from "@/lib/types";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
+import { downloadCsv } from "@/lib/csv";
 import { TenantDialog, IncreaseRentDialog } from "./portfolio";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 
@@ -83,6 +85,16 @@ function RentalHubPage() {
     () => state.tenants.filter((t) => t.propertyId === propertyId),
     [state.tenants, propertyId],
   );
+
+  // When a property has more than one tenant, showing every tenant's full ledger stacked at
+  // once makes the page unusably long — switch to one-tenant-at-a-time via tabs instead.
+  const [activeTenantId, setActiveTenantId] = useState<string>("");
+  useEffect(() => {
+    if (tenants.length > 0 && !tenants.some((t) => t.id === activeTenantId)) {
+      setActiveTenantId(tenants[0].id);
+    }
+  }, [tenants, activeTenantId]);
+  const visibleTenants = tenants.length > 1 ? tenants.filter((t) => t.id === activeTenantId) : tenants;
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -133,7 +145,19 @@ function RentalHubPage() {
         </Card>
       )}
 
-      {tenants.map((t) => (
+      {tenants.length > 1 && (
+        <Tabs value={activeTenantId} onValueChange={setActiveTenantId}>
+          <TabsList className="flex-wrap">
+            {tenants.map((t) => (
+              <TabsTrigger key={t.id} value={t.id}>
+                {t.name} — {fmtCurrency(t.rentAmount)}/{t.rentFrequency}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
+
+      {visibleTenants.map((t) => (
         <div key={t.id} className="space-y-4">
           <TenantSummaryCard tenant={t} propertyAddress={property?.address} />
           <TenantLedgerCard tenant={t} />
@@ -749,26 +773,16 @@ function LedgerExportButtons({
 }) {
   const header = ["Date", "Description", "Debit", "Credit", "Balance", "Source"];
 
-  const toCsv = () => {
-    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-    return [
-      header.map(esc).join(","),
-      ...rows.map((r) =>
-        [r.date, r.description, r.debit, r.credit, r.balance, r.source ? SOURCE_LABELS[r.source] ?? r.source : ""]
-          .map(esc)
-          .join(","),
-      ),
-    ].join("\n");
-  };
-
-  const downloadCsv = () => {
-    const blob = new Blob([toCsv()], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const downloadLedgerCsv = () => {
+    const rowsData = rows.map((r) => [
+      r.date,
+      r.description,
+      r.debit,
+      r.credit,
+      r.balance,
+      r.source ? SOURCE_LABELS[r.source] ?? r.source : "",
+    ]);
+    downloadCsv(`ledger-${tenant.name.replace(/\s+/g, "-").toLowerCase()}-${todayISO()}.csv`, header, rowsData);
     toast.success("Ledger CSV downloaded");
   };
 
@@ -875,7 +889,7 @@ function LedgerExportButtons({
 
   return (
     <>
-      <Button size="sm" variant="outline" className="gap-1" onClick={downloadCsv}>
+      <Button size="sm" variant="outline" className="gap-1" onClick={downloadLedgerCsv}>
         <Download className="h-3.5 w-3.5" /> CSV
       </Button>
       <Button size="sm" variant="outline" className="gap-1" onClick={downloadPdf}>

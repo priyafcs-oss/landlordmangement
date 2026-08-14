@@ -8,7 +8,9 @@ Extract the fields defined in the response schema as strict JSON.
 - transactions is every individual rent payment actually recorded: date (YYYY-MM-DD), amount (the rent payment amount, positive number), and a short description.
 - If the source is a weekly table: emit ONE transaction per row where "Rent Paid" (or equivalent) has an actual non-blank, non-zero amount — use that row's Week Start Date (or Paid Date if present) as the transaction date. SKIP rows where the paid amount is blank/zero, even if a "Status" column says "paid" — a blank amount is not a confirmed transaction, regardless of what an adjacent status label claims.
 - A single row's paid amount may be larger than one week's normal rent (a lump-sum catch-up payment covering several weeks, e.g. $5000 against a $900/week rent) — extract it as ONE transaction for that row's date and its full amount; do not try to split it across multiple weeks.
-- Do not include agent fees, deductions, or a net-remittance total as a transaction — only the tenant's actual rent payments.
+- Do NOT put agent fees, deductions, or bills paid on the owner's behalf into transactions — those go in expenseLines instead (see below). transactions is rent income only.
+- expenseLines is REQUIRED — always include it, even as an empty array [] when there's nothing to report. A managing agent's ownership/disbursement statement typically deducts its own management fee, and sometimes pays a bill (e.g. water usage charges) on the owner's behalf before remitting the balance — extract each such deduction as one expenseLine: vendor (who it was paid to — the agent itself for its own fee, or the actual biller e.g. "Sydney Water" for a bill they paid), amount (positive number), date (YYYY-MM-DD), description, and category (a short free-text tax category like "management_fees" or "water_rates").
+- netToOwner is the statement's own stated net amount paid/remitted to the owner, if shown (often labelled "Net to owner", "Amount paid to you", or similar) — null if not stated. This should equal rent income minus expenseLines; it's used only as a sanity check, not written anywhere directly.
 - periodStart, periodEnd should be the statement's covering period in YYYY-MM-DD, or null if not stated.
 - tenantName should be the tenant's name if stated, else null.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;
@@ -31,10 +33,25 @@ const LEDGER_SCHEMA = {
         required: ["date", "amount", "description"],
       },
     },
+    expenseLines: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          vendor: { type: "STRING" },
+          amount: { type: "NUMBER" },
+          date: { type: "STRING" },
+          description: { type: "STRING" },
+          category: { type: "STRING" },
+        },
+        required: ["vendor", "amount", "date", "description", "category"],
+      },
+    },
+    netToOwner: { type: "NUMBER", nullable: true },
     property_address: { type: "STRING" },
     confidence: { type: "NUMBER" },
   },
-  required: ["transactions", "property_address", "confidence"],
+  required: ["transactions", "expenseLines", "property_address", "confidence"],
 };
 
 async function callGemini(input: NormalizedBillInput): Promise<ParsedLedgerFields> {
@@ -45,12 +62,18 @@ async function callGemini(input: NormalizedBillInput): Promise<ParsedLedgerField
 }
 
 function validateParsed(parsed: ParsedLedgerFields): string | null {
-  if (!Array.isArray(parsed.transactions) || parsed.transactions.length === 0) {
-    return "No transactions found";
+  const hasTransactions = Array.isArray(parsed.transactions) && parsed.transactions.length > 0;
+  const hasExpenseLines = Array.isArray(parsed.expenseLines) && parsed.expenseLines.length > 0;
+  if (!hasTransactions && !hasExpenseLines) {
+    return "No transactions or expense lines found";
   }
-  for (const t of parsed.transactions) {
+  for (const t of parsed.transactions ?? []) {
     if (typeof t.amount !== "number" || !(t.amount > 0)) return "Invalid transaction amount";
     if (!t.date) return "Invalid transaction date";
+  }
+  for (const e of parsed.expenseLines ?? []) {
+    if (typeof e.amount !== "number" || !(e.amount > 0)) return "Invalid expense line amount";
+    if (!e.date) return "Invalid expense line date";
   }
   return null;
 }
@@ -118,7 +141,9 @@ export async function parseRentStatement(
       tenantName: parsed.tenantName ?? undefined,
       periodStart: parsed.periodStart ?? undefined,
       periodEnd: parsed.periodEnd ?? undefined,
-      transactions: parsed.transactions,
+      transactions: parsed.transactions ?? [],
+      expenseLines: parsed.expenseLines ?? [],
+      netToOwner: parsed.netToOwner ?? undefined,
       confidence: parsed.confidence,
     },
   };

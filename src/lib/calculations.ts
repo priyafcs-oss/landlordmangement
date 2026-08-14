@@ -1,4 +1,14 @@
-import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice, Inspection, Property, RentChange } from "./types";
+import type {
+  RentFrequency,
+  Tenant,
+  LedgerEntry,
+  TenantInvoice,
+  Inspection,
+  Property,
+  RentChange,
+  Expense,
+  AiIntakeProposal,
+} from "./types";
 
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;
@@ -288,4 +298,64 @@ export function addMonths(iso: string, months: number): string {
   const d = new Date(iso);
   d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
+}
+
+export interface ActivityItem {
+  id: string;
+  date: string; // ISO date, used for sorting and relative-time display
+  label: string;
+  amount?: number;
+}
+
+/**
+ * Recent automated activity, computed client-side from existing provenance fields
+ * (Expense.source, LedgerEntry.source, AiIntakeProposal.status) rather than a dedicated
+ * activity-log table — nothing here is persisted, it's re-derived on every dashboard load.
+ */
+export function buildActivityFeed(state: {
+  expenses: Expense[];
+  ledger: LedgerEntry[];
+  aiProposals: AiIntakeProposal[];
+  properties: Property[];
+  tenants: Tenant[];
+}): ActivityItem[] {
+  const items: ActivityItem[] = [];
+
+  for (const e of state.expenses) {
+    if (e.source !== "email_auto") continue;
+    const prop = state.properties.find((p) => p.id === e.propertyId);
+    items.push({
+      id: `exp_${e.id}`,
+      date: e.date,
+      label: `Matched a bill — ${e.itemName}${prop ? ` · ${prop.alias || prop.address}` : ""}`,
+      amount: -e.cost,
+    });
+  }
+
+  for (const entry of state.ledger) {
+    if (entry.source !== "bank_feed" && entry.source !== "rent_statement") continue;
+    const tenant = state.tenants.find((t) => t.id === entry.tenantId);
+    const prop = tenant ? state.properties.find((p) => p.id === tenant.propertyId) : undefined;
+    items.push({
+      id: `ledg_${entry.id}`,
+      date: entry.date,
+      label:
+        entry.source === "rent_statement"
+          ? `Processed a rent statement${prop ? ` · ${prop.alias || prop.address}` : ""}`
+          : `Recorded rent received${tenant ? ` · ${tenant.name}` : ""}`,
+      amount: entry.credit || undefined,
+    });
+  }
+
+  for (const proposal of state.aiProposals) {
+    if (proposal.status !== "applied" || !proposal.created_at) continue;
+    const prop = state.properties.find((p) => p.id === proposal.propertyId);
+    items.push({
+      id: `prop_${proposal.id}`,
+      date: proposal.created_at.slice(0, 10),
+      label: `Filed a ${proposal.kind === "tenant_lease" ? "lease agreement" : "rent statement"}${prop ? ` · ${prop.alias || prop.address}` : ""}`,
+    });
+  }
+
+  return items.sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 10);
 }

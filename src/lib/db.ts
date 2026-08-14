@@ -14,6 +14,8 @@ export const TABLES = {
   maintenanceRequests: "maintenance_requests",
   bills: "property_bills",
   aiProposals: "ai_intake_proposals",
+  providers: "providers",
+  entities: "entities",
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";
@@ -88,6 +90,7 @@ export async function loadSettings() {
     landlordProfile?: unknown;
     leaseTemplate?: unknown;
     tenantInfoStatement?: unknown;
+    reportHistory?: unknown;
   } | null;
 }
 

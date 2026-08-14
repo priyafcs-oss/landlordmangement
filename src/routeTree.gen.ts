@@ -10,20 +10,28 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BillsRouteImport } from './routes/bills'
 import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as DocumentsRouteImport } from './routes/documents'
+import { Route as EntitiesRouteImport } from './routes/entities'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
 import { Route as PortfolioRouteImport } from './routes/portfolio'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 import { Route as ApiVisionRouteImport } from './routes/api/vision'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BillsRoute = BillsRouteImport.update({
+  id: '/bills',
+  path: '/bills',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CopilotRoute = CopilotRouteImport.update({
@@ -34,6 +42,11 @@ const CopilotRoute = CopilotRouteImport.update({
 const DocumentsRoute = DocumentsRouteImport.update({
   id: '/documents',
   path: '/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EntitiesRoute = EntitiesRouteImport.update({
+  id: '/entities',
+  path: '/entities',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExpensesRoute = ExpensesRouteImport.update({
@@ -66,6 +79,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransactionsRoute = TransactionsRouteImport.update({
+  id: '/transactions',
+  path: '/transactions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCopilotRoute = ApiCopilotRouteImport.update({
   id: '/api/copilot',
   path: '/api/copilot',
@@ -79,41 +97,50 @@ const ApiVisionRoute = ApiVisionRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bills': typeof BillsRoute
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
+  '/entities': typeof EntitiesRoute
   '/expenses': typeof ExpensesRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
+  '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bills': typeof BillsRoute
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
+  '/entities': typeof EntitiesRoute
   '/expenses': typeof ExpensesRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
+  '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bills': typeof BillsRoute
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
+  '/entities': typeof EntitiesRoute
   '/expenses': typeof ExpensesRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
+  '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
 }
@@ -121,54 +148,66 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/bills'
     | '/copilot'
     | '/documents'
+    | '/entities'
     | '/expenses'
     | '/inspections'
     | '/maintenance'
     | '/portfolio'
     | '/rental'
     | '/settings'
+    | '/transactions'
     | '/api/copilot'
     | '/api/vision'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/bills'
     | '/copilot'
     | '/documents'
+    | '/entities'
     | '/expenses'
     | '/inspections'
     | '/maintenance'
     | '/portfolio'
     | '/rental'
     | '/settings'
+    | '/transactions'
     | '/api/copilot'
     | '/api/vision'
   id:
     | '__root__'
     | '/'
+    | '/bills'
     | '/copilot'
     | '/documents'
+    | '/entities'
     | '/expenses'
     | '/inspections'
     | '/maintenance'
     | '/portfolio'
     | '/rental'
     | '/settings'
+    | '/transactions'
     | '/api/copilot'
     | '/api/vision'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BillsRoute: typeof BillsRoute
   CopilotRoute: typeof CopilotRoute
   DocumentsRoute: typeof DocumentsRoute
+  EntitiesRoute: typeof EntitiesRoute
   ExpensesRoute: typeof ExpensesRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
   PortfolioRoute: typeof PortfolioRoute
   RentalRoute: typeof RentalRoute
   SettingsRoute: typeof SettingsRoute
+  TransactionsRoute: typeof TransactionsRoute
   ApiCopilotRoute: typeof ApiCopilotRoute
   ApiVisionRoute: typeof ApiVisionRoute
 }
@@ -180,6 +219,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bills': {
+      id: '/bills'
+      path: '/bills'
+      fullPath: '/bills'
+      preLoaderRoute: typeof BillsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/copilot': {
@@ -194,6 +240,13 @@ declare module '@tanstack/react-router' {
       path: '/documents'
       fullPath: '/documents'
       preLoaderRoute: typeof DocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/entities': {
+      id: '/entities'
+      path: '/entities'
+      fullPath: '/entities'
+      preLoaderRoute: typeof EntitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/expenses': {
@@ -238,6 +291,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transactions': {
+      id: '/transactions'
+      path: '/transactions'
+      fullPath: '/transactions'
+      preLoaderRoute: typeof TransactionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/copilot': {
       id: '/api/copilot'
       path: '/api/copilot'
@@ -257,14 +317,17 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BillsRoute: BillsRoute,
   CopilotRoute: CopilotRoute,
   DocumentsRoute: DocumentsRoute,
+  EntitiesRoute: EntitiesRoute,
   ExpensesRoute: ExpensesRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
   PortfolioRoute: PortfolioRoute,
   RentalRoute: RentalRoute,
   SettingsRoute: SettingsRoute,
+  TransactionsRoute: TransactionsRoute,
   ApiCopilotRoute: ApiCopilotRoute,
   ApiVisionRoute: ApiVisionRoute,
 }

@@ -62,6 +62,9 @@ export interface Property {
   hasSwimmingPool?: boolean;
   /** How often this property should be routinely inspected. Unset falls back to the app default (6 months). */
   inspectionFrequencyMonths?: number;
+  /** Ownership structure this property is held under (individual/joint/trust/SMSF/company). */
+  entityId?: string;
+  occupancyType?: "Investment" | "PPOR";
 }
 
 export interface Tenant {
@@ -263,6 +266,39 @@ export interface MaintenanceRequest {
   source?: "public" | "landlord";
 }
 
+export type ProviderRole = "Council" | "Agent" | "Insurer" | "Trade" | "Other";
+
+/** A vendor/contact linked to a property — council, managing agent, insurer, tradesperson, etc. */
+export interface Provider {
+  id: string;
+  propertyId?: string;
+  name: string;
+  role: ProviderRole;
+  email?: string;
+  phone?: string;
+  website?: string;
+  abn?: string;
+  address?: string;
+  notes?: string;
+}
+
+export type EntityType = "Individual" | "Joint" | "Trust" | "SMSF" | "Company";
+
+/** One owner's share of an entity — e.g. a Joint entity has two owners with a percent split. */
+export interface EntityOwner {
+  name: string;
+  percent: number;
+}
+
+/** An ownership structure a property can be held under — individual name, joint, a trust, an SMSF, etc. */
+export interface Entity {
+  id: string;
+  name: string;
+  type: EntityType;
+  owners: EntityOwner[];
+  notes?: string;
+}
+
 export interface AiConfig {
   enabled: boolean;
   dailyCount: number;
@@ -363,6 +399,10 @@ export interface RentLedgerProposalPayload {
   periodStart?: string;
   periodEnd?: string;
   transactions: { date: string; amount: number; description: string }[];
+  /** Expense lines on the same statement (e.g. an agent's management fee or a bill paid on the owner's behalf) — staged for review like everything else from this pipeline, never auto-applied. */
+  expenseLines?: { vendor: string; amount: number; date: string; description: string; category: string }[];
+  /** Rent income minus expense lines, for a quick "does this match the stated net-to-owner" sanity check. */
+  netToOwner?: number;
   confidence: number;
 }
 
@@ -384,9 +424,18 @@ export interface AiIntakeProposal {
   reviewReason?: string | null;
 }
 
+/** One past EOFY report generation, kept for quick reference — not the report itself, just a pointer to when/what. */
+export interface ReportHistoryEntry {
+  fy: string;
+  scopeLabel: string;
+  generatedAt: string;
+}
+
 export interface AppState {
   properties: Property[];
   tenants: Tenant[];
+  providers: Provider[];
+  entities: Entity[];
   ledger: LedgerEntry[];
   invoices: TenantInvoice[];
   loans: Loan[];
@@ -402,6 +451,7 @@ export interface AppState {
   leaseTemplate: LeaseTemplateConfig | null;
   /** The official Tenant Information Statement PDF, appended after the filled agreement on generation. */
   tenantInfoStatement: { fileName: string; fileData: string; uploadedAt: string } | null;
+  reportHistory: ReportHistoryEntry[];
 }
 
 export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {

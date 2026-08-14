@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import {
   buildTenantLedger,
+  buildActivityFeed,
   fmtCurrency,
   daysUntil,
   todayISO,
@@ -39,6 +40,9 @@ import {
   Wrench,
   CalendarClock,
   Plus,
+  ChevronDown,
+  ChevronUp,
+  Activity,
 } from "lucide-react";
 
 import {
@@ -62,58 +66,110 @@ export const Route = createFileRoute("/")({
 
 function DashboardPage() {
   const { state } = useStore();
-  const totalValue = state.properties.reduce((s, p) => s + p.currentValue, 0);
-  const totalDebt = state.loans.reduce((s, l) => s + l.totalBalance, 0);
-  const equity = totalValue - totalDebt;
+  const [entityScope, setEntityScope] = useState("__all__");
+  const [chartMonths, setChartMonths] = useState<6 | 12>(6);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const rentReceived = state.ledger.reduce((s, e) => s + (e.type === "Rent Payment" ? e.credit : 0), 0);
-  const invoicesReceived = state.ledger.reduce(
+  const scopedProperties =
+    entityScope === "__all__" ? state.properties : state.properties.filter((p) => p.entityId === entityScope);
+  const scopedPropertyIds = new Set(scopedProperties.map((p) => p.id));
+  const scopedTenantIds = new Set(
+    state.tenants.filter((t) => scopedPropertyIds.has(t.propertyId)).map((t) => t.id),
+  );
+  const scopedLoans = entityScope === "__all__" ? state.loans : state.loans.filter((l) => scopedPropertyIds.has(l.propertyId));
+  const scopedExpenses =
+    entityScope === "__all__" ? state.expenses : state.expenses.filter((e) => e.propertyId && scopedPropertyIds.has(e.propertyId));
+  const scopedLedger = entityScope === "__all__" ? state.ledger : state.ledger.filter((e) => scopedTenantIds.has(e.tenantId));
+
+  const totalValue = scopedProperties.reduce((s, p) => s + p.currentValue, 0);
+  const totalDebt = scopedLoans.reduce((s, l) => s + l.totalBalance, 0);
+  const equity = totalValue - totalDebt;
+  const lvrPercent = totalValue > 0 ? Math.min(100, Math.round((totalDebt / totalValue) * 100)) : 0;
+
+  const rentReceived = scopedLedger.reduce((s, e) => s + (e.type === "Rent Payment" ? e.credit : 0), 0);
+  const invoicesReceived = scopedLedger.reduce(
     (s, e) => s + ((e.type === "Water Invoice" || e.type === "Maintenance Charge") ? e.credit : 0),
     0,
   );
-  const totalEmis = state.loans.reduce((s, l) => s + l.monthlyEmi, 0);
-  const totalExpenses = state.expenses.reduce((s, e) => s + e.cost, 0);
+  const totalEmis = scopedLoans.reduce((s, l) => s + l.monthlyEmi, 0);
+  const totalExpenses = scopedExpenses.reduce((s, e) => s + e.cost, 0);
   const netCashFlow = rentReceived + invoicesReceived - totalEmis - totalExpenses;
 
   const leaseAlerts = state.tenants.filter((t) => {
+    if (!scopedPropertyIds.has(t.propertyId)) return false;
     if (!t.leaseExpiry) return false;
     const d = daysUntil(t.leaseExpiry);
     return d >= 0 && d <= 60;
   });
 
-  const warrantyAlerts = state.expenses.filter((e) => {
+  const warrantyAlerts = scopedExpenses.filter((e) => {
     if (!e.hasWarranty || !e.warrantyExpiry) return false;
     const d = daysUntil(e.warrantyExpiry);
     return d >= 0 && d <= 90;
   });
 
-  const complianceAlerts = state.properties.filter(
+  const complianceAlerts = scopedProperties.filter(
     (p) => inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue,
   );
 
-  // Chart data: last 6 months synthetic based on ledger + emis
-  const months: { name: string; cashflow: number; equity: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
+  const dueSoonCount = state.bills.filter(
+    (b) => scopedPropertyIds.has(b.propertyId) && b.status !== "Paid" && daysUntil(b.dueDate) <= 7,
+  ).length;
+  const attentionCount = leaseAlerts.length + warrantyAlerts.length + complianceAlerts.length + dueSoonCount;
+
+  // Chart data: real income vs expenses per month, from the ledger/expenses actually on file.
+  const months: { name: string; income: number; expenses: number; cashflow: number }[] = [];
+  for (let i = chartMonths - 1; i >= 0; i--) {
     const d = new Date();
     d.setMonth(d.getMonth() - i);
     const key = d.toISOString().slice(0, 7);
-    const income = state.ledger
-      .filter((e) => e.date.startsWith(key))
-      .reduce((s, e) => s + e.credit, 0);
-    const exp = state.expenses.filter((e) => e.date.startsWith(key)).reduce((s, e) => s + e.cost, 0);
+    const income = scopedLedger.filter((e) => e.date.startsWith(key)).reduce((s, e) => s + e.credit, 0);
+    const exp = scopedExpenses.filter((e) => e.date.startsWith(key)).reduce((s, e) => s + e.cost, 0);
     months.push({
-      name: d.toLocaleString("en-AU", { month: "short" }),
+      name: d.toLocaleString("en-AU", { month: "short", year: chartMonths === 12 ? "2-digit" : undefined }),
+      income,
+      expenses: exp,
       cashflow: income - exp - totalEmis,
-      equity: equity - i * 2500,
     });
   }
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Portfolio Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Wealth, cash flow, and proactive compliance signals.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Portfolio Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Wealth, cash flow, and proactive compliance signals.</p>
+        </div>
+        {state.entities.length > 0 && (
+          <Select value={entityScope} onValueChange={setEntityScope}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All entities</SelectItem>
+              {state.entities.map((e) => (
+                <SelectItem key={e.id} value={e.id}>
+                  {e.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
+
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-2 p-4">
+          <div className="text-sm">
+            {netCashFlow >= 0 ? "Cashflow's positive." : "Cashflow's negative."}{" "}
+            {attentionCount === 0
+              ? "Nothing needs your attention right now."
+              : `${attentionCount} thing${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} your attention.`}
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setDetailsOpen((o) => !o)}>
+            Details {detailsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </Button>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard icon={<Landmark className="h-4 w-4" />} label="Portfolio Value" value={fmtCurrency(totalValue)} />
@@ -128,124 +184,206 @@ function DashboardPage() {
         />
       </div>
 
+      {totalValue > 0 && (
+        <div className="rounded-md border p-3">
+          <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Debt {lvrPercent}%</span>
+            <span>Equity {100 - lvrPercent}%</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-emerald-200">
+            <div className="h-full bg-amber-500" style={{ width: `${lvrPercent}%` }} />
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Monthly cash flow &amp; equity</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Income vs expenses</CardTitle>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant={chartMonths === 6 ? "secondary" : "ghost"}
+                className="h-7 px-2 text-xs"
+                onClick={() => setChartMonths(6)}
+              >
+                6M
+              </Button>
+              <Button
+                size="sm"
+                variant={chartMonths === 12 ? "secondary" : "ghost"}
+                className="h-7 px-2 text-xs"
+                onClick={() => setChartMonths(12)}
+              >
+                12M
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <ChartContainer
               className="h-[240px] w-full"
               config={{
-                cashflow: { label: "Cash flow", color: "hsl(var(--primary))" },
-                equity: { label: "Equity", color: "hsl(var(--muted-foreground))" },
+                income: { label: "Income", color: "hsl(var(--primary))" },
+                expenses: { label: "Expenses", color: "hsl(var(--destructive))" },
               }}
             >
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={months}>
                   <defs>
                     <linearGradient id="c1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-primary)" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="var(--color-primary)" stopOpacity={0} />
+                      <stop offset="5%" stopColor="var(--color-income)" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="var(--color-income)" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="c2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--color-expenses)" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="var(--color-expenses)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
                   <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
                   <YAxis tickLine={false} axisLine={false} fontSize={12} width={60} />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Area type="monotone" dataKey="cashflow" stroke="var(--color-primary)" fill="url(#c1)" />
+                  <Area type="monotone" dataKey="income" stroke="var(--color-income)" fill="url(#c1)" />
+                  <Area type="monotone" dataKey="expenses" stroke="var(--color-expenses)" fill="url(#c2)" />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartContainer>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              Lease renewals (60 days)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {leaseAlerts.length === 0 && <div className="text-muted-foreground">No upcoming expiries.</div>}
-            {leaseAlerts.map((t) => {
-              const prop = state.properties.find((p) => p.id === t.propertyId);
-              return (
-                <div key={t.id} className="rounded-md border p-3">
-                  <div className="font-medium">Lease expiring soon</div>
-                  <div className="text-xs text-muted-foreground">
-                    {t.name} at {prop?.address} — expires {t.leaseExpiry}
-                  </div>
-                  <Button asChild variant="ghost" size="sm" className="mt-2 h-7 gap-1 px-2 text-xs">
-                    <Link to="/rental">
-                      Draft notice <ArrowRight className="h-3 w-3" />
-                    </Link>
-                  </Button>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+        <ActivityFeedCard />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
-              Asset warranties (90 days)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {warrantyAlerts.length === 0 && <div className="text-muted-foreground">No warranties expiring soon.</div>}
-            {warrantyAlerts.map((e) => (
-              <div key={e.id} className="flex items-center justify-between rounded-md border p-3">
-                <div>
-                  <div className="font-medium">{e.itemName}</div>
-                  <div className="text-xs text-muted-foreground">Expires {e.warrantyExpiry}</div>
-                </div>
-                <Badge variant="outline">{daysUntil(e.warrantyExpiry!)} days</Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      {detailsOpen && (
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Lease renewals (60 days)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {leaseAlerts.length === 0 && <div className="text-muted-foreground">No upcoming expiries.</div>}
+                {leaseAlerts.map((t) => {
+                  const prop = state.properties.find((p) => p.id === t.propertyId);
+                  return (
+                    <div key={t.id} className="rounded-md border p-3">
+                      <div className="font-medium">Lease expiring soon</div>
+                      <div className="text-xs text-muted-foreground">
+                        {t.name} at {prop?.address} — expires {t.leaseExpiry}
+                      </div>
+                      <Button asChild variant="ghost" size="sm" className="mt-2 h-7 gap-1 px-2 text-xs">
+                        <Link to="/rental">
+                          Draft notice <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </Button>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <ClipboardCheck className="h-4 w-4 text-blue-600" />
-              Compliance: inspections
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            {complianceAlerts.length === 0 && <div className="text-muted-foreground">All properties inspected recently.</div>}
-            {complianceAlerts.map((p) => {
-              const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
-              return (
-                <div key={p.id} className="rounded-md border p-3">
-                  <div className="font-medium">{p.address}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {status.last ? `Last inspected ${status.last.date} — overdue` : "No inspection on record"}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  Asset warranties (90 days)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {warrantyAlerts.length === 0 && <div className="text-muted-foreground">No warranties expiring soon.</div>}
+                {warrantyAlerts.map((e) => (
+                  <div key={e.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <div className="font-medium">{e.itemName}</div>
+                      <div className="text-xs text-muted-foreground">Expires {e.warrantyExpiry}</div>
+                    </div>
+                    <Badge variant="outline">{daysUntil(e.warrantyExpiry!)} days</Badge>
                   </div>
-                </div>
-              );
-            })}
-            {complianceAlerts.length > 0 && (
-              <Button asChild variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
-                <Link to="/inspections">
-                  Book inspections <ArrowRight className="h-3 w-3" />
-                </Link>
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
 
-      <HousekeepingWidget />
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <ClipboardCheck className="h-4 w-4 text-blue-600" />
+                Compliance: inspections
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {complianceAlerts.length === 0 && <div className="text-muted-foreground">All properties inspected recently.</div>}
+              {complianceAlerts.map((p) => {
+                const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
+                return (
+                  <div key={p.id} className="rounded-md border p-3">
+                    <div className="font-medium">{p.address}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {status.last ? `Last inspected ${status.last.date} — overdue` : "No inspection on record"}
+                    </div>
+                  </div>
+                );
+              })}
+              {complianceAlerts.length > 0 && (
+                <Button asChild variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+                  <Link to="/inspections">
+                    Book inspections <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          <HousekeepingWidget />
+        </div>
+      )}
 
       <MaintenanceRequestsWidget />
     </div>
+  );
+}
+
+/** Recent automated activity — bills matched, statements processed, documents filed. */
+function ActivityFeedCard() {
+  const { state } = useStore();
+  const items = buildActivityFeed(state);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Activity className="h-4 w-4 text-muted-foreground" />
+          Activity
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {items.length === 0 && (
+          <div className="text-muted-foreground">
+            Nothing automated yet — processed bills and rent statements will show up here.
+          </div>
+        )}
+        {items.map((item) => {
+          const days = Math.abs(daysUntil(item.date));
+          const rel = days === 0 ? "Today" : `${days}d ago`;
+          return (
+            <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 flex-1">{item.label}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                {item.amount !== undefined && (
+                  <span className={item.amount < 0 ? "text-destructive" : "text-emerald-600"}>
+                    {item.amount < 0 ? "−" : "+"}
+                    {fmtCurrency(Math.abs(item.amount))}
+                  </span>
+                )}
+                <span className="text-muted-foreground">{rel}</span>
+              </span>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 

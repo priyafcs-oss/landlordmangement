@@ -30,6 +30,12 @@ export interface ParsedBillFields {
   /** Any OTHER instalments/due dates printed on the same notice besides the one currently due — e.g. a
    * council rates notice listing all 4 quarters. Empty array if the notice only shows one payment. */
   future_instalments: ParsedFutureInstalment[];
+  /** Best-effort vendor contact details, when printed on the notice — used to build a provider directory. Null if not shown. */
+  vendor_email: string | null;
+  vendor_phone: string | null;
+  vendor_website: string | null;
+  vendor_abn: string | null;
+  vendor_address: string | null;
   /** Gemini's own 0-1 estimate of extraction certainty, used by the low-confidence guardrail. */
   confidence: number;
 }
@@ -72,6 +78,10 @@ export interface ParsedLedgerFields {
   periodStart: string | null;
   periodEnd: string | null;
   transactions: { date: string; amount: number; description: string }[];
+  /** Expense lines on the same statement — e.g. a managing agent's fee, or a bill they paid on the owner's behalf. */
+  expenseLines: { vendor: string; amount: number; date: string; description: string; category: string }[];
+  /** The statement's own stated net-to-owner figure, if shown, for a reconciliation sanity check. Null if not stated. */
+  netToOwner: number | null;
   property_address: string;
   confidence: number;
 }

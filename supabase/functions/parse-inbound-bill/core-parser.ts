@@ -14,12 +14,26 @@ Extract the fields defined in the response schema as strict JSON.
 - due_date must be formatted YYYY-MM-DD, and is the instalment that is CURRENTLY due / due soonest.
 - bpay_biller_code and bpay_reference must be null if the bill has no BPAY details.
 - bill_category must be one of: Water, Council Rates, Strata, Insurance, Electricity, Gas, Other.
-- Many Australian council and water rate notices print the FULL year's payment schedule on one notice
-  (e.g. "Instalment 1/2/3/4" or "Quarter 1/2/3/4" with their own due dates and amounts), even though only
-  one instalment is currently payable. Extract every OTHER instalment shown (not the one already captured
-  in due_date/amount) into future_instalments, each with its own due_date (YYYY-MM-DD) and amount. If the
-  notice only shows a single payment with no schedule of future instalments, return an empty array.
-- confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;
+- future_instalments is REQUIRED — you must always include this field, even as an empty array [] when
+  there is no schedule to extract. Do not omit it under any circumstances.
+- Many Australian council and water rate notices print the FULL year's payment schedule on one notice,
+  typically as a table like:
+    Instalment   Due Date      Amount
+    1st Instalment   31 Aug 2026   $558.13
+    2nd Instalment   30 Nov 2026   $557.90
+    3rd Instalment   28 Feb 2027   $557.90
+    4th Instalment   31 May 2027   $557.90
+  — even though only the 1st instalment is currently payable (that one goes in due_date/amount, NOT
+  repeated in future_instalments). Extract every OTHER row from a table like this — 2nd, 3rd, 4th
+  instalment, or "Quarter 2/3/4", or any similarly-labelled future due date — into future_instalments,
+  each with its own due_date (YYYY-MM-DD) and amount. Look specifically for a table or list with a
+  heading resembling "Instalment / Due Date / Amount" — it is often on the same page as the total, near
+  a "PAY BY INSTALMENTS" vs "PAY ENTIRE YEAR" style summary box. Only return [] if you have genuinely
+  checked and no such table/schedule appears anywhere in the document.
+- confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.
+- vendor_email, vendor_phone, vendor_website, vendor_abn, vendor_address: the biller's own contact
+  details, if printed anywhere on the notice (often in a "Contact us" or footer section) — null for
+  any that aren't shown. Do not guess or invent these.`;
 
 const BILL_SCHEMA = {
   type: "OBJECT",
@@ -43,9 +57,23 @@ const BILL_SCHEMA = {
         required: ["due_date", "amount"],
       },
     },
+    vendor_email: { type: "STRING", nullable: true },
+    vendor_phone: { type: "STRING", nullable: true },
+    vendor_website: { type: "STRING", nullable: true },
+    vendor_abn: { type: "STRING", nullable: true },
+    vendor_address: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
-  required: ["vendor", "amount", "due_date", "property_address", "ato_category", "bill_category", "confidence"],
+  required: [
+    "vendor",
+    "amount",
+    "due_date",
+    "property_address",
+    "ato_category",
+    "bill_category",
+    "future_instalments",
+    "confidence",
+  ],
 };
 
 async function callGemini(input: NormalizedBillInput): Promise<ParsedBillFields> {
@@ -129,6 +157,103 @@ async function scheduleFutureInstalments(
   if (rows.length === 0) return 0;
   const { error } = await supabase.from("property_bills").insert(rows);
   return error ? 0 : rows.length;
+}
+
+/** Council Rates bills come from the council itself; everything else defaults to a generic Trade/vendor contact. */
+function mapProviderRole(billType: BillType): "Council" | "Trade" {
+  return billType === "Council Rates" ? "Council" : "Trade";
+}
+
+/**
+ * Saves (or updates) a provider/contact record from whatever contact details the notice printed,
+ * so the landlord builds up a directory of councils/trades/insurers without typing them in by
+ * hand. Deduped by property + name (case-insensitive) — a later bill from the same vendor fills in
+ * any details this one didn't have, rather than creating a duplicate row each time.
+ */
+async function upsertProviderFromBill(
+  supabase: SupabaseClient,
+  propertyId: string,
+  billType: BillType,
+  parsed: ParsedBillFields,
+): Promise<void> {
+  const hasAnyContactInfo = parsed.vendor_email || parsed.vendor_phone || parsed.vendor_website || parsed.vendor_abn;
+  if (!hasAnyContactInfo) return;
+
+  const { data: existing } = await supabase
+    .from("providers")
+    .select("id, email, phone, website, abn, address")
+    .eq("propertyId", propertyId)
+    .ilike("name", parsed.vendor)
+    .maybeSingle();
+
+  if (existing) {
+    const patch: Record<string, unknown> = {};
+    if (!existing.email && parsed.vendor_email) patch.email = parsed.vendor_email;
+    if (!existing.phone && parsed.vendor_phone) patch.phone = parsed.vendor_phone;
+    if (!existing.website && parsed.vendor_website) patch.website = parsed.vendor_website;
+    if (!existing.abn && parsed.vendor_abn) patch.abn = parsed.vendor_abn;
+    if (!existing.address && parsed.vendor_address) patch.address = parsed.vendor_address;
+    if (Object.keys(patch).length > 0) {
+      await supabase.from("providers").update(patch).eq("id", existing.id);
+    }
+    return;
+  }
+
+  await supabase.from("providers").insert({
+    id: `prov_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    propertyId,
+    name: parsed.vendor,
+    role: mapProviderRole(billType),
+    email: parsed.vendor_email,
+    phone: parsed.vendor_phone,
+    website: parsed.vendor_website,
+    abn: parsed.vendor_abn,
+    address: parsed.vendor_address,
+    notes: "Auto-saved from an emailed bill.",
+  });
+}
+
+/** Which Property annual-running-cost column each bill type feeds, if any. */
+const ANNUAL_COST_FIELD: Partial<Record<BillType, string>> = {
+  "Council Rates": "councilRatesAnnual",
+  Water: "waterRatesAnnual",
+  Strata: "strataFeesAnnual",
+  Insurance: "insuranceAnnual",
+};
+
+/**
+ * Keeps the property's annual running-cost figures (used across P&L/forecast displays) current
+ * automatically, instead of requiring manual entry every time a bill comes in. Deliberately
+ * conservative about when it's confident enough to know the TRUE annual figure:
+ *   - Insurance is normally billed as a single annual premium, so the bill's own amount IS the
+ *     annual figure.
+ *   - Council/Water/Strata are typically quarterly — only update when this notice's current
+ *     instalment plus its 3 future instalments account for a full 4-quarter cycle. A single
+ *     quarter alone isn't the annual total, and guessing would silently write a wrong number
+ *     into the landlord's own figures.
+ */
+async function updateAnnualRunningCost(
+  supabase: SupabaseClient,
+  propertyId: string,
+  billType: BillType,
+  currentAmount: number,
+  futureInstalments: { amount: number }[],
+): Promise<void> {
+  const field = ANNUAL_COST_FIELD[billType];
+  if (!field) return;
+
+  let annual: number | null = null;
+  if (billType === "Insurance" && futureInstalments.length === 0) {
+    annual = currentAmount;
+  } else if (futureInstalments.length === 3) {
+    annual = currentAmount + futureInstalments.reduce((s, i) => s + i.amount, 0);
+  }
+  if (annual === null) return;
+
+  await supabase
+    .from("properties")
+    .update({ [field]: Math.round(annual * 100) / 100 })
+    .eq("id", propertyId);
 }
 
 async function runGuardrails(
@@ -243,13 +368,28 @@ export async function parseInboundBill(
     return { ok: false, error: error.message };
   }
 
+  console.log(
+    `[parse-inbound-bill] "${parsed.vendor}" future_instalments: ${JSON.stringify(parsed.future_instalments ?? "MISSING")}`,
+  );
+
   let scheduledBillsCreated = 0;
-  if (matchedPropertyId && parsed.future_instalments?.length) {
-    scheduledBillsCreated = await scheduleFutureInstalments(
+  if (matchedPropertyId) {
+    const billType = mapBillType(parsed.bill_category, parsed.vendor);
+    if (parsed.future_instalments?.length) {
+      scheduledBillsCreated = await scheduleFutureInstalments(
+        supabase,
+        matchedPropertyId,
+        billType,
+        parsed.future_instalments,
+      );
+    }
+    await upsertProviderFromBill(supabase, matchedPropertyId, billType, parsed);
+    await updateAnnualRunningCost(
       supabase,
       matchedPropertyId,
-      mapBillType(parsed.bill_category, parsed.vendor),
-      parsed.future_instalments,
+      billType,
+      parsed.amount,
+      parsed.future_instalments ?? [],
     );
   }
 
