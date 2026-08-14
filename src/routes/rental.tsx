@@ -378,6 +378,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     tenant,
     state.ledger,
     state.invoices,
+    state.rentChanges,
   );
   const [amount, setAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayISO());
@@ -386,7 +387,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
 
   const nextDue = addDays(tenant.paidUpToDate, 1);
   const propertyAddress = state.properties.find((p) => p.id === tenant.propertyId)?.address ?? "";
-  const paidUpTo = paidUpToDetails(tenant, state.ledger);
+  const paidUpTo = paidUpToDetails(tenant, state.ledger, state.rentChanges);
 
   const fyOptions = useMemo(() => {
     const years: string[] = [];

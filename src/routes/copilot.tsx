@@ -47,7 +47,7 @@ function CopilotPage() {
   const buildContext = () => {
     const tenantsSummary = state.tenants.map((t) => {
       const prop = state.properties.find((p) => p.id === t.propertyId);
-      const { total, outstandingRent, outstandingInvoices } = buildTenantLedger(t, state.ledger, state.invoices);
+      const { total, outstandingRent, outstandingInvoices } = buildTenantLedger(t, state.ledger, state.invoices, state.rentChanges);
       return {
         name: t.name,
         property: prop?.address,

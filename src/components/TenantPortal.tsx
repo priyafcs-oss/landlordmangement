@@ -11,7 +11,7 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
   const tenant = state.tenants.find((t) => t.id === tenantId);
   if (!tenant) return <div className="p-6">Tenant not found.</div>;
   const property = state.properties.find((p) => p.id === tenant.propertyId);
-  const { total, rows, outstandingInvoices } = buildTenantLedger(tenant, state.ledger, state.invoices);
+  const { total, rows, outstandingInvoices } = buildTenantLedger(tenant, state.ledger, state.invoices, state.rentChanges);
   const unpaidInvoices = state.invoices.filter((i) => i.tenantId === tenantId && i.status === "Unpaid");
   const receipts = rows.filter((r) => r.credit > 0);
 

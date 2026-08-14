@@ -214,10 +214,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * Single source of truth for `paidUpToDate`: always re-derived from the lease
    * start date plus every Rent Payment credit in the ledger, then persisted.
    */
-  const recomputePaidUp = (tenantId: string, tenants: Tenant[], ledger: LedgerEntry[]): Tenant[] =>
+  const recomputePaidUp = (
+    tenantId: string,
+    tenants: Tenant[],
+    ledger: LedgerEntry[],
+    rentChanges: RentChange[],
+  ): Tenant[] =>
     tenants.map((t) => {
       if (t.id !== tenantId) return t;
-      const next = paidUpToDateFromPayments(t, ledger);
+      const next = paidUpToDateFromPayments(t, ledger, rentChanges);
       if (next === t.paidUpToDate) return t;
       void updateRow(TABLES.tenants, t.id, { paidUpToDate: next });
       return { ...t, paidUpToDate: next };
@@ -284,7 +289,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const rc: RentChange = {
             id: uid("rc"),
             tenantId: id,
-            changeDate: new Date().toISOString().slice(0, 10),
+            // The landlord-chosen effective date (IncreaseRentDialog always sets this alongside
+            // rentAmount) — not "today", which silently backdated every increase to whenever it
+            // happened to be clicked rather than the date it was meant to take effect.
+            changeDate: patch.lastRentIncreaseDate ?? new Date().toISOString().slice(0, 10),
             oldRent: prev.rentAmount,
             newRent: patch.rentAmount,
           };
@@ -297,7 +305,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           patch.rentAmount !== undefined ||
           patch.rentFrequency !== undefined
         ) {
-          nextTenants = recomputePaidUp(id, nextTenants, s.ledger);
+          nextTenants = recomputePaidUp(id, nextTenants, s.ledger, rentChanges);
         }
         return { ...s, tenants: nextTenants, rentChanges };
       }),
@@ -343,7 +351,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const rc: RentChange = {
             id: uid("rc"),
             tenantId,
-            changeDate: new Date().toISOString().slice(0, 10),
+            // The new rent takes effect from the new lease term's start date, not from whenever
+            // the landlord happens to process the renewal in the app.
+            changeDate: args.newStart,
             oldRent: prev.rentAmount,
             newRent: args.newRent,
           };
@@ -357,8 +367,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           leaseDuration: args.newDuration ?? prev.leaseDuration,
           rentAmount: args.newRent,
           rentFrequency: args.newFrequency ?? prev.rentFrequency,
-          lastRentIncreaseDate:
-            args.newRent !== prev.rentAmount ? new Date().toISOString().slice(0, 10) : prev.lastRentIncreaseDate,
+          lastRentIncreaseDate: args.newRent !== prev.rentAmount ? args.newStart : prev.lastRentIncreaseDate,
           // Only replace the current lease document if a new one was uploaded at renewal.
           ...(args.newLeaseDocumentFileData
             ? {
@@ -373,6 +382,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tenantId,
           s.tenants.map((t) => (t.id === tenantId ? { ...t, ...patch } : t)),
           s.ledger,
+          rentChanges,
         );
         return { ...s, leaseHistory: [...s.leaseHistory, history], rentChanges, tenants };
       }),
@@ -409,7 +419,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const row: LedgerEntry = { ...e, id: uid("le") };
         void upsertRow(TABLES.ledger, row as unknown as Record<string, unknown>);
         const ledger = [...s.ledger, row];
-        return { ...s, ledger, tenants: recomputePaidUp(row.tenantId, s.tenants, ledger) };
+        return { ...s, ledger, tenants: recomputePaidUp(row.tenantId, s.tenants, ledger, s.rentChanges) };
       }),
     deleteLedger: (id) =>
       set((s) => {
@@ -419,7 +429,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return {
           ...s,
           ledger,
-          tenants: entry ? recomputePaidUp(entry.tenantId, s.tenants, ledger) : s.tenants,
+          tenants: entry ? recomputePaidUp(entry.tenantId, s.tenants, ledger, s.rentChanges) : s.tenants,
         };
       }),
 

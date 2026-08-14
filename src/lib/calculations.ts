@@ -1,4 +1,4 @@
-import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice, Inspection, Property } from "./types";
+import type { RentFrequency, Tenant, LedgerEntry, TenantInvoice, Inspection, Property, RentChange } from "./types";
 
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;
@@ -13,6 +13,24 @@ export function dailyRentRate(amount: number, freq: RentFrequency): number {
   if (freq === "Weekly") return amount / 7;
   if (freq === "Fortnightly") return amount / 14;
   return (amount * 12) / 365;
+}
+
+/**
+ * The rent actually in effect on `date`, accounting for the tenant's rent-change history —
+ * `tenant.rentAmount` alone is only the CURRENT rate, and using it for the whole tenancy back to
+ * lease start silently applies every rent increase retroactively from day one.
+ */
+export function rentAmountOnDate(tenant: Tenant, rentChanges: RentChange[], date: string): number {
+  const relevant = [...rentChanges]
+    .filter((rc) => rc.tenantId === tenant.id)
+    .sort((a, b) => (a.changeDate < b.changeDate ? -1 : a.changeDate > b.changeDate ? 1 : 0));
+  if (relevant.length === 0) return tenant.rentAmount;
+  let amount = relevant[0].oldRent;
+  for (const rc of relevant) {
+    if (rc.changeDate <= date) amount = rc.newRent;
+    else break;
+  }
+  return amount;
 }
 
 export function addDays(iso: string, days: number): string {
@@ -87,6 +105,7 @@ export function buildTenantLedger(
   tenant: Tenant,
   entries: LedgerEntry[],
   invoices: TenantInvoice[],
+  rentChanges: RentChange[] = [],
 ): { rows: LedgerRow[]; outstandingRent: number; outstandingInvoices: number; total: number; nextDue: string } {
   const period = periodDays(tenant.rentFrequency);
   const rows: LedgerRow[] = [];
@@ -99,8 +118,9 @@ export function buildTenantLedger(
     while (cursor <= today && cursor <= cap) {
       // Cycle spans `period` calendar days: cursor (day 1) ... cursor+period-1 (day 7 for weekly).
       const cycleEnd = addDays(cursor, period - 1);
-      // Charge the full nominal rent per cycle (avoids float drift from daily-rate rounding).
-      const cycleAmount = tenant.rentAmount;
+      // Charge the rent that was actually in effect at the start of this cycle — not today's
+      // rate applied retroactively to every past cycle.
+      const cycleAmount = rentAmountOnDate(tenant, rentChanges, cursor);
       rows.push({
         id: `due-${tenant.id}-${cursor}`,
         date: cursor,
@@ -171,8 +191,9 @@ export function tenantArrearsStatus(
   tenant: Tenant,
   entries: LedgerEntry[],
   invoices: TenantInvoice[],
+  rentChanges: RentChange[] = [],
 ): { inArrears: boolean; amount: number } {
-  const { total } = buildTenantLedger(tenant, entries, invoices);
+  const { total } = buildTenantLedger(tenant, entries, invoices, rentChanges);
   return { inArrears: total > 0.01, amount: total };
 }
 
@@ -182,10 +203,8 @@ export interface PaidUpToInfo {
   extra: number;
 }
 
-export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[]): PaidUpToInfo {
-  const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
+export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[], rentChanges: RentChange[] = []): PaidUpToInfo {
   const start = tenant.leaseStart ?? tenant.paidUpToDate;
-  if (rate <= 0) return { date: start, extra: 0 };
   // Rent Payment and Adjustment/Manual credits all advance the paid-up date; an Adjustment
   // Debit (e.g. a clawed-back shortfall) pulls it back — previously only "Rent Payment" counted,
   // so adjustments silently had no effect on this date at all.
@@ -202,24 +221,31 @@ export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[]): PaidUpT
     }, 0);
 
   const EPS = 1e-8;
-  const rawDaysCovered = totalPaid / rate;
-  let fullDays = Math.floor(rawDaysCovered + EPS);
-  let leftover = totalPaid - fullDays * rate;
-
-  if (leftover + EPS >= rate) {
+  // Walk forward day by day from lease start, consuming totalPaid against whatever rent was
+  // actually in effect on each day — a flat totalPaid/rate division only works when the rent
+  // never changed; with a mid-tenancy increase it silently applies the current rate to every
+  // past day too, which both overstates and understates how many days are actually covered.
+  let remaining = totalPaid;
+  let fullDays = 0;
+  let cursor = start;
+  const MAX_DAYS = 20000; // safety cap (~55 years) against a zero/negative-rate infinite loop
+  while (fullDays < MAX_DAYS) {
+    const dayRate = dailyRentRate(rentAmountOnDate(tenant, rentChanges, cursor), tenant.rentFrequency);
+    if (dayRate <= 0 || remaining + EPS < dayRate) break;
+    remaining -= dayRate;
     fullDays += 1;
-    leftover = 0;
+    cursor = addDays(cursor, 1);
   }
 
-  const extra = Math.round(Math.max(0, leftover) * 100) / 100;
+  const extra = Math.round(Math.max(0, remaining) * 100) / 100;
   // Floor at "nothing paid" (start - 1 day, matching the tenant's initial default), not at
   // `start` itself — the previous Math.max(0, ...) clamp meant zero payment still advanced the
   // paid-up date by one free day the moment any ledger entry triggered a recompute.
   return { date: addDays(start, Math.max(-1, fullDays - 1)), extra };
 }
 
-export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[]): string {
-  return paidUpToDetails(tenant, entries).date;
+export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[], rentChanges: RentChange[] = []): string {
+  return paidUpToDetails(tenant, entries, rentChanges).date;
 }
 
 export function daysUntil(dateISO: string): number {
