@@ -10,6 +10,12 @@ export interface NormalizedBillInput {
   textBody?: string;
 }
 
+/** A later instalment printed on the same notice (e.g. quarterly council/water rates) — not yet due. */
+export interface ParsedFutureInstalment {
+  due_date: string; // YYYY-MM-DD
+  amount: number;
+}
+
 /** Strict JSON shape requested from Gemini. */
 export interface ParsedBillFields {
   vendor: string;
@@ -19,6 +25,11 @@ export interface ParsedBillFields {
   bpay_biller_code: string | null;
   bpay_reference: string | null;
   ato_category: string;
+  /** Free-text category Gemini assigns, mapped onto the app's BillType union for scheduling. */
+  bill_category: string;
+  /** Any OTHER instalments/due dates printed on the same notice besides the one currently due — e.g. a
+   * council rates notice listing all 4 quarters. Empty array if the notice only shows one payment. */
+  future_instalments: ParsedFutureInstalment[];
   /** Gemini's own 0-1 estimate of extraction certainty, used by the low-confidence guardrail. */
   confidence: number;
 }
@@ -29,6 +40,7 @@ export interface ParseResult {
   status?: "approved" | "needs_review";
   reviewReason?: string | null;
   matchedPropertyId?: string | null;
+  scheduledBillsCreated?: number;
   error?: string;
 }
 

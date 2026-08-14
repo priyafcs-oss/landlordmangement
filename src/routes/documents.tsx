@@ -1,0 +1,201 @@
+import { useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useStore } from "@/lib/store";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { FileText, Mail, FolderOpen } from "lucide-react";
+import { fmtCurrency } from "@/lib/calculations";
+
+export const Route = createFileRoute("/documents")({
+  head: () => ({
+    meta: [
+      { title: "Documents — Landlord OS" },
+      { name: "description", content: "Every bill, rent statement and lease agreement forwarded by email, kept for reference." },
+    ],
+  }),
+  component: DocumentsPage,
+});
+
+interface DocumentEntry {
+  id: string;
+  kind: "Bill" | "Lease Agreement" | "Rent Statement";
+  date: string;
+  propertyId?: string;
+  label: string;
+  amount?: number;
+  status?: string;
+  fileName?: string;
+  fileData?: string;
+  subject?: string;
+  emailBody?: string;
+}
+
+function DocumentsPage() {
+  const { state } = useStore();
+  const [propertyId, setPropertyId] = useState("__all__");
+  const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
+  const [query, setQuery] = useState("");
+
+  const entries: DocumentEntry[] = [
+    ...state.expenses
+      .filter((e) => e.invoiceFileData || e.sourceEmailBody)
+      .map((e) => ({
+        id: e.id,
+        kind: "Bill" as const,
+        date: e.date,
+        propertyId: e.propertyId,
+        label: e.itemName,
+        amount: e.cost,
+        status: e.status,
+        fileName: e.invoiceFileName,
+        fileData: e.invoiceFileData,
+        subject: e.sourceSubject,
+        emailBody: e.sourceEmailBody,
+      })),
+    ...state.aiProposals.map((p) => {
+      const isLease = p.kind === "tenant_lease";
+      const label = isLease
+        ? (p.payload as { name?: string }).name ?? "Lease agreement"
+        : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
+      return {
+        id: p.id,
+        kind: (isLease ? "Lease Agreement" : "Rent Statement") as DocumentEntry["kind"],
+        date: p.created_at?.slice(0, 10) ?? "",
+        propertyId: p.propertyId,
+        label,
+        status: p.status,
+        fileName: p.sourceFileName,
+        fileData: p.sourceFileData,
+        subject: p.sourceSubject,
+        emailBody: p.sourceEmailBody,
+      };
+    }),
+  ].sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const filtered = entries.filter((d) => {
+    if (propertyId !== "__all__" && d.propertyId !== propertyId) return false;
+    if (kind !== "__all__" && d.kind !== kind) return false;
+    if (query && !`${d.label} ${d.subject ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
+        <p className="text-sm text-muted-foreground">
+          Every bill, rent statement and lease agreement forwarded by email — kept here for reference
+          regardless of whether it was applied or dismissed.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Search…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="max-w-[220px]"
+        />
+        <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All types</SelectItem>
+            <SelectItem value="Bill">Bills</SelectItem>
+            <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
+            <SelectItem value="Rent Statement">Rent statements</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={propertyId} onValueChange={setPropertyId}>
+          <SelectTrigger className="w-[220px]">
+            <SelectValue placeholder="All properties" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All properties</SelectItem>
+            {state.properties.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.alias || p.address}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        {filtered.length === 0 && (
+          <Card>
+            <CardContent className="p-6 text-center text-sm text-muted-foreground">
+              <FolderOpen className="mx-auto mb-2 h-6 w-6" />
+              No documents match these filters.
+            </CardContent>
+          </Card>
+        )}
+        {filtered.map((d) => {
+          const property = state.properties.find((p) => p.id === d.propertyId);
+          return (
+            <Card key={`${d.kind}-${d.id}`}>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{d.kind}</Badge>
+                    <span className="font-medium">{d.label}</span>
+                    {d.amount !== undefined && <span className="text-muted-foreground">{fmtCurrency(d.amount)}</span>}
+                    {d.status && <Badge variant="secondary">{d.status}</Badge>}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {d.date || "—"} {property && `• ${property.alias || property.address}`}
+                  </div>
+                </div>
+                <DocumentLinks fileName={d.fileName} fileData={d.fileData} subject={d.subject} emailBody={d.emailBody} />
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DocumentLinks({
+  fileName,
+  fileData,
+  subject,
+  emailBody,
+}: {
+  fileName?: string;
+  fileData?: string;
+  subject?: string;
+  emailBody?: string;
+}) {
+  const [showEmail, setShowEmail] = useState(false);
+  if (!fileData && !emailBody) return <span className="text-xs text-muted-foreground">No document attached</span>;
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs">
+      {fileData && (
+        <a href={fileData} download={fileName || "document.pdf"} className="inline-flex items-center gap-1 text-primary underline">
+          <FileText className="h-3 w-3" /> View file
+        </a>
+      )}
+      {emailBody && (
+        <>
+          <button type="button" onClick={() => setShowEmail(true)} className="inline-flex items-center gap-1 text-primary underline">
+            <Mail className="h-3 w-3" /> View email
+          </button>
+          <Dialog open={showEmail} onOpenChange={setShowEmail}>
+            <DialogContent className="max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{subject || "Email"}</DialogTitle>
+              </DialogHeader>
+              <pre className="whitespace-pre-wrap text-xs">{emailBody}</pre>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
+    </div>
+  );
+}

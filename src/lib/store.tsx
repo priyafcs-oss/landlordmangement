@@ -567,8 +567,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
 
     dismissProposal: (id) => {
-      void deleteRow(TABLES.aiProposals, id);
-      set((s) => ({ ...s, aiProposals: s.aiProposals.filter((x) => x.id !== id) }));
+      // Kept (not deleted) so the original forwarded document stays available in the Documents archive.
+      void updateRow(TABLES.aiProposals, id, { status: "dismissed" });
+      set((s) => ({
+        ...s,
+        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, status: "dismissed" as const } : x)),
+      }));
     },
     markProposalApplied: (id) => {
       void updateRow(TABLES.aiProposals, id, { status: "applied" });

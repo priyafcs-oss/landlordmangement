@@ -366,6 +366,8 @@ export interface RentLedgerProposalPayload {
 
 export interface AiIntakeProposal {
   id: string;
+  /** Server-set on insert — when this document was received, used for the Documents archive. */
+  created_at?: string;
   kind: "tenant_lease" | "rent_ledger";
   status: "pending" | "applied" | "dismissed";
   propertyId?: string;

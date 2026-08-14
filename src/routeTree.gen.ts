@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CopilotRouteImport } from './routes/copilot'
+import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
@@ -28,6 +29,11 @@ const IndexRoute = IndexRouteImport.update({
 const CopilotRoute = CopilotRouteImport.update({
   id: '/copilot',
   path: '/copilot',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocumentsRoute = DocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExpensesRoute = ExpensesRouteImport.update({
@@ -74,6 +80,7 @@ const ApiVisionRoute = ApiVisionRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/copilot': typeof CopilotRoute
+  '/documents': typeof DocumentsRoute
   '/expenses': typeof ExpensesRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/copilot': typeof CopilotRoute
+  '/documents': typeof DocumentsRoute
   '/expenses': typeof ExpensesRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
@@ -99,6 +107,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/copilot': typeof CopilotRoute
+  '/documents': typeof DocumentsRoute
   '/expenses': typeof ExpensesRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
@@ -113,6 +122,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/copilot'
+    | '/documents'
     | '/expenses'
     | '/inspections'
     | '/maintenance'
@@ -125,6 +135,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/copilot'
+    | '/documents'
     | '/expenses'
     | '/inspections'
     | '/maintenance'
@@ -137,6 +148,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/copilot'
+    | '/documents'
     | '/expenses'
     | '/inspections'
     | '/maintenance'
@@ -150,6 +162,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CopilotRoute: typeof CopilotRoute
+  DocumentsRoute: typeof DocumentsRoute
   ExpensesRoute: typeof ExpensesRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
@@ -174,6 +187,13 @@ declare module '@tanstack/react-router' {
       path: '/copilot'
       fullPath: '/copilot'
       preLoaderRoute: typeof CopilotRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/documents': {
+      id: '/documents'
+      path: '/documents'
+      fullPath: '/documents'
+      preLoaderRoute: typeof DocumentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/expenses': {
@@ -238,6 +258,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CopilotRoute: CopilotRoute,
+  DocumentsRoute: DocumentsRoute,
   ExpensesRoute: ExpensesRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
