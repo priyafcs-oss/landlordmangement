@@ -178,12 +178,14 @@ export type Database = {
           fileData: string | null
           fileFileName: string | null
           id: string
+          issues: Json | null
           notes: string | null
           photos: Json | null
           propertyId: string
           rooms: Json | null
           signature: string | null
           status: string
+          tenantId: string | null
           type: string
         }
         Insert: {
@@ -193,12 +195,14 @@ export type Database = {
           fileData?: string | null
           fileFileName?: string | null
           id: string
+          issues?: Json | null
           notes?: string | null
           photos?: Json | null
           propertyId: string
           rooms?: Json | null
           signature?: string | null
           status?: string
+          tenantId?: string | null
           type?: string
         }
         Update: {
@@ -208,12 +212,14 @@ export type Database = {
           fileData?: string | null
           fileFileName?: string | null
           id?: string
+          issues?: Json | null
           notes?: string | null
           photos?: Json | null
           propertyId?: string
           rooms?: Json | null
           signature?: string | null
           status?: string
+          tenantId?: string | null
           type?: string
         }
         Relationships: []

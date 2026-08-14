@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -16,29 +18,55 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Sparkles, ClipboardCheck, TriangleAlert, CalendarClock, FileText } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Sparkles,
+  ClipboardCheck,
+  TriangleAlert,
+  CalendarClock,
+  FileText,
+  CheckCircle2,
+  Wrench,
+  Mail,
+  ChevronDown,
+  ChevronUp,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { todayISO, daysUntil, inspectionDueStatus } from "@/lib/calculations";
-import type { Inspection, ChecklistItem, ChecklistRoom, Property } from "@/lib/types";
+import { openGmailCompose } from "@/lib/emailPdf";
+import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Property, Tenant } from "@/lib/types";
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
 
 export const Route = createFileRoute("/inspections")({
   head: () => ({
     meta: [
       { title: "Inspections — Landlord OS" },
-      { name: "description", content: "Schedule, track and report on property inspections." },
+      { name: "description", content: "Book inspections, track due dates, upload reports and flag issues." },
     ],
   }),
   component: InspectionsPage,
 });
 
+function currentTenantOf(propertyId: string, tenants: Tenant[]): Tenant | undefined {
+  return tenants.find((t) => t.propertyId === propertyId);
+}
+
 function InspectionsPage() {
   const { state } = useStore();
 
-  const dueList = state.properties
-    .map((p) => ({ property: p, status: inspectionDueStatus(p.id, state.inspections) }))
-    .sort((a, b) => (a.status.daysSinceLast ?? Infinity) < (b.status.daysSinceLast ?? Infinity) ? 1 : -1)
-    .filter((r) => r.status.overdue || (r.status.dueDate && daysUntil(r.status.dueDate) <= 30));
+  const overdueScheduled = state.inspections.filter(
+    (i) => i.status === "Scheduled" && i.date < todayISO(),
+  );
+  const overdueProperties = state.properties.filter((p) => {
+    if (overdueScheduled.some((i) => i.propertyId === p.id)) return false; // already counted above
+    return inspectionDueStatus(p.id, state.inspections).overdue && !hasFutureScheduled(p.id, state.inspections);
+  });
+
+  const upcoming = state.inspections
+    .filter((i) => i.status === "Scheduled" && i.date >= todayISO())
+    .sort((a, b) => (a.date > b.date ? 1 : -1));
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -46,55 +74,56 @@ function InspectionsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Inspections</h1>
           <p className="text-sm text-muted-foreground">
-            Due dates, batch scheduling and inspection reports across your portfolio.
+            Book inspections, track what's due, upload reports and flag issues.
           </p>
         </div>
-        <div className="flex gap-2">
-          <BatchScheduleDialog />
-          <InspectionFormDialog>
-            <Button variant="outline" className="gap-2">
-              <Plus className="h-4 w-4" /> Log Inspection
-            </Button>
-          </InspectionFormDialog>
-        </div>
+        <BookInspectionDialog />
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <TriangleAlert className="h-4 w-4 text-amber-500" />
-            Due &amp; overdue ({dueList.length})
+            <TriangleAlert className="h-4 w-4 text-destructive" />
+            Overdue ({overdueScheduled.length + overdueProperties.length})
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {dueList.length === 0 && (
-            <div className="text-sm text-muted-foreground">Nothing due in the next 30 days.</div>
+          {overdueScheduled.length === 0 && overdueProperties.length === 0 && (
+            <div className="text-sm text-muted-foreground">Nothing overdue.</div>
           )}
-          {dueList.map(({ property, status }) => (
-            <div key={property.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 text-sm">
-              <div>
-                <div className="font-medium">{property.alias || property.address}</div>
-                <div className="text-xs text-muted-foreground">
-                  {status.last
-                    ? `Last inspected ${status.last.date} (${status.daysSinceLast} days ago)`
-                    : "No inspection on record"}
+          {overdueScheduled.map((i) => (
+            <InspectionRow key={i.id} inspection={i} overdue />
+          ))}
+          {overdueProperties.map((p) => {
+            const status = inspectionDueStatus(p.id, state.inspections);
+            const tenant = currentTenantOf(p.id, state.tenants);
+            return (
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                <div>
+                  <div className="font-medium">{p.alias || p.address}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {tenant?.name ?? "No tenant"} •{" "}
+                    {status.last ? `Last inspected ${status.last.date}` : "No inspection on record"}
+                  </div>
                 </div>
+                <BookInspectionDialog defaultPropertyId={p.id} trigger={<Button size="sm" variant="outline" className="h-7 gap-1 text-xs"><CalendarClock className="h-3 w-3" /> Book</Button>} />
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={status.overdue ? "destructive" : "outline"}>
-                  {status.overdue
-                    ? "Overdue"
-                    : status.dueDate
-                      ? `Due in ${daysUntil(status.dueDate)} days`
-                      : "Due"}
-                </Badge>
-                <InspectionFormDialog defaultPropertyId={property.id}>
-                  <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
-                    <CalendarClock className="h-3 w-3" /> Schedule
-                  </Button>
-                </InspectionFormDialog>
-              </div>
-            </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CalendarClock className="h-4 w-4 text-blue-600" />
+            Upcoming ({upcoming.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {upcoming.length === 0 && <div className="text-sm text-muted-foreground">Nothing booked yet.</div>}
+          {upcoming.map((i) => (
+            <InspectionRow key={i.id} inspection={i} />
           ))}
         </CardContent>
       </Card>
@@ -108,64 +137,120 @@ function InspectionsPage() {
   );
 }
 
+function hasFutureScheduled(propertyId: string, inspections: Inspection[]): boolean {
+  return inspections.some((i) => i.propertyId === propertyId && i.status === "Scheduled" && i.date >= todayISO());
+}
+
+/** One line in the Overdue/Upcoming lists — property, tenant, date, and the three actions the user asked for: done, reschedule, view. */
+function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdue?: boolean }) {
+  const { state, updateInspection } = useStore();
+  const property = state.properties.find((p) => p.id === inspection.propertyId);
+  const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenantOf(inspection.propertyId, state.tenants);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [newDate, setNewDate] = useState(inspection.date);
+
+  const markDone = () => {
+    updateInspection(inspection.id, { status: "Completed", date: todayISO() });
+    toast.success("Marked as done");
+  };
+
+  const saveReschedule = () => {
+    updateInspection(inspection.id, { date: newDate });
+    setRescheduling(false);
+    toast.success(`Rescheduled to ${newDate}`);
+  };
+
+  return (
+    <div className={`rounded-md border p-3 text-sm ${overdue ? "border-destructive/40 bg-destructive/5" : ""}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="font-medium">{property?.alias || property?.address}</div>
+          <div className="text-xs text-muted-foreground">
+            {tenant?.name ?? "No tenant"} • {inspection.type} • {inspection.date}
+            {overdue && " — overdue"}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <Badge variant={overdue ? "destructive" : "outline"}>{overdue ? "Overdue" : "Scheduled"}</Badge>
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={markDone}>
+            <CheckCircle2 className="h-3 w-3" /> Done
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setRescheduling((r) => !r)}>
+            <CalendarClock className="h-3 w-3" /> Reschedule
+          </Button>
+          <InspectionDetailDialog inspection={inspection}>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs">
+              View
+            </Button>
+          </InspectionDetailDialog>
+        </div>
+      </div>
+      {rescheduling && (
+        <div className="mt-2 flex items-center gap-2">
+          <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className="h-8 w-40" />
+          <Button size="sm" className="h-8" onClick={saveReschedule}>
+            Save
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PropertyInspectionGroup({ property }: { property: Property }) {
   const { state } = useStore();
   const inspections = state.inspections
     .filter((i) => i.propertyId === property.id)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
   const status = inspectionDueStatus(property.id, state.inspections);
+  const [open, setOpen] = useState(false);
+
+  if (inspections.length === 0) return null;
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-          <span>{property.alias || property.address}</span>
-          <Badge variant={status.overdue ? "destructive" : "outline"} className="text-xs font-normal">
-            {status.last ? `Last inspected ${status.last.date}` : "Never inspected"}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {inspections.length === 0 && (
-          <div className="text-sm text-muted-foreground">No inspections logged for this property yet.</div>
-        )}
-        {inspections.map((i) => {
-          const failed = (i.checklist ?? []).filter((c) => c.result === "Fail");
-          return (
-            <div key={i.id} className="rounded-md border p-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium">{i.type} Inspection</span>
-                  <Badge variant={i.status === "Completed" ? "secondary" : "outline"}>{i.status}</Badge>
-                  {failed.length > 0 && <Badge variant="destructive">{failed.length} issue(s)</Badge>}
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+              <span>{property.alias || property.address}</span>
+              <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                {status.last ? `Last inspected ${status.last.date}` : "Never inspected"} • {inspections.length} record(s)
+                {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </span>
+            </CardTitle>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="space-y-2">
+            {inspections.map((i) => {
+              const openIssues = (i.issues ?? []).filter((iss) => iss.status !== "Resolved");
+              return (
+                <div key={i.id} className="rounded-md border p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{i.type} Inspection</span>
+                      <Badge variant={i.status === "Completed" ? "secondary" : "outline"}>{i.status}</Badge>
+                      {openIssues.length > 0 && <Badge variant="destructive">{openIssues.length} open issue(s)</Badge>}
+                      {i.fileFileName && <Badge variant="outline">📎 Report</Badge>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <InspectionDetailDialog inspection={i}>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs">
+                          Open
+                        </Button>
+                      </InspectionDetailDialog>
+                      <DeleteInspectionButton id={i.id} />
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">{i.date}</div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <InspectionFormDialog inspection={i}>
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs">
-                      {i.status === "Scheduled" ? "Complete" : "Edit"}
-                    </Button>
-                  </InspectionFormDialog>
-                  <ReportViewDialog inspection={i} propertyLabel={property.alias || property.address} />
-                  <DeleteInspectionButton id={i.id} />
-                </div>
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">{i.date}</div>
-              {failed.length > 0 && (
-                <ul className="mt-2 list-inside list-disc space-y-0.5 text-xs text-destructive">
-                  {failed.slice(0, 3).map((f, idx) => (
-                    <li key={idx}>
-                      {f.label}
-                      {f.notes ? ` — ${f.notes}` : ""}
-                    </li>
-                  ))}
-                  {failed.length > 3 && <li>+{failed.length - 3} more</li>}
-                </ul>
-              )}
-            </div>
-          );
-        })}
-      </CardContent>
+              );
+            })}
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
     </Card>
   );
 }
@@ -187,8 +272,14 @@ function DeleteInspectionButton({ id }: { id: string }) {
   );
 }
 
-/** Select multiple properties + one date + one type — creates a lightweight "Scheduled" stub for each, so a full day of inspections can be booked in one action. */
-function BatchScheduleDialog() {
+/** Lightweight booking only — property, tenant (auto), date, type. No checklist prompts. Supports booking several properties for one day at once. */
+function BookInspectionDialog({
+  defaultPropertyId,
+  trigger,
+}: {
+  defaultPropertyId?: string;
+  trigger?: React.ReactNode;
+}) {
   const { state, addInspection } = useStore();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -198,11 +289,12 @@ function BatchScheduleDialog() {
   const onOpenChange = (o: boolean) => {
     setOpen(o);
     if (o) {
-      const dueIds = state.properties
-        .filter((p) => inspectionDueStatus(p.id, state.inspections).overdue)
-        .map((p) => p.id);
-      setSelected(new Set(dueIds));
+      const preselect = defaultPropertyId
+        ? [defaultPropertyId]
+        : state.properties.filter((p) => inspectionDueStatus(p.id, state.inspections).overdue).map((p) => p.id);
+      setSelected(new Set(preselect));
       setDate(todayISO());
+      setType("Routine");
     }
   };
 
@@ -216,33 +308,32 @@ function BatchScheduleDialog() {
 
   const save = () => {
     if (selected.size === 0) return toast.error("Select at least one property");
-    const rooms: ChecklistRoom[] = DEFAULT_INSPECTION_ROOMS[type].map((r) => ({
-      name: r.name,
-      items: r.items.map((i) => ({ ...i })),
-    }));
     for (const propertyId of selected) {
-      addInspection({ propertyId, date, type, status: "Scheduled", rooms, checklist: [] });
+      const tenant = currentTenantOf(propertyId, state.tenants);
+      addInspection({ propertyId, tenantId: tenant?.id, date, type, status: "Scheduled" });
     }
-    toast.success(`Scheduled ${selected.size} inspection(s) for ${date}`);
+    toast.success(`Booked ${selected.size} inspection(s) for ${date}`);
     setOpen(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button className="gap-2">
-          <CalendarClock className="h-4 w-4" /> Book Inspections
-        </Button>
+        {trigger ?? (
+          <Button className="gap-2">
+            <CalendarClock className="h-4 w-4" /> Book Inspections
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Book inspections for one day</DialogTitle>
+          <DialogTitle>Book inspections</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Date">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
-          <Field label="Type (loads room template)">
+          <Field label="Type">
             <Select value={type} onValueChange={(v) => setType(v as Inspection["type"])}>
               <SelectTrigger>
                 <SelectValue />
@@ -260,10 +351,14 @@ function BatchScheduleDialog() {
           <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
             {state.properties.map((p) => {
               const status = inspectionDueStatus(p.id, state.inspections);
+              const tenant = currentTenantOf(p.id, state.tenants);
               return (
                 <label key={p.id} className="flex items-center gap-2 rounded p-1.5 text-sm hover:bg-muted/50">
                   <Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggle(p.id)} />
-                  <span className="flex-1">{p.alias || p.address}</span>
+                  <span className="flex-1">
+                    {p.alias || p.address}
+                    {tenant && <span className="text-muted-foreground"> — {tenant.name}</span>}
+                  </span>
                   {status.overdue && (
                     <Badge variant="destructive" className="text-[10px]">
                       Overdue
@@ -275,97 +370,32 @@ function BatchScheduleDialog() {
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={save}>Schedule {selected.size || ""} inspection(s)</Button>
+          <Button onClick={save}>Book {selected.size || ""} inspection(s)</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-/** Read-only viewer for a logged inspection — the "quickly access the report" ask. */
-function ReportViewDialog({ inspection, propertyLabel }: { inspection: Inspection; propertyLabel: string }) {
+/** View/act on an existing inspection: mark done, reschedule, upload a report, flag issues (create maintenance items / follow up with the tenant), and — optionally — fill in a full room-by-room checklist. */
+function InspectionDetailDialog({ inspection, children }: { inspection: Inspection; children: React.ReactNode }) {
+  const { state, updateInspection, addMaintenanceRequest, consumeAiBudget } = useStore();
   const [open, setOpen] = useState(false);
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs">
-          <FileText className="h-3 w-3" /> Report
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {inspection.type} Inspection — {propertyLabel}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{inspection.date}</span>
-            <Badge variant={inspection.status === "Completed" ? "secondary" : "outline"}>{inspection.status}</Badge>
-            {inspection.signature && <span>Signed: {inspection.signature}</span>}
-          </div>
-          {inspection.notes && <div>{inspection.notes}</div>}
-          {inspection.fileFileName && inspection.fileData && (
-            <a href={inspection.fileData} download={inspection.fileFileName} className="inline-flex items-center gap-1 text-primary underline">
-              <FileText className="h-3 w-3" /> {inspection.fileFileName}
-            </a>
-          )}
-          {(inspection.rooms ?? []).map((room, ri) => (
-            <div key={ri} className="rounded border">
-              <div className="border-b bg-muted/50 px-3 py-1.5 text-xs font-medium">{room.name}</div>
-              <div className="divide-y">
-                {room.items.map((item, ii) => (
-                  <div key={ii} className="flex items-start justify-between gap-2 p-2 text-xs">
-                    <div>
-                      <div>{item.label}</div>
-                      {item.notes && <div className="text-muted-foreground">{item.notes}</div>}
-                    </div>
-                    {item.result && (
-                      <Badge variant={item.result === "Fail" ? "destructive" : "outline"} className="shrink-0">
-                        {item.result}
-                      </Badge>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-          {inspection.photos && inspection.photos.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {inspection.photos.map((p, i) => (
-                <img key={i} src={p.data} alt={p.name} className="h-16 w-16 rounded object-cover" />
-              ))}
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+  const property = state.properties.find((p) => p.id === inspection.propertyId);
+  const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenantOf(inspection.propertyId, state.tenants);
 
-/** Create a new inspection, or (when `inspection` is passed) edit/complete an existing one — e.g. filling in the checklist for a batch-scheduled stub. */
-function InspectionFormDialog({
-  inspection,
-  defaultPropertyId,
-  children,
-}: {
-  inspection?: Inspection;
-  defaultPropertyId?: string;
-  children: React.ReactNode;
-}) {
-  const { state, addInspection, updateInspection, consumeAiBudget } = useStore();
-  const [open, setOpen] = useState(false);
-  const [propertyId, setPropertyId] = useState(inspection?.propertyId ?? defaultPropertyId ?? state.properties[0]?.id ?? "");
-  const [date, setDate] = useState(inspection?.date ?? todayISO());
-  const [type, setType] = useState<Inspection["type"]>(inspection?.type ?? "Routine");
-  const [status, setStatus] = useState<Inspection["status"]>(inspection?.status ?? "Scheduled");
-  const [notes, setNotes] = useState(inspection?.notes ?? "");
-  const [signature, setSignature] = useState(inspection?.signature ?? "");
-  const [fileFileName, setFileFileName] = useState(inspection?.fileFileName ?? "");
-  const [fileData, setFileData] = useState(inspection?.fileData ?? "");
-  const [photos, setPhotos] = useState<{ name: string; data: string }[]>(inspection?.photos ?? []);
+  const [date, setDate] = useState(inspection.date);
+  const [status, setStatus] = useState<Inspection["status"]>(inspection.status);
+  const [notes, setNotes] = useState(inspection.notes ?? "");
+  const [signature, setSignature] = useState(inspection.signature ?? "");
+  const [fileFileName, setFileFileName] = useState(inspection.fileFileName ?? "");
+  const [fileData, setFileData] = useState(inspection.fileData ?? "");
+  const [issues, setIssues] = useState<InspectionIssue[]>(inspection.issues ?? []);
+  const [newIssueDesc, setNewIssueDesc] = useState("");
+  const [newIssuePhoto, setNewIssuePhoto] = useState<{ name: string; data: string } | undefined>();
+  const [showChecklist, setShowChecklist] = useState(false);
   const [rooms, setRooms] = useState<ChecklistRoom[]>(
-    inspection?.rooms ?? DEFAULT_INSPECTION_ROOMS[type].map((r) => ({ name: r.name, items: r.items.map((i) => ({ ...i })) })),
+    inspection.rooms ?? DEFAULT_INSPECTION_ROOMS[inspection.type].map((r) => ({ name: r.name, items: r.items.map((i) => ({ ...i })) })),
   );
   const [newRoom, setNewRoom] = useState("");
   const [analysing, setAnalysing] = useState<string | null>(null);
@@ -373,51 +403,113 @@ function InspectionFormDialog({
   const onOpenChange = (o: boolean) => {
     setOpen(o);
     if (o) {
-      setPropertyId(inspection?.propertyId ?? defaultPropertyId ?? state.properties[0]?.id ?? "");
-      setDate(inspection?.date ?? todayISO());
-      setType(inspection?.type ?? "Routine");
-      setStatus(inspection?.status ?? "Scheduled");
-      setNotes(inspection?.notes ?? "");
-      setSignature(inspection?.signature ?? "");
-      setFileFileName(inspection?.fileFileName ?? "");
-      setFileData(inspection?.fileData ?? "");
-      setPhotos(inspection?.photos ?? []);
+      setDate(inspection.date);
+      setStatus(inspection.status);
+      setNotes(inspection.notes ?? "");
+      setSignature(inspection.signature ?? "");
+      setFileFileName(inspection.fileFileName ?? "");
+      setFileData(inspection.fileData ?? "");
+      setIssues(inspection.issues ?? []);
       setRooms(
-        inspection?.rooms ??
-          DEFAULT_INSPECTION_ROOMS[inspection?.type ?? "Routine"].map((r) => ({ name: r.name, items: r.items.map((i) => ({ ...i })) })),
+        inspection.rooms ??
+          DEFAULT_INSPECTION_ROOMS[inspection.type].map((r) => ({ name: r.name, items: r.items.map((i) => ({ ...i })) })),
       );
+      setShowChecklist(false);
     }
   };
 
-  const onTypeChange = (v: Inspection["type"]) => {
-    setType(v);
-    if (!inspection) setRooms(DEFAULT_INSPECTION_ROOMS[v].map((r) => ({ name: r.name, items: r.items.map((i) => ({ ...i })) })));
-  };
+  const persist = (patch: Partial<Inspection>) => updateInspection(inspection.id, patch);
 
-  const handleFile = (f: File | undefined) => {
+  const handleReportFile = (f: File | undefined) => {
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
-      setFileFileName(f.name);
-      setFileData(String(reader.result));
+      const name = f.name;
+      const data = String(reader.result);
+      setFileFileName(name);
+      setFileData(data);
+      persist({ fileFileName: name, fileData: data });
+      toast.success("Report attached");
     };
     reader.readAsDataURL(f);
   };
 
-  const onPhotos = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => setPhotos((ps) => [...ps, { name: f.name, data: String(reader.result) }]);
-      reader.readAsDataURL(f);
-    });
+  const handleIssuePhoto = (f: File | undefined) => {
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setNewIssuePhoto({ name: f.name, data: String(reader.result) });
+    reader.readAsDataURL(f);
   };
 
-  const updateItem = (ri: number, ii: number, patch: Partial<ChecklistItem>) =>
-    setRooms((rs) =>
-      rs.map((r, i) => (i === ri ? { ...r, items: r.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) } : r)),
-    );
+  const addIssue = () => {
+    if (!newIssueDesc.trim()) return toast.error("Describe the issue");
+    const issue: InspectionIssue = {
+      id: crypto.randomUUID(),
+      description: newIssueDesc.trim(),
+      photoData: newIssuePhoto?.data,
+      photoName: newIssuePhoto?.name,
+      status: "Open",
+    };
+    const next = [...issues, issue];
+    setIssues(next);
+    persist({ issues: next });
+    setNewIssueDesc("");
+    setNewIssuePhoto(undefined);
+  };
 
+  const removeIssue = (id: string) => {
+    const next = issues.filter((i) => i.id !== id);
+    setIssues(next);
+    persist({ issues: next });
+  };
+
+  const updateIssue = (id: string, patch: Partial<InspectionIssue>) => {
+    const next = issues.map((i) => (i.id === id ? { ...i, ...patch } : i));
+    setIssues(next);
+    persist({ issues: next });
+  };
+
+  const createMaintenanceFromIssue = async (issue: InspectionIssue) => {
+    if (!property) return;
+    await addMaintenanceRequest({
+      propertyId: property.id,
+      propertyAddressTyped: property.address,
+      category: "Other",
+      description: issue.description,
+      urgency: "Medium",
+      photos: issue.photoData ? [{ name: issue.photoName ?? "issue.jpg", data: issue.photoData }] : [],
+      contactName: state.landlordProfile.fullName || "Landlord",
+      contactPhone: state.landlordProfile.phone || "",
+      contactEmail: state.landlordProfile.email || "",
+      source: "landlord",
+    });
+    updateIssue(issue.id, { status: "Maintenance Logged" });
+    toast.success("Maintenance job logged");
+  };
+
+  const followUpWithTenant = (issue: InspectionIssue) => {
+    if (!tenant?.email) return toast.error("This tenant has no email on file");
+    const propertyLabel = property?.alias || property?.address || "";
+    openGmailCompose(
+      tenant.email,
+      `Follow-up from ${inspection.type.toLowerCase()} inspection — ${propertyLabel}`,
+      `Hi ${tenant.name},\n\nFollowing up on the recent inspection — we noted: ${issue.description}\n\nCould you let us know a good time to address this, or if it's already resolved?\n\nThanks,\n${state.landlordProfile.fullName || "The Landlord"}`,
+    );
+  };
+
+  const markDone = () => {
+    setStatus("Completed");
+    setDate(todayISO());
+    persist({ status: "Completed", date: todayISO() });
+    toast.success("Marked as done");
+  };
+
+  // --- optional detailed checklist (unchanged behaviour, just collapsed by default) ---
+  const onTypeChangeRooms = () => {
+    setRooms(DEFAULT_INSPECTION_ROOMS[inspection.type].map((r) => ({ name: r.name, items: r.items.map((i) => ({ ...i })) })));
+  };
+  const updateItem = (ri: number, ii: number, patch: Partial<ChecklistItem>) =>
+    setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, items: r.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) } : r)));
   const addRoom = () => {
     const name = newRoom.trim();
     if (!name) return toast.error("Enter a room name");
@@ -426,23 +518,19 @@ function InspectionFormDialog({
   };
   const removeRoom = (ri: number) => setRooms((rs) => rs.filter((_, i) => i !== ri));
   const addItem = (ri: number) => setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, items: [...r.items, { label: "" }] } : r)));
-  const removeItem = (ri: number, ii: number) =>
-    setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, items: r.items.filter((_, j) => j !== ii) } : r)));
-
+  const removeItem = (ri: number, ii: number) => setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, items: r.items.filter((_, j) => j !== ii) } : r)));
   const itemPhoto = (ri: number, ii: number, f: File | undefined) => {
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => updateItem(ri, ii, { photoName: f.name, photoData: String(reader.result) });
     reader.readAsDataURL(f);
   };
-
   const analysePhoto = async (ri: number, ii: number) => {
     const item = rooms[ri]?.items[ii];
     if (!item?.photoData) return toast.error("Attach a photo to this item first");
     const budget = consumeAiBudget();
     if (!budget.ok) return toast.error(budget.reason ?? "AI unavailable");
-    const key = `${ri}-${ii}`;
-    setAnalysing(key);
+    setAnalysing(`${ri}-${ii}`);
     try {
       const res = await fetch("/api/vision", {
         method: "POST",
@@ -460,69 +548,60 @@ function InspectionFormDialog({
     }
   };
 
-  const save = () => {
-    if (!propertyId) return toast.error("Property required");
-    const flat: ChecklistItem[] = rooms.flatMap((r) =>
-      r.items.filter((i) => i.label.trim()).map((i) => ({ ...i, label: `${r.name}: ${i.label}` })),
-    );
-    const payload = {
-      propertyId,
+  const saveAll = () => {
+    const flat: ChecklistItem[] = rooms.flatMap((r) => r.items.filter((i) => i.label.trim()).map((i) => ({ ...i, label: `${r.name}: ${i.label}` })));
+    persist({
       date,
-      type,
       status,
       notes: notes || undefined,
-      fileFileName: fileFileName || undefined,
-      fileData: fileData || undefined,
+      signature: signature || undefined,
       rooms,
       checklist: flat,
-      photos,
-      signature: signature || undefined,
-    };
-    if (inspection) updateInspection(inspection.id, payload);
-    else addInspection(payload);
+    });
     setOpen(false);
-    toast.success(inspection ? "Inspection updated" : "Inspection logged");
+    toast.success("Inspection updated");
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{inspection ? "Edit inspection" : "New inspection"}</DialogTitle>
+          <DialogTitle>
+            {inspection.type} Inspection — {property?.alias || property?.address}
+          </DialogTitle>
         </DialogHeader>
+
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Badge variant={status === "Completed" ? "secondary" : "outline"}>{status}</Badge>
+          <span className="text-muted-foreground">{tenant?.name ?? "No tenant"}</span>
+          {status !== "Completed" && (
+            <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={markDone}>
+              <CheckCircle2 className="h-3 w-3" /> Mark done
+            </Button>
+          )}
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Property">
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
           <Field label="Date">
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-          <Field label="Type (loads room template)">
-            <Select value={type} onValueChange={(v) => onTypeChange(v as Inspection["type"])}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Entry">Entry</SelectItem>
-                <SelectItem value="Routine">Routine</SelectItem>
-                <SelectItem value="Exit">Exit</SelectItem>
-              </SelectContent>
-            </Select>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => {
+                setDate(e.target.value);
+                persist({ date: e.target.value });
+              }}
+            />
           </Field>
           <Field label="Status">
-            <Select value={status} onValueChange={(v) => setStatus(v as Inspection["status"])}>
+            <Select
+              value={status}
+              onValueChange={(v) => {
+                const next = v as Inspection["status"];
+                setStatus(next);
+                persist({ status: next });
+              }}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -532,20 +611,68 @@ function InspectionFormDialog({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Condition report PDF">
-            <Input type="file" onChange={(e) => handleFile(e.target.files?.[0])} />
-            {fileFileName && <div className="mt-1 text-xs text-muted-foreground">📎 {fileFileName}</div>}
-          </Field>
-          <Field label="General photos">
-            <Input type="file" accept="image/*" multiple onChange={(e) => onPhotos(e.target.files)} />
-            {photos.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {photos.map((p, i) => (
-                  <img key={i} src={p.data} alt={p.name} className="h-10 w-10 rounded object-cover" />
-                ))}
+        </div>
+
+        <div className="space-y-2 rounded-md border p-3">
+          <div className="text-sm font-medium">Report</div>
+          <Input type="file" accept="application/pdf,image/*" onChange={(e) => handleReportFile(e.target.files?.[0])} />
+          {fileFileName && fileData && (
+            <a href={fileData} download={fileFileName} className="inline-flex items-center gap-1 text-xs text-primary underline">
+              <FileText className="h-3 w-3" /> {fileFileName}
+            </a>
+          )}
+        </div>
+
+        <div className="space-y-2 rounded-md border p-3">
+          <div className="text-sm font-medium">Issues ({issues.length})</div>
+          {issues.map((issue) => (
+            <div key={issue.id} className="rounded-md border p-2 text-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div>{issue.description}</div>
+                  {issue.photoData && <img src={issue.photoData} alt={issue.photoName} className="mt-1 h-14 w-14 rounded object-cover" />}
+                </div>
+                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => removeIssue(issue.id)}>
+                  <X className="h-3 w-3" />
+                </Button>
               </div>
-            )}
-          </Field>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Badge variant={issue.status === "Resolved" ? "secondary" : "outline"} className="text-[10px]">
+                  {issue.status}
+                </Badge>
+                {issue.status !== "Maintenance Logged" && (
+                  <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => createMaintenanceFromIssue(issue)}>
+                    <Wrench className="h-3 w-3" /> Create maintenance item
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => followUpWithTenant(issue)}>
+                  <Mail className="h-3 w-3" /> Follow up with tenant
+                </Button>
+                {issue.status !== "Resolved" && (
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => updateIssue(issue.id, { status: "Resolved" })}>
+                    Mark resolved
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div className="space-y-2">
+            <Textarea
+              placeholder="Describe an issue noted in the report or on-site…"
+              value={newIssueDesc}
+              onChange={(e) => setNewIssueDesc(e.target.value)}
+              className="min-h-16"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Input type="file" accept="image/*" className="h-8 max-w-[220px] text-xs" onChange={(e) => handleIssuePhoto(e.target.files?.[0])} />
+              <Button size="sm" variant="outline" className="h-8 gap-1" onClick={addIssue}>
+                <Plus className="h-3 w-3" /> Add issue
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Notes">
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
@@ -554,99 +681,86 @@ function InspectionFormDialog({
           </Field>
         </div>
 
-        <div className="mt-4 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-sm font-medium">{type} room checklist</div>
-            <Input
-              placeholder="New room name"
-              value={newRoom}
-              onChange={(e) => setNewRoom(e.target.value)}
-              className="h-8 max-w-[200px]"
-            />
-            <Button size="sm" variant="outline" className="h-8 gap-1" onClick={addRoom}>
-              <Plus className="h-3 w-3" /> Add room
+        <Collapsible open={showChecklist} onOpenChange={setShowChecklist}>
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="outline" size="sm" className="w-full justify-between">
+              Detailed room-by-room checklist (optional)
+              {showChecklist ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
-          </div>
-
-          {rooms.map((room, ri) => (
-            <div key={ri} className="rounded border">
-              <div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2">
-                <Input
-                  value={room.name}
-                  onChange={(e) => setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, name: e.target.value } : r)))}
-                  className="h-7 max-w-[240px] text-sm font-medium"
-                />
-                <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" onClick={() => addItem(ri)}>
-                  <Plus className="h-3 w-3" /> Item
-                </Button>
-                <Button size="icon" variant="ghost" className="ml-auto h-7 w-7" onClick={() => removeRoom(ri)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <div className="divide-y">
-                {room.items.length === 0 && (
-                  <div className="p-3 text-xs text-muted-foreground">No checklist items — add one.</div>
-                )}
-                {room.items.map((c, ii) => (
-                  <div key={ii} className="grid gap-2 p-3 sm:grid-cols-[1fr_auto]">
-                    <div className="space-y-2">
-                      <Input
-                        placeholder="Checklist item"
-                        value={c.label}
-                        onChange={(e) => updateItem(ri, ii, { label: e.target.value })}
-                        className="h-8"
-                      />
-                      <div className="flex flex-wrap items-center gap-2">
-                        {(["Pass", "Fail", "N/A"] as const).map((r) => (
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input placeholder="New room name" value={newRoom} onChange={(e) => setNewRoom(e.target.value)} className="h-8 max-w-[200px]" />
+              <Button size="sm" variant="outline" className="h-8 gap-1" onClick={addRoom}>
+                <Plus className="h-3 w-3" /> Add room
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={onTypeChangeRooms}>
+                Reset to {inspection.type} template
+              </Button>
+            </div>
+            {rooms.map((room, ri) => (
+              <div key={ri} className="rounded border">
+                <div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2">
+                  <Input
+                    value={room.name}
+                    onChange={(e) => setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, name: e.target.value } : r)))}
+                    className="h-7 max-w-[240px] text-sm font-medium"
+                  />
+                  <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" onClick={() => addItem(ri)}>
+                    <Plus className="h-3 w-3" /> Item
+                  </Button>
+                  <Button size="icon" variant="ghost" className="ml-auto h-7 w-7" onClick={() => removeRoom(ri)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <div className="divide-y">
+                  {room.items.length === 0 && <div className="p-3 text-xs text-muted-foreground">No checklist items — add one.</div>}
+                  {room.items.map((c, ii) => (
+                    <div key={ii} className="grid gap-2 p-3 sm:grid-cols-[1fr_auto]">
+                      <div className="space-y-2">
+                        <Input placeholder="Checklist item" value={c.label} onChange={(e) => updateItem(ri, ii, { label: e.target.value })} className="h-8" />
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(["Pass", "Fail", "N/A"] as const).map((r) => (
+                            <Button
+                              key={r}
+                              size="sm"
+                              variant={c.result === r ? "default" : "outline"}
+                              className="h-7 px-2 text-xs"
+                              onClick={() => updateItem(ri, ii, { result: r })}
+                            >
+                              {r}
+                            </Button>
+                          ))}
+                          <Input type="file" accept="image/*" className="h-7 max-w-[190px] text-xs" onChange={(e) => itemPhoto(ri, ii, e.target.files?.[0])} />
                           <Button
-                            key={r}
                             size="sm"
-                            variant={c.result === r ? "default" : "outline"}
-                            className="h-7 px-2 text-xs"
-                            onClick={() => updateItem(ri, ii, { result: r })}
+                            variant="outline"
+                            className="h-7 gap-1 px-2 text-xs"
+                            disabled={analysing === `${ri}-${ii}`}
+                            onClick={() => analysePhoto(ri, ii)}
                           >
-                            {r}
+                            <Sparkles className="h-3 w-3" />
+                            {analysing === `${ri}-${ii}` ? "Analysing…" : "AI remark"}
                           </Button>
-                        ))}
-                        <Input
-                          type="file"
-                          accept="image/*"
-                          className="h-7 max-w-[190px] text-xs"
-                          onChange={(e) => itemPhoto(ri, ii, e.target.files?.[0])}
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 gap-1 px-2 text-xs"
-                          disabled={analysing === `${ri}-${ii}`}
-                          onClick={() => analysePhoto(ri, ii)}
-                        >
-                          <Sparkles className="h-3 w-3" />
-                          {analysing === `${ri}-${ii}` ? "Analysing…" : "AI remark"}
+                        </div>
+                        <Input placeholder="Condition remarks" value={c.notes ?? ""} onChange={(e) => updateItem(ri, ii, { notes: e.target.value })} className="h-8" />
+                      </div>
+                      <div className="flex items-start gap-2">
+                        {c.photoData && <img src={c.photoData} alt={c.photoName} className="h-14 w-14 rounded object-cover" />}
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => removeItem(ri, ii)}>
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                      <Input
-                        placeholder="Condition remarks"
-                        value={c.notes ?? ""}
-                        onChange={(e) => updateItem(ri, ii, { notes: e.target.value })}
-                        className="h-8"
-                      />
                     </div>
-                    <div className="flex items-start gap-2">
-                      {c.photoData && <img src={c.photoData} alt={c.photoName} className="h-14 w-14 rounded object-cover" />}
-                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => removeItem(ri, ii)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
 
         <DialogFooter>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={saveAll}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

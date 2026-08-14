@@ -193,9 +193,22 @@ export interface ChecklistRoom {
   items: ChecklistItem[];
 }
 
+/** A specific problem noted during/after an inspection — independent of the room checklist, so it can be logged directly off an uploaded third-party report. */
+export interface InspectionIssue {
+  id: string;
+  description: string;
+  photoData?: string;
+  photoName?: string;
+  status: "Open" | "Maintenance Logged" | "Resolved";
+  maintenanceRequestId?: string;
+  followUpNote?: string;
+}
+
 export interface Inspection {
   id: string;
   propertyId: string;
+  /** The tenant in place at the time of this inspection — kept explicit so history stays correct across tenant changes. */
+  tenantId?: string;
   date: string;
   type: "Entry" | "Routine" | "Exit";
   status: "Scheduled" | "Completed";
@@ -206,6 +219,7 @@ export interface Inspection {
   rooms?: ChecklistRoom[];
   photos?: { name: string; data: string }[];
   signature?: string;
+  issues?: InspectionIssue[];
 }
 
 export interface RentChange {
