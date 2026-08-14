@@ -905,6 +905,13 @@ function LedgerExportButtons({
   );
 }
 
+interface BankStatementTransaction {
+  date: string;
+  description: string;
+  amount: number;
+  direction: "credit" | "debit";
+}
+
 function BankFeedDialog() {
   const { state, addLedger } = useStore();
 
@@ -912,6 +919,17 @@ function BankFeedDialog() {
   const [text, setText] = useState("");
   const [matches, setMatches] = useState<{ tenant: Tenant; amount: number; line: string }[]>([]);
   const [confirming, setConfirming] = useState<{ tenant: Tenant; amount: number } | null>(null);
+  const [extracting, setExtracting] = useState(false);
+
+  const matchTenant = (line: string): Tenant | undefined => {
+    const lower = line.toLowerCase();
+    return state.tenants.find((t) => {
+      const ref = (t.bankReference ?? "").toLowerCase();
+      if (ref && lower.includes(ref)) return true;
+      const parts = t.name.toLowerCase().split(/\s+/);
+      return parts.some((p) => p.length > 2 && lower.includes(p));
+    });
+  };
 
   const parse = () => {
     const lines = text.split(/\r?\n/).filter(Boolean);
@@ -921,20 +939,60 @@ function BankFeedDialog() {
       if (!moneyMatch) continue;
       const amount = parseFloat(moneyMatch[1]);
       if (!amount) continue;
-      const lower = line.toLowerCase();
-      const tenant = state.tenants.find((t) => {
-        const ref = (t.bankReference ?? "").toLowerCase();
-        if (ref && lower.includes(ref)) return true;
-        const parts = t.name.toLowerCase().split(/\s+/);
-        return parts.some((p) => p.length > 2 && lower.includes(p));
-      });
+      const tenant = matchTenant(line);
       if (tenant) found.push({ tenant, amount, line });
     }
     if (found.length === 0) toast.error("No matches found");
     setMatches(found);
   };
 
+  const extractFromDocument = async (f: File) => {
+    setExtracting(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Couldn't read file"));
+        reader.readAsDataURL(f);
+      });
+      const base64 = dataUrl.split(",")[1] ?? "";
+      const { data, error } = await supabase.functions.invoke<{
+        ok: boolean;
+        transactions?: BankStatementTransaction[];
+        error?: string;
+      }>("extract-bank-statement", {
+        body: { fileBase64: base64, fileName: f.name, mimeType: f.type || "application/pdf" },
+      });
+      if (error) throw error;
+      if (!data?.ok) {
+        toast.error(data?.error || "Couldn't read this statement");
+        return;
+      }
+      const credits = (data.transactions ?? []).filter((t) => t.direction === "credit");
+      const found: { tenant: Tenant; amount: number; line: string }[] = [];
+      for (const t of credits) {
+        const line = `${t.date} ${t.description}`;
+        const tenant = matchTenant(line);
+        if (tenant) found.push({ tenant, amount: t.amount, line });
+      }
+      if (found.length === 0) {
+        toast.error(`Read ${credits.length} deposit(s) but couldn't match any to a tenant`);
+      } else {
+        toast.success(`Matched ${found.length} of ${credits.length} deposit(s)`);
+      }
+      setMatches(found);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't process this statement");
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const handleFile = async (f: File) => {
+    if (f.type === "application/pdf" || f.type.startsWith("image/")) {
+      await extractFromDocument(f);
+      return;
+    }
     const t = await f.text();
     setText(t);
     toast.success("CSV loaded");
@@ -970,21 +1028,25 @@ function BankFeedDialog() {
           <DialogTitle>Bank feed reconciliation</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <Label className="text-xs">Paste bank feed lines or upload CSV</Label>
+          <Label className="text-xs">Paste bank feed lines, or upload a CSV, PDF or photo of the statement</Label>
           <Textarea
             placeholder="e.g. 2026-07-01 REF-SK-2026 Sarah Kim $720.00"
             value={text}
             onChange={(e) => setText(e.target.value)}
             className="min-h-[120px] font-mono text-xs"
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               type="file"
-              accept=".csv,text/csv,.txt"
+              accept=".csv,text/csv,.txt,application/pdf,image/*"
               onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               className="max-w-xs"
+              disabled={extracting}
             />
-            <Button onClick={parse}>Parse</Button>
+            <Button onClick={parse} disabled={extracting}>
+              Parse
+            </Button>
+            {extracting && <span className="text-xs text-muted-foreground">Reading statement…</span>}
           </div>
           {matches.length > 0 && (
             <div className="space-y-2">
