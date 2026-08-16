@@ -57,12 +57,15 @@ export async function callGeminiJSON<T>(
     }
 
     lastError = `${res.status} ${await res.text()}`;
-    // Only fall through to the next candidate when the model itself was retired (404) — any
-    // other failure (bad key, quota, malformed request) is a real bug, not a model-rot issue.
-    if (res.status !== 404) {
+    // Fall through to the next candidate when the model itself was retired (404), or when THIS
+    // model's free-tier quota is exhausted (429) — Gemini's free-tier "requests per day" quota is
+    // tracked per-model, so a different model has its own independent allowance and is very
+    // plausibly still available even when the primary one is capped out for the day. Any other
+    // failure (bad key, malformed request) is a real bug, not a model-availability issue.
+    if (res.status !== 404 && res.status !== 429) {
       throw new Error(`Gemini request failed: ${lastError}`);
     }
-    console.warn(`[parse-inbound-bill] Gemini model "${model}" unavailable (404), trying next candidate`);
+    console.warn(`[parse-inbound-bill] Gemini model "${model}" unavailable (${res.status}), trying next candidate`);
   }
 
   throw new Error(`Gemini request failed on all model candidates: ${lastError}`);
