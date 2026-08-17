@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,8 +42,9 @@ import {
   TrendingUp,
   TriangleAlert,
   IdCard,
+  ArrowRight,
 } from "lucide-react";
-import { fmtCurrency, todayISO } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil } from "@/lib/calculations";
 import type {
   Property,
   Tenant,
@@ -60,6 +61,9 @@ import type {
   ContactPerson,
   Provider,
   ProviderRole,
+  DepreciationItem,
+  Loan,
+  Expense,
 } from "@/lib/types";
 import { toast } from "sonner";
 import { BillRow } from "@/components/BillRow";
@@ -542,6 +546,15 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
     inspectionFrequencyMonths: property?.inspectionFrequencyMonths?.toString() ?? "",
     entityId: property?.entityId ?? "",
     occupancyType: (property?.occupancyType ?? "") as Property["occupancyType"] | "",
+    strataLevyAmount: property?.strataLevyAmount?.toString() ?? "",
+    strataLevyFrequency: property?.strataLevyFrequency ?? "",
+    insurerName: property?.insurerName ?? "",
+    insurancePolicyNumber: property?.insurancePolicyNumber ?? "",
+    insurancePremium: property?.insurancePremium?.toString() ?? "",
+    insuranceSumInsured: property?.insuranceSumInsured?.toString() ?? "",
+    insuranceRenewalDate: property?.insuranceRenewalDate ?? "",
+    smokeAlarmCheckDueDate: property?.smokeAlarmCheckDueDate ?? "",
+    poolSafetyCertExpiry: property?.poolSafetyCertExpiry ?? "",
     notes: property?.notes ?? "",
   });
   const [photos, setPhotos] = useState<{ name: string; data: string }[]>(property?.photos ?? []);
@@ -804,6 +817,51 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
                 </div>
               </div>
 
+              <div className="rounded-md border p-3">
+                <div className="mb-2 text-sm font-medium">Strata, insurance &amp; compliance</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Strata levy amount">
+                    <Input type="number" value={form.strataLevyAmount} onChange={(e) => setForm({ ...form, strataLevyAmount: e.target.value })} />
+                  </Field>
+                  <Field label="Strata levy frequency">
+                    <Select
+                      value={form.strataLevyFrequency || "__unset__"}
+                      onValueChange={(v) => setForm({ ...form, strataLevyFrequency: v === "__unset__" ? "" : v })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__unset__">Not set</SelectItem>
+                        <SelectItem value="Quarterly">Quarterly</SelectItem>
+                        <SelectItem value="Annually">Annually</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Insurer">
+                    <Input value={form.insurerName} onChange={(e) => setForm({ ...form, insurerName: e.target.value })} />
+                  </Field>
+                  <Field label="Policy number">
+                    <Input value={form.insurancePolicyNumber} onChange={(e) => setForm({ ...form, insurancePolicyNumber: e.target.value })} />
+                  </Field>
+                  <Field label="Premium (annual)">
+                    <Input type="number" value={form.insurancePremium} onChange={(e) => setForm({ ...form, insurancePremium: e.target.value })} />
+                  </Field>
+                  <Field label="Sum insured">
+                    <Input type="number" value={form.insuranceSumInsured} onChange={(e) => setForm({ ...form, insuranceSumInsured: e.target.value })} />
+                  </Field>
+                  <Field label="Insurance renewal date">
+                    <Input type="date" value={form.insuranceRenewalDate} onChange={(e) => setForm({ ...form, insuranceRenewalDate: e.target.value })} />
+                  </Field>
+                  <Field label="Smoke alarm check due">
+                    <Input type="date" value={form.smokeAlarmCheckDueDate} onChange={(e) => setForm({ ...form, smokeAlarmCheckDueDate: e.target.value })} />
+                  </Field>
+                  {property?.hasSwimmingPool && (
+                    <Field label="Pool safety cert expiry">
+                      <Input type="date" value={form.poolSafetyCertExpiry} onChange={(e) => setForm({ ...form, poolSafetyCertExpiry: e.target.value })} />
+                    </Field>
+                  )}
+                </div>
+              </div>
+
               <Field label="Notes">
                 <Textarea
                   value={form.notes}
@@ -895,6 +953,15 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
                   : undefined,
                 entityId: form.entityId || undefined,
                 occupancyType: form.occupancyType || undefined,
+                strataLevyAmount: form.strataLevyAmount ? parseFloat(form.strataLevyAmount) : undefined,
+                strataLevyFrequency: (form.strataLevyFrequency || undefined) as Property["strataLevyFrequency"],
+                insurerName: form.insurerName || undefined,
+                insurancePolicyNumber: form.insurancePolicyNumber || undefined,
+                insurancePremium: form.insurancePremium ? parseFloat(form.insurancePremium) : undefined,
+                insuranceSumInsured: form.insuranceSumInsured ? parseFloat(form.insuranceSumInsured) : undefined,
+                insuranceRenewalDate: form.insuranceRenewalDate || undefined,
+                smokeAlarmCheckDueDate: form.smokeAlarmCheckDueDate || undefined,
+                poolSafetyCertExpiry: form.poolSafetyCertExpiry || undefined,
                 notes: form.notes || undefined,
                 photos: photos.length > 0 ? photos : undefined,
                 videos: videos.length > 0 ? videos : undefined,
@@ -914,6 +981,281 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
   );
 }
 
+function PropertyOverviewTab({ prop, loan, tenants }: { prop: Property; loan?: Loan; tenants: Tenant[] }) {
+  const { state } = useStore();
+  const currentFY = ausFinancialYear(todayISO());
+  const { start, end } = fyRange(currentFY);
+  const tenantIds = tenants.map((t) => t.id);
+  const ytdIncome = state.ledger
+    .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
+    .reduce((s, e) => s + e.credit, 0);
+  const activeTenant = tenants[0];
+  const nextBill = state.bills
+    .filter((b) => b.propertyId === prop.id && b.status !== "Paid")
+    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))[0];
+  const equity = prop.currentValue - (loan?.totalBalance ?? 0);
+  const complianceDue = [prop.smokeAlarmCheckDueDate, prop.hasSwimmingPool ? prop.poolSafetyCertExpiry : undefined]
+    .filter((d): d is string => !!d)
+    .sort()[0];
+
+  return (
+    <div className="grid grid-cols-2 gap-3 text-sm">
+      <Stat label="Property value" value={fmtCurrency(prop.currentValue)} />
+      <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+      <Stat label="Current equity" value={fmtCurrency(equity)} />
+      <Stat label="Loan balance" value={fmtCurrency(loan?.totalBalance ?? 0)} />
+      <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
+      <Stat label="Weekly rent" value={activeTenant ? `${fmtCurrency(activeTenant.rentAmount)}/${activeTenant.rentFrequency}` : "—"} />
+      <Stat label="Current tenant" value={activeTenant?.name || "—"} />
+      <Stat label="Lease end date" value={activeTenant?.leaseExpiry || "—"} />
+      <Stat
+        label="Next bill due"
+        value={nextBill ? `${nextBill.billType} · ${fmtCurrency(nextBill.amount)} · ${nextBill.dueDate}` : "—"}
+      />
+      <Stat label="Insurance expiry" value={prop.insuranceRenewalDate || "—"} />
+      <Stat label="Compliance due" value={complianceDue || "—"} />
+      <Stat label="YTD income" value={fmtCurrency(ytdIncome)} />
+    </div>
+  );
+}
+
+function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loan }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 text-sm">
+      <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+      <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
+      <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
+      <Stat label="Stamp duty" value={prop.stampDuty ? fmtCurrency(prop.stampDuty) : "—"} />
+      <Stat label="Deposit" value={prop.deposit ? fmtCurrency(prop.deposit) : "—"} />
+      <Stat label="Lot size" value={prop.lotSize || "—"} />
+      <Stat label="Physical attributes" value={prop.physicalAttributes || "—"} />
+      <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
+      <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
+      <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
+      <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
+      <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
+    </div>
+  );
+}
+
+function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
+  const currentFY = ausFinancialYear(todayISO());
+  const { start, end } = fyRange(currentFY);
+  const activeTenant = tenants[0];
+  const annualRent = activeTenant
+    ? activeTenant.rentFrequency === "Weekly"
+      ? activeTenant.rentAmount * 52
+      : activeTenant.rentFrequency === "Fortnightly"
+        ? activeTenant.rentAmount * 26
+        : activeTenant.rentAmount * 12
+    : 0;
+  const ytdExpenses = expenses.filter((e) => e.date >= start && e.date <= end).reduce((s, e) => s + e.cost, 0);
+  const loanInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
+  const grossYield = prop.currentValue > 0 ? (annualRent / prop.currentValue) * 100 : 0;
+  const netYield = prop.currentValue > 0 ? ((annualRent - ytdExpenses - loanInterest) / prop.currentValue) * 100 : 0;
+  const cashInvested = (prop.deposit ?? 0) + (prop.stampDuty ?? 0);
+  const cashOnCash = cashInvested > 0 ? ((annualRent - ytdExpenses - loanInterest) / cashInvested) * 100 : undefined;
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-xs text-muted-foreground">
+        Estimates based on the current tenant's rent annualised and this FY's expenses — not a formal valuation.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="Gross yield" value={`${grossYield.toFixed(2)}%`} />
+        <Stat label="Net yield" value={`${netYield.toFixed(2)}%`} />
+        <Stat label="Cash-on-cash return" value={cashOnCash !== undefined ? `${cashOnCash.toFixed(2)}%` : "— (no deposit/stamp duty on file)"} />
+        <Stat label="Annualised rent" value={fmtCurrency(annualRent)} />
+      </div>
+    </div>
+  );
+}
+
+function PropertyCostBaseTab({ prop, expenses, depreciationItems }: { prop: Property; expenses: Expense[]; depreciationItems: DepreciationItem[] }) {
+  const capitalWorks = expenses.filter((e) => e.taxCategory === "Capital Works").reduce((s, e) => s + e.cost, 0);
+  const costBase = prop.purchasePrice + (prop.stampDuty ?? 0) + capitalWorks;
+  const totalDepreciationClaimed = depreciationItems.reduce((s, d) => s + d.purchaseCost, 0);
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-xs text-muted-foreground">
+        Estimate only — purchase price + stamp duty + capital-works expenses. Not adjusted for depreciation; talk to
+        your accountant for the actual CGT cost base.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+        <Stat label="Stamp duty" value={prop.stampDuty ? fmtCurrency(prop.stampDuty) : "—"} />
+        <Stat label="Capital works expenses" value={fmtCurrency(capitalWorks)} />
+        <Stat label="Cost base (estimate)" value={fmtCurrency(costBase)} />
+        <Stat label="Total depreciation logged" value={fmtCurrency(totalDepreciationClaimed)} />
+      </div>
+    </div>
+  );
+}
+
+function DepreciationTab({ assetId }: { assetId?: string }) {
+  const { state, addDepreciationItem, deleteDepreciationItem } = useStore();
+  const [open, setOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const [purchaseCost, setPurchaseCost] = useState("");
+  const [effectiveLifeYears, setEffectiveLifeYears] = useState("10");
+  const [purchaseDate, setPurchaseDate] = useState(todayISO());
+
+  const items = assetId ? state.depreciationItems.filter((d) => d.assetId === assetId) : [];
+  const totalAnnual = items.reduce((s, d) => s + d.purchaseCost / (d.effectiveLifeYears || 1), 0);
+
+  const save = () => {
+    if (!assetId) return;
+    if (!description.trim()) return toast.error("Description required");
+    const cost = parseFloat(purchaseCost);
+    if (!cost || cost <= 0) return toast.error("Cost must be greater than 0");
+    addDepreciationItem({
+      assetId,
+      description: description.trim(),
+      purchaseCost: cost,
+      effectiveLifeYears: parseFloat(effectiveLifeYears) || 1,
+      purchaseDate: purchaseDate || undefined,
+    });
+    toast.success("Depreciation item added");
+    setOpen(false);
+    setDescription("");
+    setPurchaseCost("");
+  };
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-xs text-muted-foreground">
+        A simplified prime-cost log (cost ÷ effective life = annual claim) — not a full ATO Div 40/43
+        diminishing-value schedule. Use as a running reference, not tax advice.
+      </p>
+      <div className="flex justify-end">
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" variant="outline" className="gap-1">
+              <Plus className="h-3 w-3" /> Add item
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New depreciation item</DialogTitle>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Field label="Description">
+                  <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Carpet, hot water system" />
+                </Field>
+              </div>
+              <Field label="Cost">
+                <Input type="number" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} />
+              </Field>
+              <Field label="Effective life (years)">
+                <Input type="number" value={effectiveLifeYears} onChange={(e) => setEffectiveLifeYears(e.target.value)} />
+              </Field>
+              <Field label="Purchase date">
+                <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+              </Field>
+            </div>
+            <DialogFooter>
+              <Button onClick={save}>Save</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+      {items.length === 0 && <div className="text-xs text-muted-foreground">No depreciation items logged.</div>}
+      {items.map((d) => (
+        <div key={d.id} className="flex items-center justify-between rounded border p-2 text-xs">
+          <div>
+            <div className="font-medium">{d.description}</div>
+            <div className="text-muted-foreground">
+              {fmtCurrency(d.purchaseCost)} over {d.effectiveLifeYears}y — {fmtCurrency(d.purchaseCost / (d.effectiveLifeYears || 1))}/yr
+            </div>
+          </div>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            onClick={() => {
+              deleteDepreciationItem(d.id);
+              toast.success("Removed");
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </div>
+      ))}
+      {items.length > 0 && (
+        <div className="flex justify-between border-t pt-2 text-xs font-medium">
+          <span>Total annual claim</span>
+          <span>{fmtCurrency(totalAnnual)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
+  const { state } = useStore();
+  const currentFY = ausFinancialYear(todayISO());
+  const { start, end } = fyRange(currentFY);
+  const tenantIds = tenants.map((t) => t.id);
+  const grossRent = state.ledger
+    .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
+    .reduce((s, e) => s + e.credit, 0);
+  const fyExpenses = expenses.filter((e) => e.date >= start && e.date <= end);
+  const totalExpenses = fyExpenses.reduce((s, e) => s + e.cost, 0);
+  const loanInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
+  const net = grossRent - totalExpenses - loanInterest;
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="text-xs text-muted-foreground">FY {currentFY}</div>
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="Gross rent collected" value={fmtCurrency(grossRent)} />
+        <Stat label="Total expenses" value={fmtCurrency(totalExpenses)} />
+        <Stat label="Loan interest (est.)" value={fmtCurrency(loanInterest)} />
+        <Stat label="Net taxable profit / loss" value={fmtCurrency(net)} />
+      </div>
+      <Button asChild size="sm" variant="outline" className="gap-1">
+        <Link to="/expenses">
+          Full EOFY report <ArrowRight className="h-3 w-3" />
+        </Link>
+      </Button>
+    </div>
+  );
+}
+
+function PropertyComplianceTab({ prop }: { prop: Property }) {
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <div className="mb-2 text-xs font-medium text-muted-foreground">Strata</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat
+            label="Levy"
+            value={prop.strataLevyAmount ? `${fmtCurrency(prop.strataLevyAmount)} / ${prop.strataLevyFrequency ?? "—"}` : "—"}
+          />
+        </div>
+      </div>
+      <div>
+        <div className="mb-2 text-xs font-medium text-muted-foreground">Insurance</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label="Insurer" value={prop.insurerName || "—"} />
+          <Stat label="Policy number" value={prop.insurancePolicyNumber || "—"} />
+          <Stat label="Premium" value={prop.insurancePremium ? fmtCurrency(prop.insurancePremium) : "—"} />
+          <Stat label="Sum insured" value={prop.insuranceSumInsured ? fmtCurrency(prop.insuranceSumInsured) : "—"} />
+          <Stat label="Renewal date" value={prop.insuranceRenewalDate || "—"} />
+        </div>
+      </div>
+      <div>
+        <div className="mb-2 text-xs font-medium text-muted-foreground">Compliance</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label="Smoke alarm check due" value={prop.smokeAlarmCheckDueDate || "—"} />
+          {prop.hasSwimmingPool && <Stat label="Pool safety cert expiry" value={prop.poolSafetyCertExpiry || "—"} />}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; onClose: () => void }) {
   const { state } = useStore();
@@ -923,19 +1265,51 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
   const expenses = state.expenses.filter((e) => e.propertyId === propertyId);
   return (
     <Sheet open={!!propertyId} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
         <SheetHeader>
           <SheetTitle>{prop?.alias || prop?.address}</SheetTitle>
           {prop?.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
         </SheetHeader>
         {prop && (
-          <Tabs defaultValue="details" className="mt-4">
-            <TabsList>
+          <Tabs defaultValue="overview" className="mt-4">
+            <TabsList className="flex-wrap h-auto">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="purchase">Purchase &amp; Settlement</TabsTrigger>
+              <TabsTrigger value="performance">Performance</TabsTrigger>
+              <TabsTrigger value="costbase">Cost Base</TabsTrigger>
+              <TabsTrigger value="depreciation">Depreciation</TabsTrigger>
+              <TabsTrigger value="pnl">P&amp;L</TabsTrigger>
+              <TabsTrigger value="compliance">Compliance</TabsTrigger>
               <TabsTrigger value="housekeeping">Housekeeping &amp; Bills</TabsTrigger>
               <TabsTrigger value="providers">Providers</TabsTrigger>
               <TabsTrigger value="media">Media</TabsTrigger>
             </TabsList>
+            <TabsContent value="overview" className="text-sm">
+              <PropertyOverviewTab prop={prop} loan={loan} tenants={tenants} />
+            </TabsContent>
+            <TabsContent value="purchase" className="text-sm">
+              <PropertyPurchaseTab prop={prop} loan={loan} />
+            </TabsContent>
+            <TabsContent value="performance" className="text-sm">
+              <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
+            </TabsContent>
+            <TabsContent value="costbase" className="text-sm">
+              <PropertyCostBaseTab
+                prop={prop}
+                expenses={expenses}
+                depreciationItems={prop.assetId ? state.depreciationItems.filter((d) => d.assetId === prop.assetId) : []}
+              />
+            </TabsContent>
+            <TabsContent value="depreciation" className="text-sm">
+              <DepreciationTab assetId={prop.assetId} />
+            </TabsContent>
+            <TabsContent value="pnl" className="text-sm">
+              <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
+            </TabsContent>
+            <TabsContent value="compliance" className="text-sm">
+              <PropertyComplianceTab prop={prop} />
+            </TabsContent>
             <TabsContent value="details" className="space-y-4 text-sm">
               <div>
                 <div className="mb-2 text-xs font-medium text-muted-foreground">Operational</div>
@@ -951,23 +1325,6 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
                   <Stat label="Manager email" value={prop.managerEmail || "—"} />
                   <Stat label="Council rate ref" value={prop.councilRateRef || "—"} />
                   <Stat label="Water account #" value={prop.waterAccountRef || "—"} />
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs font-medium text-muted-foreground">Acquisition &amp; loan</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
-                  <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
-                  <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
-                  <Stat label="Stamp duty" value={prop.stampDuty ? fmtCurrency(prop.stampDuty) : "—"} />
-                  <Stat label="Deposit" value={prop.deposit ? fmtCurrency(prop.deposit) : "—"} />
-                  <Stat label="Lot size" value={prop.lotSize || "—"} />
-                  <Stat label="Physical attributes" value={prop.physicalAttributes || "—"} />
-                  <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
-                  <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
-                  <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
-                  <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
                 </div>
               </div>
 

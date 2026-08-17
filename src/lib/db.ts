@@ -19,6 +19,10 @@ export const TABLES = {
   assets: "assets",
   goldDetails: "gold_details",
   etfDetails: "etf_details",
+  depreciationItems: "depreciation_items",
+  valuationSnapshots: "valuation_snapshots",
+  loanBalanceSnapshots: "loan_balance_snapshots",
+  buffers: "buffers",
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";

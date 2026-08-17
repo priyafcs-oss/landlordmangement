@@ -22,6 +22,10 @@ import type {
   Asset,
   GoldDetails,
   EtfDetails,
+  DepreciationItem,
+  ValuationSnapshot,
+  LoanBalanceSnapshot,
+  CashBuffer,
 } from "./types";
 import {
   TABLES,
@@ -34,7 +38,7 @@ import {
   loadSettings,
   saveSettings,
 } from "./db";
-import { paidUpToDateFromPayments } from "./calculations";
+import { paidUpToDateFromPayments, todayISO } from "./calculations";
 
 const defaultAi: AiConfig = {
   enabled: true,
@@ -59,6 +63,10 @@ const empty: AppState = {
   assets: [],
   goldDetails: [],
   etfDetails: [],
+  depreciationItems: [],
+  valuationSnapshots: [],
+  loanBalanceSnapshots: [],
+  buffers: [],
   ledger: [],
   invoices: [],
   loans: [],
@@ -153,6 +161,13 @@ interface StoreCtx {
   ) => void;
   deleteAsset: (id: string) => void;
 
+  addDepreciationItem: (d: Omit<DepreciationItem, "id">) => void;
+  deleteDepreciationItem: (id: string) => void;
+
+  addBuffer: (b: Omit<CashBuffer, "id">) => void;
+  updateBuffer: (id: string, b: Partial<CashBuffer>) => void;
+  deleteBuffer: (id: string) => void;
+
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
@@ -185,6 +200,19 @@ function addMonthsISO(iso: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Persists a point-in-time value snapshot — called whenever an asset's currentValue or a
+ * loan's balance changes, so the Dashboard's trend charts build real history forward from today. */
+function snapshotValuation(assetId: string, value: number): ValuationSnapshot {
+  const row: ValuationSnapshot = { id: uid("val"), assetId, date: todayISO(), value };
+  void upsertRow(TABLES.valuationSnapshots, row as unknown as Record<string, unknown>);
+  return row;
+}
+function snapshotLoanBalance(loanId: string, balance: number): LoanBalanceSnapshot {
+  const row: LoanBalanceSnapshot = { id: uid("lbal"), loanId, date: todayISO(), balance };
+  void upsertRow(TABLES.loanBalanceSnapshots, row as unknown as Record<string, unknown>);
+  return row;
+}
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(empty);
   const [loading, setLoading] = useState(true);
@@ -198,6 +226,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       assets,
       goldDetails,
       etfDetails,
+      depreciationItems,
+      valuationSnapshots,
+      loanBalanceSnapshots,
+      buffers,
       ledger,
       invoices,
       loans,
@@ -217,6 +249,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectAll<Asset>(TABLES.assets),
       selectAll<GoldDetails>(TABLES.goldDetails),
       selectAll<EtfDetails>(TABLES.etfDetails),
+      selectAll<DepreciationItem>(TABLES.depreciationItems),
+      selectAll<ValuationSnapshot>(TABLES.valuationSnapshots),
+      selectAll<LoanBalanceSnapshot>(TABLES.loanBalanceSnapshots),
+      selectAll<CashBuffer>(TABLES.buffers),
       selectAll<LedgerEntry>(TABLES.ledger),
       selectAll<TenantInvoice>(TABLES.invoices),
       selectAll<Loan>(TABLES.loans),
@@ -237,6 +273,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       assets,
       goldDetails,
       etfDetails,
+      depreciationItems,
+      valuationSnapshots,
+      loanBalanceSnapshots,
+      buffers,
       ledger,
       invoices,
       loans,
@@ -308,7 +348,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         linkedPropertyId: propertyId,
       };
       void upsertRow(TABLES.assets, assetRow as unknown as Record<string, unknown>);
-      set((s) => ({ ...s, properties: [...s.properties, row], assets: [...s.assets, assetRow] }));
+      const snap = snapshotValuation(assetId, assetRow.currentValue);
+      set((s) => ({
+        ...s,
+        properties: [...s.properties, row],
+        assets: [...s.assets, assetRow],
+        valuationSnapshots: [...s.valuationSnapshots, snap],
+      }));
     },
     updateProperty: (id, p) => {
       void updateRow(TABLES.properties, id, p as Record<string, unknown>);
@@ -316,6 +362,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const existing = s.properties.find((x) => x.id === id);
         const properties = s.properties.map((x) => (x.id === id ? { ...x, ...p } : x));
         let assets = s.assets;
+        let valuationSnapshots = s.valuationSnapshots;
         const touchesMirroredFields =
           p.alias !== undefined ||
           p.address !== undefined ||
@@ -332,8 +379,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           };
           void updateRow(TABLES.assets, existing.assetId, assetPatch as Record<string, unknown>);
           assets = s.assets.map((a) => (a.id === existing.assetId ? { ...a, ...assetPatch } : a));
+          if (p.currentValue !== undefined) {
+            valuationSnapshots = [...valuationSnapshots, snapshotValuation(existing.assetId, p.currentValue)];
+          }
         }
-        return { ...s, properties, assets };
+        return { ...s, properties, assets, valuationSnapshots };
       });
     },
     deleteProperty: (id) => {
@@ -347,12 +397,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteWhere(TABLES.inspections, "propertyId", id);
       void deleteWhere(TABLES.bills, "propertyId", id);
       void deleteWhere(TABLES.providers, "propertyId", id);
+      if (assetId) void deleteWhere(TABLES.depreciationItems, "assetId", assetId);
       void deleteWhereIn(TABLES.ledger, "tenantId", tenantIds);
       void deleteWhereIn(TABLES.invoices, "tenantId", tenantIds);
       set((s) => ({
         ...s,
         properties: s.properties.filter((x) => x.id !== id),
         assets: s.assets.filter((a) => a.id !== assetId),
+        depreciationItems: s.depreciationItems.filter((d) => d.assetId !== assetId),
         tenants: s.tenants.filter((t) => t.propertyId !== id),
         loans: s.loans.filter((l) => l.propertyId !== id),
         expenses: s.expenses.filter((e) => e.propertyId !== id),
@@ -547,11 +599,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addLoan: (l) => {
       const row: Loan = { ...l, id: uid("l") };
       void upsertRow(TABLES.loans, row as unknown as Record<string, unknown>);
-      set((s) => ({ ...s, loans: [...s.loans, row] }));
+      const snap = snapshotLoanBalance(row.id, row.totalBalance);
+      set((s) => ({ ...s, loans: [...s.loans, row], loanBalanceSnapshots: [...s.loanBalanceSnapshots, snap] }));
     },
     updateLoan: (id, l) => {
       void updateRow(TABLES.loans, id, l as Record<string, unknown>);
-      set((s) => ({ ...s, loans: s.loans.map((x) => (x.id === id ? { ...x, ...l } : x)) }));
+      set((s) => {
+        const loans = s.loans.map((x) => (x.id === id ? { ...x, ...l } : x));
+        let loanBalanceSnapshots = s.loanBalanceSnapshots;
+        if (l.totalBalance !== undefined) {
+          loanBalanceSnapshots = [...loanBalanceSnapshots, snapshotLoanBalance(id, l.totalBalance)];
+        }
+        return { ...s, loans, loanBalanceSnapshots };
+      });
     },
     deleteLoan: (id) => {
       void deleteRow(TABLES.loans, id);
@@ -674,11 +734,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         etfRow = { ...details.etfDetails, assetId: row.id };
         void upsertRow(TABLES.etfDetails, etfRow as unknown as Record<string, unknown>);
       }
+      const snap = snapshotValuation(row.id, row.currentValue);
       set((s) => ({
         ...s,
         assets: [...s.assets, row],
         goldDetails: goldRow ? [...s.goldDetails, goldRow] : s.goldDetails,
         etfDetails: etfRow ? [...s.etfDetails, etfRow] : s.etfDetails,
+        valuationSnapshots: [...s.valuationSnapshots, snap],
       }));
     },
     updateAsset: (id, patch, details) => {
@@ -702,16 +764,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ? s.etfDetails.map((e) => (e.assetId === id ? { ...e, ...details.etfDetails } : e))
             : [...s.etfDetails, { assetId: id, ...details.etfDetails } as EtfDetails]
           : s.etfDetails,
+        valuationSnapshots:
+          patch.currentValue !== undefined
+            ? [...s.valuationSnapshots, snapshotValuation(id, patch.currentValue)]
+            : s.valuationSnapshots,
       }));
     },
     deleteAsset: (id) => {
       void deleteRow(TABLES.assets, id);
+      void deleteWhere(TABLES.depreciationItems, "assetId", id);
       set((s) => ({
         ...s,
         assets: s.assets.filter((a) => a.id !== id),
         goldDetails: s.goldDetails.filter((g) => g.assetId !== id),
         etfDetails: s.etfDetails.filter((e) => e.assetId !== id),
+        depreciationItems: s.depreciationItems.filter((d) => d.assetId !== id),
       }));
+    },
+
+    addDepreciationItem: (d) => {
+      const row: DepreciationItem = { ...d, id: uid("depr") };
+      void upsertRow(TABLES.depreciationItems, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, depreciationItems: [...s.depreciationItems, row] }));
+    },
+    deleteDepreciationItem: (id) => {
+      void deleteRow(TABLES.depreciationItems, id);
+      set((s) => ({ ...s, depreciationItems: s.depreciationItems.filter((d) => d.id !== id) }));
+    },
+
+    addBuffer: (b) => {
+      const row: CashBuffer = { ...b, id: uid("buf") };
+      void upsertRow(TABLES.buffers, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, buffers: [...s.buffers, row] }));
+    },
+    updateBuffer: (id, patch) => {
+      void updateRow(TABLES.buffers, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, buffers: s.buffers.map((b) => (b.id === id ? { ...b, ...patch } : b)) }));
+    },
+    deleteBuffer: (id) => {
+      void deleteRow(TABLES.buffers, id);
+      set((s) => ({ ...s, buffers: s.buffers.filter((b) => b.id !== id) }));
     },
 
     addMaintenanceRequest: async (m) => {

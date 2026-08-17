@@ -121,7 +121,16 @@ function DashboardPage() {
   const dueSoonCount = state.bills.filter(
     (b) => !!b.propertyId && scopedPropertyIds.has(b.propertyId) && b.status !== "Paid" && daysUntil(b.dueDate) <= 7,
   ).length;
-  const attentionCount = leaseAlerts.length + warrantyAlerts.length + complianceAlerts.length + dueSoonCount;
+  const worstBuffer = state.buffers
+    .map((b) => {
+      const target = b.targetAmount;
+      const pct = target && target > 0 ? (b.currentBalance / target) * 100 : undefined;
+      return { buffer: b, pct };
+    })
+    .filter((x) => x.pct !== undefined)
+    .sort((a, b) => (a.pct ?? 0) - (b.pct ?? 0))[0];
+  const bufferAlert = worstBuffer && (worstBuffer.pct ?? 100) < 100 ? 1 : 0;
+  const attentionCount = leaseAlerts.length + warrantyAlerts.length + complianceAlerts.length + dueSoonCount + bufferAlert;
 
   // Chart data: real income vs expenses per month, from the ledger/expenses actually on file.
   const months: { name: string; income: number; expenses: number; cashflow: number }[] = [];
@@ -137,6 +146,31 @@ function DashboardPage() {
       expenses: exp,
       cashflow: income - exp - totalEmis,
     });
+  }
+
+  // Value/loan trend: for each month, the latest snapshot at-or-before that month's end, summed
+  // across scoped assets/loans. Months before any snapshot exists simply have no data point yet —
+  // no synthetic interpolation.
+  const latestAtOrBefore = <T extends { date: string }>(rows: T[], dateISO: string): T | undefined =>
+    rows.filter((r) => r.date <= dateISO).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+
+  const valueTrend: { name: string; value: number }[] = [];
+  const loanTrend: { name: string; balance: number }[] = [];
+  for (let i = chartMonths - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const name = d.toLocaleString("en-AU", { month: "short", year: chartMonths === 12 ? "2-digit" : undefined });
+    const value = scopedAssets.reduce((s, a) => {
+      const snap = latestAtOrBefore(state.valuationSnapshots.filter((v) => v.assetId === a.id), monthEnd);
+      return s + (snap?.value ?? 0);
+    }, 0);
+    const balance = scopedLoans.reduce((s, l) => {
+      const snap = latestAtOrBefore(state.loanBalanceSnapshots.filter((v) => v.loanId === l.id), monthEnd);
+      return s + (snap?.balance ?? 0);
+    }, 0);
+    valueTrend.push({ name, value });
+    loanTrend.push({ name, balance });
   }
 
   return (
@@ -205,6 +239,14 @@ function DashboardPage() {
               reducing the interest on the debt above.
             </div>
           )}
+          {worstBuffer && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Lowest buffer — {worstBuffer.buffer.label}:{" "}
+              <span className={`font-medium ${(worstBuffer.pct ?? 100) < 100 ? "text-amber-600" : "text-foreground"}`}>
+                {Math.round(worstBuffer.pct ?? 0)}% covered
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -264,6 +306,58 @@ function DashboardPage() {
         </Card>
 
         <ActivityFeedCard />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Portfolio value trend</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ChartContainer className="h-[200px] w-full" config={{ value: { label: "Value", color: "hsl(var(--primary))" } }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={valueTrend}>
+                  <defs>
+                    <linearGradient id="c3" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--color-value)" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="var(--color-value)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis tickLine={false} axisLine={false} fontSize={12} width={60} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Area type="monotone" dataKey="value" stroke="var(--color-value)" fill="url(#c3)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Loan balance trend</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ChartContainer className="h-[200px] w-full" config={{ balance: { label: "Balance", color: "hsl(var(--destructive))" } }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={loanTrend}>
+                  <defs>
+                    <linearGradient id="c4" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="var(--color-balance)" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="var(--color-balance)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis tickLine={false} axisLine={false} fontSize={12} width={60} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Area type="monotone" dataKey="balance" stroke="var(--color-balance)" fill="url(#c4)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartContainer>
+          </CardContent>
+        </Card>
       </div>
 
       {detailsOpen && (

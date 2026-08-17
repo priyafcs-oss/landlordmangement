@@ -12,10 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as BillsRouteImport } from './routes/bills'
+import { Route as BuffersRouteImport } from './routes/buffers'
 import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as EntitiesRouteImport } from './routes/entities'
 import { Route as ExpensesRouteImport } from './routes/expenses'
+import { Route as ForecastsRouteImport } from './routes/forecasts'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
 import { Route as PortfolioRouteImport } from './routes/portfolio'
@@ -40,6 +42,11 @@ const BillsRoute = BillsRouteImport.update({
   path: '/bills',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BuffersRoute = BuffersRouteImport.update({
+  id: '/buffers',
+  path: '/buffers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CopilotRoute = CopilotRouteImport.update({
   id: '/copilot',
   path: '/copilot',
@@ -58,6 +65,11 @@ const EntitiesRoute = EntitiesRouteImport.update({
 const ExpensesRoute = ExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForecastsRoute = ForecastsRouteImport.update({
+  id: '/forecasts',
+  path: '/forecasts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InspectionsRoute = InspectionsRouteImport.update({
@@ -105,10 +117,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assets': typeof AssetsRoute
   '/bills': typeof BillsRoute
+  '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
   '/expenses': typeof ExpensesRoute
+  '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
@@ -122,10 +136,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assets': typeof AssetsRoute
   '/bills': typeof BillsRoute
+  '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
   '/expenses': typeof ExpensesRoute
+  '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
@@ -140,10 +156,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/assets': typeof AssetsRoute
   '/bills': typeof BillsRoute
+  '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
   '/expenses': typeof ExpensesRoute
+  '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/portfolio': typeof PortfolioRoute
@@ -159,10 +177,12 @@ export interface FileRouteTypes {
     | '/'
     | '/assets'
     | '/bills'
+    | '/buffers'
     | '/copilot'
     | '/documents'
     | '/entities'
     | '/expenses'
+    | '/forecasts'
     | '/inspections'
     | '/maintenance'
     | '/portfolio'
@@ -176,10 +196,12 @@ export interface FileRouteTypes {
     | '/'
     | '/assets'
     | '/bills'
+    | '/buffers'
     | '/copilot'
     | '/documents'
     | '/entities'
     | '/expenses'
+    | '/forecasts'
     | '/inspections'
     | '/maintenance'
     | '/portfolio'
@@ -193,10 +215,12 @@ export interface FileRouteTypes {
     | '/'
     | '/assets'
     | '/bills'
+    | '/buffers'
     | '/copilot'
     | '/documents'
     | '/entities'
     | '/expenses'
+    | '/forecasts'
     | '/inspections'
     | '/maintenance'
     | '/portfolio'
@@ -211,10 +235,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssetsRoute: typeof AssetsRoute
   BillsRoute: typeof BillsRoute
+  BuffersRoute: typeof BuffersRoute
   CopilotRoute: typeof CopilotRoute
   DocumentsRoute: typeof DocumentsRoute
   EntitiesRoute: typeof EntitiesRoute
   ExpensesRoute: typeof ExpensesRoute
+  ForecastsRoute: typeof ForecastsRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
   PortfolioRoute: typeof PortfolioRoute
@@ -248,6 +274,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BillsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/buffers': {
+      id: '/buffers'
+      path: '/buffers'
+      fullPath: '/buffers'
+      preLoaderRoute: typeof BuffersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/copilot': {
       id: '/copilot'
       path: '/copilot'
@@ -274,6 +307,13 @@ declare module '@tanstack/react-router' {
       path: '/expenses'
       fullPath: '/expenses'
       preLoaderRoute: typeof ExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forecasts': {
+      id: '/forecasts'
+      path: '/forecasts'
+      fullPath: '/forecasts'
+      preLoaderRoute: typeof ForecastsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inspections': {
@@ -339,10 +379,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssetsRoute: AssetsRoute,
   BillsRoute: BillsRoute,
+  BuffersRoute: BuffersRoute,
   CopilotRoute: CopilotRoute,
   DocumentsRoute: DocumentsRoute,
   EntitiesRoute: EntitiesRoute,
   ExpensesRoute: ExpensesRoute,
+  ForecastsRoute: ForecastsRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
   PortfolioRoute: PortfolioRoute,

@@ -67,6 +67,62 @@ export interface Property {
   occupancyType?: "Investment" | "PPOR";
   /** Mirror row in the generic `assets` register — kept in sync by the store, not a separate source of truth. */
   assetId?: string;
+  strataLevyAmount?: number;
+  strataLevyFrequency?: "Quarterly" | "Annually";
+  insurerName?: string;
+  insurancePolicyNumber?: string;
+  insurancePremium?: number;
+  insuranceRenewalDate?: string;
+  insuranceSumInsured?: number;
+  smokeAlarmCheckDueDate?: string;
+  poolSafetyCertExpiry?: string;
+}
+
+/**
+ * A simplified prime-cost depreciation line for a property — NOT a full ATO Div 40/43
+ * diminishing-value engine, just item/cost/effective-life so the landlord has a running log.
+ * Annual claim = purchaseCost / effectiveLifeYears.
+ */
+export interface DepreciationItem {
+  id: string;
+  assetId: string;
+  description: string;
+  purchaseCost: number;
+  effectiveLifeYears: number;
+  purchaseDate?: string;
+}
+
+/** One point-in-time value for an asset — captured automatically whenever currentValue changes,
+ * building real history forward from today rather than any backfilled guess. */
+export interface ValuationSnapshot {
+  id: string;
+  assetId: string;
+  date: string;
+  value: number;
+}
+
+export interface LoanBalanceSnapshot {
+  id: string;
+  loanId: string;
+  date: string;
+  balance: number;
+}
+
+/**
+ * A cash-reserve target. currentBalance is entered manually by the landlord — there's no
+ * "Cash Account" asset type yet, so this deliberately doesn't try to link to one; it's just a
+ * number you keep updated, checked against a target (a flat amount or N months of expenses).
+ */
+export type BufferScopeType = "Portfolio" | "Entity" | "Asset";
+
+export interface CashBuffer {
+  id: string;
+  scopeType: BufferScopeType;
+  scopeId?: string;
+  label: string;
+  targetAmount?: number;
+  targetMonths?: number;
+  currentBalance: number;
 }
 
 export interface Tenant {
@@ -499,6 +555,10 @@ export interface AppState {
   assets: Asset[];
   goldDetails: GoldDetails[];
   etfDetails: EtfDetails[];
+  depreciationItems: DepreciationItem[];
+  valuationSnapshots: ValuationSnapshot[];
+  loanBalanceSnapshots: LoanBalanceSnapshot[];
+  buffers: CashBuffer[];
   ledger: LedgerEntry[];
   invoices: TenantInvoice[];
   loans: Loan[];
