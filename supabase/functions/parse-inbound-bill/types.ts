@@ -50,7 +50,7 @@ export interface ParseResult {
   error?: string;
 }
 
-export type DocumentType = "bill" | "lease_agreement" | "rent_statement" | "other";
+export type DocumentType = "bill" | "lease_agreement" | "rent_statement" | "property_document" | "other";
 
 export interface ClassificationResult {
   document_type: DocumentType;
@@ -91,4 +91,28 @@ export interface ProposalParseResult {
   ok: boolean;
   proposalId?: string;
   error?: string;
+}
+
+/**
+ * Strict JSON shape requested from Gemini for a property document — settlement statement,
+ * insurance certificate/policy, or strata notice. Every field is nullable since any one
+ * document typically only carries a handful of these; the caller applies only what's present.
+ */
+export interface ParsedPropertyDocumentFields {
+  document_category: string; // e.g. "Settlement Statement", "Insurance Certificate", "Strata Notice"
+  property_address: string;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  stamp_duty: number | null;
+  deposit: number | null;
+  insurer_name: string | null;
+  insurance_policy_number: string | null;
+  insurance_premium: number | null;
+  insurance_renewal_date: string | null;
+  insurance_sum_insured: number | null;
+  strata_levy_amount: number | null;
+  strata_levy_frequency: string | null; // "Quarterly" | "Annually"
+  smoke_alarm_check_due_date: string | null;
+  pool_safety_cert_expiry: string | null;
+  confidence: number;
 }

@@ -22,7 +22,7 @@ export const Route = createFileRoute("/documents")({
 
 interface DocumentEntry {
   id: string;
-  kind: "Bill" | "Lease Agreement" | "Rent Statement";
+  kind: "Bill" | "Lease Agreement" | "Rent Statement" | "Property Document";
   date: string;
   propertyId?: string;
   label: string;
@@ -57,13 +57,17 @@ function DocumentsPage() {
         emailBody: e.sourceEmailBody,
       })),
     ...state.aiProposals.map((p) => {
-      const isLease = p.kind === "tenant_lease";
-      const label = isLease
-        ? (p.payload as { name?: string }).name ?? "Lease agreement"
-        : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
+      const kind: DocumentEntry["kind"] =
+        p.kind === "tenant_lease" ? "Lease Agreement" : p.kind === "property_detail" ? "Property Document" : "Rent Statement";
+      const label =
+        p.kind === "tenant_lease"
+          ? (p.payload as { name?: string }).name ?? "Lease agreement"
+          : p.kind === "property_detail"
+            ? (p.payload as { documentCategory?: string }).documentCategory ?? "Property document"
+            : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
       return {
         id: p.id,
-        kind: (isLease ? "Lease Agreement" : "Rent Statement") as DocumentEntry["kind"],
+        kind,
         date: p.created_at?.slice(0, 10) ?? "",
         propertyId: p.propertyId,
         label,
@@ -109,6 +113,7 @@ function DocumentsPage() {
             <SelectItem value="Bill">Bills</SelectItem>
             <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
             <SelectItem value="Rent Statement">Rent statements</SelectItem>
+            <SelectItem value="Property Document">Property documents</SelectItem>
           </SelectContent>
         </Select>
         <Select value={propertyId} onValueChange={setPropertyId}>

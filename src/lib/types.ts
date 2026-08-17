@@ -522,11 +522,34 @@ export interface RentLedgerProposalPayload {
   confidence: number;
 }
 
+/**
+ * Extracted from a settlement statement, insurance certificate/policy, or strata notice — every
+ * field but documentCategory/confidence is optional since one document rarely carries all of
+ * them. The review card lets the landlord pick which fields to actually apply to the property.
+ */
+export interface PropertyDetailProposalPayload {
+  documentCategory: string;
+  purchaseDate?: string;
+  purchasePrice?: number;
+  stampDuty?: number;
+  deposit?: number;
+  insurerName?: string;
+  insurancePolicyNumber?: string;
+  insurancePremium?: number;
+  insuranceRenewalDate?: string;
+  insuranceSumInsured?: number;
+  strataLevyAmount?: number;
+  strataLevyFrequency?: "Quarterly" | "Annually";
+  smokeAlarmCheckDueDate?: string;
+  poolSafetyCertExpiry?: string;
+  confidence: number;
+}
+
 export interface AiIntakeProposal {
   id: string;
   /** Server-set on insert — when this document was received, used for the Documents archive. */
   created_at?: string;
-  kind: "tenant_lease" | "rent_ledger";
+  kind: "tenant_lease" | "rent_ledger" | "property_detail";
   status: "pending" | "applied" | "dismissed";
   propertyId?: string;
   matchedTenantId?: string;
@@ -536,7 +559,7 @@ export interface AiIntakeProposal {
   sourceFileName?: string;
   sourceFileData?: string;
   sourceEmailBody?: string;
-  payload: TenantLeaseProposalPayload | RentLedgerProposalPayload;
+  payload: TenantLeaseProposalPayload | RentLedgerProposalPayload | PropertyDetailProposalPayload;
   reviewReason?: string | null;
 }
 

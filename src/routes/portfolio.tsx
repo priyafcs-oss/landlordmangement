@@ -56,6 +56,7 @@ import type {
   AiIntakeProposal,
   TenantLeaseProposalPayload,
   RentLedgerProposalPayload,
+  PropertyDetailProposalPayload,
   RentChange,
   LeaseHistory,
   ContactPerson,
@@ -67,6 +68,7 @@ import type {
 } from "@/lib/types";
 import { toast } from "sonner";
 import { BillRow } from "@/components/BillRow";
+import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { FileSignature } from "lucide-react";
@@ -113,7 +115,7 @@ function PortfolioPage() {
         ))}
       </div>
 
-      <PropertyDrawer propertyId={drawerId} onClose={() => setDrawerId(null)} />
+      <PropertyDrawer propertyId={drawerId} onClose={() => setDrawerId(null)} onEdit={(p) => setOpenProp(p)} />
     </div>
   );
 }
@@ -175,6 +177,8 @@ function AiProposalsSection() {
         {pending.map((p) =>
           p.kind === "tenant_lease" ? (
             <TenantLeaseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "property_detail" ? (
+            <PropertyDetailProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : (
             <RentLedgerProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ),
@@ -253,6 +257,115 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
               Review &amp; Create Tenant
             </Button>
           </TenantDialog>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const PROPERTY_DETAIL_FIELDS: { key: keyof PropertyDetailProposalPayload; label: string; kind: "currency" | "date" | "text" }[] = [
+  { key: "purchaseDate", label: "Settlement date", kind: "date" },
+  { key: "purchasePrice", label: "Purchase price", kind: "currency" },
+  { key: "stampDuty", label: "Stamp duty", kind: "currency" },
+  { key: "deposit", label: "Deposit", kind: "currency" },
+  { key: "insurerName", label: "Insurer", kind: "text" },
+  { key: "insurancePolicyNumber", label: "Policy number", kind: "text" },
+  { key: "insurancePremium", label: "Premium", kind: "currency" },
+  { key: "insuranceSumInsured", label: "Sum insured", kind: "currency" },
+  { key: "insuranceRenewalDate", label: "Insurance renewal date", kind: "date" },
+  { key: "strataLevyAmount", label: "Strata levy amount", kind: "currency" },
+  { key: "strataLevyFrequency", label: "Strata levy frequency", kind: "text" },
+  { key: "smokeAlarmCheckDueDate", label: "Smoke alarm check due", kind: "date" },
+  { key: "poolSafetyCertExpiry", label: "Pool safety cert expiry", kind: "date" },
+];
+
+function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, updateProperty, markProposalApplied } = useStore();
+  const payload = proposal.payload as PropertyDetailProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+
+  const presentFields = PROPERTY_DETAIL_FIELDS.filter((f) => payload[f.key] !== undefined && payload[f.key] !== null);
+  const [checked, setChecked] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(presentFields.map((f) => [f.key, true])),
+  );
+
+  const formatValue = (f: (typeof PROPERTY_DETAIL_FIELDS)[number]) => {
+    const v = payload[f.key];
+    if (f.kind === "currency") return fmtCurrency(v as number);
+    return String(v);
+  };
+
+  const confirm = () => {
+    if (!propertyId) return toast.error("Select a property first");
+    const patch: Record<string, unknown> = {};
+    presentFields.forEach((f) => {
+      if (checked[f.key]) patch[f.key] = payload[f.key];
+    });
+    if (Object.keys(patch).length === 0) return toast.error("Select at least one field to apply");
+    updateProperty(propertyId, patch);
+    markProposalApplied(proposal.id);
+    toast.success("Property details updated");
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">{payload.documentCategory}</Badge>
+          {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">No property matched — assign one:</span>
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger className="h-7 w-[220px] text-xs">
+                <SelectValue placeholder="Assign property" />
+              </SelectTrigger>
+              <SelectContent>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.alias || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {presentFields.length === 0 ? (
+          <div className="text-xs text-muted-foreground">No usable fields found on this document.</div>
+        ) : (
+          <div className="space-y-1 rounded border p-2">
+            <div className="text-[11px] font-medium text-muted-foreground">Apply to property</div>
+            {presentFields.map((f) => (
+              <label key={f.key} className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={checked[f.key] ?? false}
+                  onChange={(e) => setChecked((c) => ({ ...c, [f.key]: e.target.checked }))}
+                />
+                <span className="w-40 shrink-0 text-muted-foreground">{f.label}</span>
+                <span className="font-medium">{formatValue(f)}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+            Apply selected fields
+          </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
           </Button>
@@ -1257,7 +1370,15 @@ function PropertyComplianceTab({ prop }: { prop: Property }) {
   );
 }
 
-function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; onClose: () => void }) {
+function PropertyDrawer({
+  propertyId,
+  onClose,
+  onEdit,
+}: {
+  propertyId: string | null;
+  onClose: () => void;
+  onEdit: (p: Property) => void;
+}) {
   const { state } = useStore();
   const prop = state.properties.find((p) => p.id === propertyId);
   const tenants = state.tenants.filter((t) => t.propertyId === propertyId);
@@ -1267,8 +1388,20 @@ function PropertyDrawer({ propertyId, onClose }: { propertyId: string | null; on
     <Sheet open={!!propertyId} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>{prop?.alias || prop?.address}</SheetTitle>
-          {prop?.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
+          <div className="flex items-center justify-between gap-2 pr-8">
+            <div>
+              <SheetTitle>{prop?.alias || prop?.address}</SheetTitle>
+              {prop?.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
+            </div>
+            {prop && (
+              <div className="flex shrink-0 gap-2">
+                <UploadDocumentDialog />
+                <Button size="sm" variant="outline" className="gap-1" onClick={() => onEdit(prop)}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit property
+                </Button>
+              </div>
+            )}
+          </div>
         </SheetHeader>
         {prop && (
           <Tabs defaultValue="overview" className="mt-4">
