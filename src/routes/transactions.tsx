@@ -8,6 +8,7 @@ import { Download, Receipt } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
+import type { AssetType } from "@/lib/types";
 
 export const Route = createFileRoute("/transactions")({
   head: () => ({
@@ -25,6 +26,7 @@ interface TxRow {
   description: string;
   category: string;
   propertyId?: string;
+  assetId?: string;
   amount: number; // positive = income, negative = outgoing
 }
 
@@ -33,6 +35,7 @@ function TransactionsPage() {
   const currentFY = ausFinancialYear(todayISO());
   const [fy, setFy] = useState(currentFY);
   const [propertyId, setPropertyId] = useState("__all__");
+  const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const { start, end } = fyRange(fy);
 
   const fys = useMemo(() => {
@@ -64,7 +67,8 @@ function TransactionsPage() {
       description: e.itemName,
       category: e.taxCategory,
       propertyId: e.propertyId,
-      amount: -e.cost,
+      assetId: e.assetId,
+      amount: e.direction === "Income" ? e.cost : -e.cost,
     })),
     ...state.bills
       .filter((b) => b.status === "Paid")
@@ -74,13 +78,17 @@ function TransactionsPage() {
         description: `${b.billType} bill`,
         category: b.billType,
         propertyId: b.propertyId,
+        assetId: b.assetId,
         amount: -b.amount,
       })),
   ];
 
+  const assetTypeOf = (r: TxRow) => state.assets.find((a) => a.id === r.assetId)?.assetType;
+
   const filtered = allRows
     .filter((r) => r.date >= start && r.date <= end)
     .filter((r) => propertyId === "__all__" || r.propertyId === propertyId)
+    .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   const totalIncome = filtered.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
@@ -93,10 +101,11 @@ function TransactionsPage() {
     }, {});
 
   const exportCsv = () => {
-    const header = ["Date", "Description", "Category", "Property", "Amount"];
+    const header = ["Date", "Description", "Category", "Asset", "Amount"];
     const rows = filtered.map((r) => {
       const prop = state.properties.find((p) => p.id === r.propertyId);
-      return [r.date, r.description, r.category, prop?.alias || prop?.address || "", r.amount];
+      const asset = state.assets.find((a) => a.id === r.assetId);
+      return [r.date, r.description, r.category, prop?.alias || prop?.address || asset?.name || "", r.amount];
     });
     downloadCsv(`transactions-${fy}.csv`, header, rows);
     toast.success("Transactions CSV downloaded");
@@ -142,6 +151,17 @@ function TransactionsPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All asset types</SelectItem>
+                <SelectItem value="Property">Property</SelectItem>
+                <SelectItem value="Gold">Gold</SelectItem>
+                <SelectItem value="ETF">ETF</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -155,13 +175,15 @@ function TransactionsPage() {
             )}
             {filtered.map((r) => {
               const prop = state.properties.find((p) => p.id === r.propertyId);
+              const asset = state.assets.find((a) => a.id === r.assetId);
+              const label = prop?.alias || prop?.address || asset?.name;
               return (
                 <div key={r.id} className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm">
                   <div className="min-w-0">
                     <div className="font-medium">{r.description}</div>
                     <div className="text-xs text-muted-foreground">
                       {r.date} • {r.category}
-                      {prop && <> • {prop.alias || prop.address}</>}
+                      {label && <> • {label}</>}
                     </div>
                   </div>
                   <div className={`shrink-0 font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>

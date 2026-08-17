@@ -508,7 +508,7 @@ function PropertyCard({
   );
 }
 
-function PropertyDialog({ property, onDone }: { property: Property | null; onDone: () => void }) {
+export function PropertyDialog({ property, onDone }: { property: Property | null; onDone: () => void }) {
   const { state, addProperty, updateProperty } = useStore();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({

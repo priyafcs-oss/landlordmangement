@@ -16,6 +16,9 @@ export const TABLES = {
   aiProposals: "ai_intake_proposals",
   providers: "providers",
   entities: "entities",
+  assets: "assets",
+  goldDetails: "gold_details",
+  etfDetails: "etf_details",
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";

@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BillRow } from "@/components/BillRow";
 import { Receipt } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
-import type { BillType } from "@/lib/types";
+import type { AssetType, BillType } from "@/lib/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/bills")({
@@ -25,14 +25,17 @@ const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance",
 function BillsPage() {
   const { state, markBillPaid, deleteBill } = useStore();
   const [propertyId, setPropertyId] = useState("__all__");
+  const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [status, setStatus] = useState<(typeof STATUS_OPTIONS)[number]>("__all__");
   const [billType, setBillType] = useState<"__all__" | BillType>("__all__");
 
   const today = todayISO();
   const isOverdue = (b: (typeof state.bills)[number]) => b.status === "Unpaid" && b.dueDate < today;
+  const assetTypeOf = (b: (typeof state.bills)[number]) => state.assets.find((a) => a.id === b.assetId)?.assetType;
 
   const filtered = state.bills
     .filter((b) => propertyId === "__all__" || b.propertyId === propertyId)
+    .filter((b) => assetType === "__all__" || assetTypeOf(b) === assetType)
     .filter((b) => billType === "__all__" || b.billType === billType)
     .filter((b) => {
       if (status === "__all__") return true;
@@ -72,6 +75,17 @@ function BillsPage() {
                 ))}
               </SelectContent>
             </Select>
+            <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All asset types</SelectItem>
+                <SelectItem value="Property">Property</SelectItem>
+                <SelectItem value="Gold">Gold</SelectItem>
+                <SelectItem value="ETF">ETF</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
               <SelectTrigger className="w-[160px]">
                 <SelectValue />
@@ -109,11 +123,12 @@ function BillsPage() {
             )}
             {filtered.map((b) => {
               const prop = state.properties.find((p) => p.id === b.propertyId);
+              const asset = state.assets.find((a) => a.id === b.assetId);
               return (
                 <BillRow
                   key={b.id}
                   bill={b}
-                  propertyLabel={prop?.alias || prop?.address}
+                  propertyLabel={prop?.alias || prop?.address || asset?.name}
                   onPaid={() => {
                     markBillPaid(b.id);
                     toast.success("Marked paid" + (b.recurrenceMonths ? " — next cycle scheduled" : ""));

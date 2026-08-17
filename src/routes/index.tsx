@@ -80,9 +80,15 @@ function DashboardPage() {
   const scopedExpenses =
     entityScope === "__all__" ? state.expenses : state.expenses.filter((e) => e.propertyId && scopedPropertyIds.has(e.propertyId));
   const scopedLedger = entityScope === "__all__" ? state.ledger : state.ledger.filter((e) => scopedTenantIds.has(e.tenantId));
+  // Every asset — property, gold, ETF — that has a status of Active feeds the wealth cards below;
+  // Gold/ETF don't yet have an owner entity assigned, so they only show up under "All entities".
+  const scopedAssets = state.assets
+    .filter((a) => a.status === "Active")
+    .filter((a) => entityScope === "__all__" || a.ownerEntityId === entityScope);
 
-  const totalValue = scopedProperties.reduce((s, p) => s + p.currentValue, 0);
+  const totalValue = scopedAssets.reduce((s, a) => s + a.currentValue, 0);
   const totalDebt = scopedLoans.reduce((s, l) => s + l.totalBalance, 0);
+  const totalOffset = scopedLoans.reduce((s, l) => s + (l.offsetBalance || 0), 0);
   const equity = totalValue - totalDebt;
   const lvrPercent = totalValue > 0 ? Math.min(100, Math.round((totalDebt / totalValue) * 100)) : 0;
 
@@ -113,7 +119,7 @@ function DashboardPage() {
   );
 
   const dueSoonCount = state.bills.filter(
-    (b) => scopedPropertyIds.has(b.propertyId) && b.status !== "Paid" && daysUntil(b.dueDate) <= 7,
+    (b) => !!b.propertyId && scopedPropertyIds.has(b.propertyId) && b.status !== "Paid" && daysUntil(b.dueDate) <= 7,
   ).length;
   const attentionCount = leaseAlerts.length + warrantyAlerts.length + complianceAlerts.length + dueSoonCount;
 
@@ -193,6 +199,12 @@ function DashboardPage() {
           <div className="h-2 w-full overflow-hidden rounded-full bg-emerald-200">
             <div className="h-full bg-amber-500" style={{ width: `${lvrPercent}%` }} />
           </div>
+          {totalOffset > 0 && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Offset balance: <span className="font-medium text-foreground">{fmtCurrency(totalOffset)}</span> — already
+              reducing the interest on the debt above.
+            </div>
+          )}
         </div>
       )}
 

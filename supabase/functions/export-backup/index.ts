@@ -15,6 +15,11 @@ const TABLES = [
   "maintenance_requests",
   "property_bills",
   "ai_intake_proposals",
+  "providers",
+  "entities",
+  "assets",
+  "gold_details",
+  "etf_details",
   "app_settings",
 ];
 

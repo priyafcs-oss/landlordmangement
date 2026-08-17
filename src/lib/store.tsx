@@ -19,6 +19,9 @@ import type {
   Provider,
   Entity,
   ReportHistoryEntry,
+  Asset,
+  GoldDetails,
+  EtfDetails,
 } from "./types";
 import {
   TABLES,
@@ -53,6 +56,9 @@ const empty: AppState = {
   tenants: [],
   providers: [],
   entities: [],
+  assets: [],
+  goldDetails: [],
+  etfDetails: [],
   ledger: [],
   invoices: [],
   loans: [],
@@ -134,6 +140,19 @@ interface StoreCtx {
   updateEntity: (id: string, e: Partial<Entity>) => void;
   deleteEntity: (id: string) => void;
 
+  /** Generic asset CRUD — used for Gold/ETF (and anything added later). Property manages its own
+   * mirrored asset row automatically via addProperty/updateProperty/deleteProperty. */
+  addAsset: (
+    a: Omit<Asset, "id">,
+    details?: { goldDetails?: Omit<GoldDetails, "assetId">; etfDetails?: Omit<EtfDetails, "assetId"> },
+  ) => void;
+  updateAsset: (
+    id: string,
+    a: Partial<Asset>,
+    details?: { goldDetails?: Partial<GoldDetails>; etfDetails?: Partial<EtfDetails> },
+  ) => void;
+  deleteAsset: (id: string) => void;
+
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
@@ -176,6 +195,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tenants,
       providers,
       entities,
+      assets,
+      goldDetails,
+      etfDetails,
       ledger,
       invoices,
       loans,
@@ -192,6 +214,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectAll<Tenant>(TABLES.tenants),
       selectAll<Provider>(TABLES.providers),
       selectAll<Entity>(TABLES.entities),
+      selectAll<Asset>(TABLES.assets),
+      selectAll<GoldDetails>(TABLES.goldDetails),
+      selectAll<EtfDetails>(TABLES.etfDetails),
       selectAll<LedgerEntry>(TABLES.ledger),
       selectAll<TenantInvoice>(TABLES.invoices),
       selectAll<Loan>(TABLES.loans),
@@ -209,6 +234,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tenants,
       providers,
       entities,
+      assets,
+      goldDetails,
+      etfDetails,
       ledger,
       invoices,
       loans,
@@ -262,17 +290,57 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     reset: () => void 0,
 
     addProperty: (p) => {
-      const row: Property = { ...p, id: uid("p") };
+      const propertyId = uid("p");
+      const assetId = uid("asset");
+      const row: Property = { ...p, id: propertyId, assetId };
       void upsertRow(TABLES.properties, row as unknown as Record<string, unknown>);
-      set((s) => ({ ...s, properties: [...s.properties, row] }));
+      // Every property gets a mirrored row in the generic assets register — `properties` stays
+      // the source of truth for its own fields, this mirror is just what makes Property show up
+      // in the cross-asset-type Assets/Transactions/Bills/Loans views alongside Gold/ETF.
+      const assetRow: Asset = {
+        id: assetId,
+        assetType: "Property",
+        name: row.alias || row.address,
+        purchaseDate: row.purchaseDate,
+        purchaseCost: row.purchasePrice,
+        currentValue: row.currentValue,
+        status: "Active",
+        linkedPropertyId: propertyId,
+      };
+      void upsertRow(TABLES.assets, assetRow as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, properties: [...s.properties, row], assets: [...s.assets, assetRow] }));
     },
     updateProperty: (id, p) => {
       void updateRow(TABLES.properties, id, p as Record<string, unknown>);
-      set((s) => ({ ...s, properties: s.properties.map((x) => (x.id === id ? { ...x, ...p } : x)) }));
+      set((s) => {
+        const existing = s.properties.find((x) => x.id === id);
+        const properties = s.properties.map((x) => (x.id === id ? { ...x, ...p } : x));
+        let assets = s.assets;
+        const touchesMirroredFields =
+          p.alias !== undefined ||
+          p.address !== undefined ||
+          p.purchaseDate !== undefined ||
+          p.purchasePrice !== undefined ||
+          p.currentValue !== undefined;
+        if (existing?.assetId && touchesMirroredFields) {
+          const updated = { ...existing, ...p };
+          const assetPatch: Partial<Asset> = {
+            name: updated.alias || updated.address,
+            purchaseDate: updated.purchaseDate,
+            purchaseCost: updated.purchasePrice,
+            currentValue: updated.currentValue,
+          };
+          void updateRow(TABLES.assets, existing.assetId, assetPatch as Record<string, unknown>);
+          assets = s.assets.map((a) => (a.id === existing.assetId ? { ...a, ...assetPatch } : a));
+        }
+        return { ...s, properties, assets };
+      });
     },
     deleteProperty: (id) => {
       const tenantIds = state.tenants.filter((t) => t.propertyId === id).map((t) => t.id);
+      const assetId = state.properties.find((x) => x.id === id)?.assetId;
       void deleteRow(TABLES.properties, id);
+      if (assetId) void deleteRow(TABLES.assets, assetId);
       void deleteWhere(TABLES.tenants, "propertyId", id);
       void deleteWhere(TABLES.loans, "propertyId", id);
       void deleteWhere(TABLES.expenses, "propertyId", id);
@@ -284,6 +352,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({
         ...s,
         properties: s.properties.filter((x) => x.id !== id),
+        assets: s.assets.filter((a) => a.id !== assetId),
         tenants: s.tenants.filter((t) => t.propertyId !== id),
         loans: s.loans.filter((l) => l.propertyId !== id),
         expenses: s.expenses.filter((e) => e.propertyId !== id),
@@ -589,6 +658,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...s,
         entities: s.entities.filter((e) => e.id !== id),
         properties: s.properties.map((p) => (p.entityId === id ? { ...p, entityId: undefined } : p)),
+      }));
+    },
+
+    addAsset: (a, details) => {
+      const row: Asset = { ...a, id: uid("asset") };
+      void upsertRow(TABLES.assets, row as unknown as Record<string, unknown>);
+      let goldRow: GoldDetails | undefined;
+      let etfRow: EtfDetails | undefined;
+      if (details?.goldDetails) {
+        goldRow = { ...details.goldDetails, assetId: row.id };
+        void upsertRow(TABLES.goldDetails, goldRow as unknown as Record<string, unknown>);
+      }
+      if (details?.etfDetails) {
+        etfRow = { ...details.etfDetails, assetId: row.id };
+        void upsertRow(TABLES.etfDetails, etfRow as unknown as Record<string, unknown>);
+      }
+      set((s) => ({
+        ...s,
+        assets: [...s.assets, row],
+        goldDetails: goldRow ? [...s.goldDetails, goldRow] : s.goldDetails,
+        etfDetails: etfRow ? [...s.etfDetails, etfRow] : s.etfDetails,
+      }));
+    },
+    updateAsset: (id, patch, details) => {
+      void updateRow(TABLES.assets, id, patch as Record<string, unknown>);
+      if (details?.goldDetails) {
+        void upsertRow(TABLES.goldDetails, { assetId: id, ...details.goldDetails } as unknown as Record<string, unknown>);
+      }
+      if (details?.etfDetails) {
+        void upsertRow(TABLES.etfDetails, { assetId: id, ...details.etfDetails } as unknown as Record<string, unknown>);
+      }
+      set((s) => ({
+        ...s,
+        assets: s.assets.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+        goldDetails: details?.goldDetails
+          ? s.goldDetails.some((g) => g.assetId === id)
+            ? s.goldDetails.map((g) => (g.assetId === id ? { ...g, ...details.goldDetails } : g))
+            : [...s.goldDetails, { assetId: id, ...details.goldDetails } as GoldDetails]
+          : s.goldDetails,
+        etfDetails: details?.etfDetails
+          ? s.etfDetails.some((e) => e.assetId === id)
+            ? s.etfDetails.map((e) => (e.assetId === id ? { ...e, ...details.etfDetails } : e))
+            : [...s.etfDetails, { assetId: id, ...details.etfDetails } as EtfDetails]
+          : s.etfDetails,
+      }));
+    },
+    deleteAsset: (id) => {
+      void deleteRow(TABLES.assets, id);
+      set((s) => ({
+        ...s,
+        assets: s.assets.filter((a) => a.id !== id),
+        goldDetails: s.goldDetails.filter((g) => g.assetId !== id),
+        etfDetails: s.etfDetails.filter((e) => e.assetId !== id),
       }));
     },
 

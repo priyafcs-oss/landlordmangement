@@ -65,6 +65,8 @@ export interface Property {
   /** Ownership structure this property is held under (individual/joint/trust/SMSF/company). */
   entityId?: string;
   occupancyType?: "Investment" | "PPOR";
+  /** Mirror row in the generic `assets` register — kept in sync by the store, not a separate source of truth. */
+  assetId?: string;
 }
 
 export interface Tenant {
@@ -158,6 +160,10 @@ export interface Loan {
   isDirectDebit?: boolean;
   linkedBankAccount?: string;
   status?: "Active" | "Paid Off" | "In Arrears";
+  /** Cash sitting in an offset account against this loan — reduces the interest it accrues. */
+  offsetBalance?: number;
+  /** Which Asset this loan is secured against/funds — mirrors propertyId, set for every asset type. */
+  assetId?: string;
 }
 
 export interface Expense {
@@ -166,6 +172,12 @@ export interface Expense {
   cost: number;
   date: string;
   propertyId?: string;
+  /** Which Asset this transaction belongs to — set for every asset type, propertyId only for Property. */
+  assetId?: string;
+  /** Unset means "Expense" — every historical row is an outgoing. Only Income exists for
+   * non-property assets (a gold sale, an ETF dividend) where cost alone can't say which way
+   * the money moved; Property expenses never set this. */
+  direction?: "Income" | "Expense";
   taxCategory: "Immediate Deduction" | "Capital Works";
   invoiceFileName?: string;
   invoiceFileData?: string;
@@ -299,6 +311,52 @@ export interface Entity {
   notes?: string;
 }
 
+/**
+ * Every current asset type. Property is the only one with its own full screen set (see
+ * PropertyDrawer in portfolio.tsx) — Gold and ETF get the generic Overview/Transactions/
+ * Bills/Documents/Notes tabs on the Assets page. Adding a new type later is one more union
+ * member plus one small `*_details` extension table — nothing here or in Transactions/Bills/
+ * Loans/Documents needs to change.
+ */
+export type AssetType = "Property" | "Gold" | "ETF";
+
+/**
+ * The generic register every asset — of any type — has a row in. For Property, this is a
+ * lightweight mirror kept in sync by the store's addProperty/updateProperty/deleteProperty
+ * actions; `properties` stays the source of truth for property-specific fields. For Gold/ETF,
+ * this row IS the source of truth, alongside its `*_details` extension row.
+ */
+export interface Asset {
+  id: string;
+  assetType: AssetType;
+  name: string;
+  ownerEntityId?: string;
+  purchaseDate?: string;
+  purchaseCost?: number;
+  currentValue: number;
+  valuationDate?: string;
+  status: "Active" | "Archived" | "Sold";
+  tags?: string[];
+  notes?: string;
+  /** Set only when assetType === "Property" — back-reference to the properties row this mirrors. */
+  linkedPropertyId?: string;
+}
+
+export interface GoldDetails {
+  assetId: string;
+  form?: "Bar" | "Coin" | "Other";
+  gramsHeld?: number;
+  storageLocation?: string;
+}
+
+export interface EtfDetails {
+  assetId: string;
+  ticker?: string;
+  exchange?: string;
+  unitsHeld?: number;
+  avgCostPerUnit?: number;
+}
+
 export interface AiConfig {
   enabled: boolean;
   dailyCount: number;
@@ -365,7 +423,9 @@ export type BillType =
 
 export interface PropertyBill {
   id: string;
-  propertyId: string;
+  propertyId?: string;
+  /** Which Asset this bill belongs to — set for every asset type, propertyId only for Property. */
+  assetId?: string;
   billType: BillType;
   amount: number;
   dueDate: string;
@@ -436,6 +496,9 @@ export interface AppState {
   tenants: Tenant[];
   providers: Provider[];
   entities: Entity[];
+  assets: Asset[];
+  goldDetails: GoldDetails[];
+  etfDetails: EtfDetails[];
   ledger: LedgerEntry[];
   invoices: TenantInvoice[];
   loans: Loan[];
