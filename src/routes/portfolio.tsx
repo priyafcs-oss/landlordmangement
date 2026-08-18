@@ -2765,7 +2765,7 @@ function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
  * lease-history — a single-click browser confirm() was too easy to fire by accident given how
  * much data disappears. Requires typing the tenant's exact name before the button unlocks.
  */
-export function DeleteTenantDialog({ tenant }: { tenant: Tenant }) {
+export function DeleteTenantDialog({ tenant, trigger }: { tenant: Tenant; trigger?: React.ReactNode }) {
   const { state, deleteTenant } = useStore();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -2786,9 +2786,11 @@ export function DeleteTenantDialog({ tenant }: { tenant: Tenant }) {
       }}
     >
       <DialogTrigger asChild>
-        <Button size="icon" variant="ghost" title="Delete tenant">
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" title="Delete tenant">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

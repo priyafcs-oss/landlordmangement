@@ -197,6 +197,7 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
   const { state, convertToPeriodic } = useStore();
   const [noticeOpen, setNoticeOpen] = useState<null | TemplateKey>(null);
   const [showHist, setShowHist] = useState(false);
+  const [showActions, setShowActions] = useState(false);
   const propertyAddress = property?.address;
   const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
   const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
@@ -217,11 +218,18 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
           <div className="flex items-center gap-1">
             <span className="mr-1 text-xs font-normal text-muted-foreground">{propertyAddress}</span>
             <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
-              <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit tenant">
-                <Pencil className="h-3.5 w-3.5" />
+              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs">
+                <Pencil className="h-3.5 w-3.5" /> Edit tenant
               </Button>
             </TenantDialog>
-            <DeleteTenantDialog tenant={tenant} />
+            <DeleteTenantDialog
+              tenant={tenant}
+              trigger={
+                <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs text-destructive">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete tenant
+                </Button>
+              }
+            />
           </div>
         </CardTitle>
       </CardHeader>
@@ -296,59 +304,74 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
         )}
 
         <div>
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Tenancy actions
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {property && (
-              <LeaseAgreementWizard property={property} tenant={tenant}>
-                <Button size="sm" variant="outline" className="gap-1">
-                  <FileSignature className="h-3.5 w-3.5" /> Tenancy Agreement
-                </Button>
-              </LeaseAgreementWizard>
-            )}
-            <IncreaseRentDialog
-              tenant={tenant}
-              trigger={
-                <Button size="sm" variant="outline" className="gap-1">
-                  <TrendingUp className="h-3.5 w-3.5" /> Change Rent
-                </Button>
-              }
-            />
-            <RenewLeaseDialog
-              tenant={tenant}
-              trigger={
-                <Button size="sm" variant="outline" className="gap-1">
-                  <RefreshCw className="h-3.5 w-3.5" /> Renew Lease
-                </Button>
-              }
-            />
-          </div>
-        </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={() => setShowActions((v) => !v)}
+          >
+            <SlidersHorizontal className="h-3 w-3" /> {showActions ? "Hide" : "Manage tenancy"}{" "}
+            {showActions ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </Button>
+          {showActions && (
+            <div className="mt-2 space-y-3">
+              <div>
+                <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Tenancy actions
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {property && (
+                    <LeaseAgreementWizard property={property} tenant={tenant}>
+                      <Button size="sm" variant="outline" className="gap-1">
+                        <FileSignature className="h-3.5 w-3.5" /> Tenancy Agreement
+                      </Button>
+                    </LeaseAgreementWizard>
+                  )}
+                  <IncreaseRentDialog
+                    tenant={tenant}
+                    trigger={
+                      <Button size="sm" variant="outline" className="gap-1">
+                        <TrendingUp className="h-3.5 w-3.5" /> Change Rent
+                      </Button>
+                    }
+                  />
+                  <RenewLeaseDialog
+                    tenant={tenant}
+                    trigger={
+                      <Button size="sm" variant="outline" className="gap-1">
+                        <RefreshCw className="h-3.5 w-3.5" /> Renew Lease
+                      </Button>
+                    }
+                  />
+                </div>
+              </div>
 
-        <div>
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Notices &amp; letters
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => setNoticeOpen("renewal")}
-            >
-              <FileSignature className="h-3.5 w-3.5" /> Send Lease Renewal Offer
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => setNoticeOpen("arrears")}
-            >
-              <Mail className="h-3.5 w-3.5" /> Generate Arrears Notice
-            </Button>
-            <RentIncreaseLetterButton tenant={tenant} propertyAddress={propertyAddress} />
-          </div>
+              <div>
+                <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Notices &amp; letters
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => setNoticeOpen("renewal")}
+                  >
+                    <FileSignature className="h-3.5 w-3.5" /> Send Lease Renewal Offer
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    onClick={() => setNoticeOpen("arrears")}
+                  >
+                    <Mail className="h-3.5 w-3.5" /> Generate Arrears Notice
+                  </Button>
+                  <RentIncreaseLetterButton tenant={tenant} propertyAddress={propertyAddress} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {(history.length > 0 || rentChanges.length > 0) && (
@@ -650,20 +673,6 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
             <Badge variant={total > 0 ? "destructive" : "secondary"}>
               {total > 0 ? `Owes ${fmtCurrency(total)}` : "Up to date"}
             </Badge>
-            <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
-              <Button size="sm" variant="outline">
-                Edit Tenant Details
-              </Button>
-            </TenantDialog>
-            <IncreaseRentDialog
-              tenant={tenant}
-              trigger={
-                <Button size="sm" variant="outline" className="gap-1">
-                  <TrendingUp className="h-3.5 w-3.5" /> Change Rent
-                </Button>
-              }
-            />
-            <AdjustmentDialog tenant={tenant} />
             <LedgerExportButtons
               tenant={tenant}
               propertyAddress={propertyAddress}
@@ -709,6 +718,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
             />
           </div>
           <Button onClick={postPayment}>Post Payment</Button>
+          <AdjustmentDialog tenant={tenant} />
         </div>
 
         <div className="flex flex-wrap items-end gap-2">
