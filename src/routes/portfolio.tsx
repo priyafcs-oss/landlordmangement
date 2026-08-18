@@ -1484,26 +1484,17 @@ function PropertyDrawer({
                 </div>
               )}
 
-              <div>
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-medium">Tenants</div>
-                  <div className="flex gap-2">
-                    <LeaseAgreementWizard property={prop}>
-                      <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
-                        <FileSignature className="h-3 w-3" /> Create Tenancy Agreement
-                      </Button>
-                    </LeaseAgreementWizard>
-                    <TenantDialog propertyId={prop.id}>
-                      <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
-                        <Plus className="h-3 w-3" /> Add
-                      </Button>
-                    </TenantDialog>
-                  </div>
-                </div>
-                {tenants.length === 0 && <div className="text-muted-foreground">No tenants linked.</div>}
-                {tenants.map((t) => (
-                  <TenantRow key={t.id} tenant={t} />
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-dashed p-3 text-xs">
+                <span className="text-muted-foreground">
+                  {tenants.length === 0
+                    ? "No tenants linked."
+                    : `${tenants.length} tenant${tenants.length === 1 ? "" : "s"} — leases, rent changes and tenancy actions live in Rental Hub now.`}
+                </span>
+                <Button asChild size="sm" variant="outline" className="h-7 gap-1 text-xs">
+                  <Link to="/rental">
+                    Open in Rental Hub <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </Button>
               </div>
 
               <div>
@@ -1598,7 +1589,7 @@ function YesNoSelect({
  * invents legal wording. Works both for a brand-new tenant (no `tenant` prop) and for adding
  * agreement details to an existing one (`tenant` provided, pre-fills and skips re-asking).
  */
-function LeaseAgreementWizard({
+export function LeaseAgreementWizard({
   property,
   tenant,
   children,
@@ -2449,132 +2440,8 @@ function PropertyBillsTab({ propertyId }: { propertyId: string }) {
 
 
 
-function TenantRow({ tenant }: { tenant: Tenant }) {
-  const { state, convertToPeriodic } = useStore();
-  const property = state.properties.find((p) => p.id === tenant.propertyId);
-  const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
-  const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
-  const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
-  const [showHist, setShowHist] = useState(false);
-  const isExpiredFixedTerm =
-    !!tenant.leaseExpiry && tenant.leaseExpiry < todayISO() && tenant.leaseDuration !== "Periodic";
 
-  return (
-    <div className="mb-2 rounded border p-3">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="font-medium">{tenant.name}</div>
-          <div className="text-xs text-muted-foreground">
-            {tenant.leaseStart || "—"} → {tenant.leaseExpiry || "Periodic"} •{" "}
-            {fmtCurrency(tenant.rentAmount)}/{tenant.rentFrequency}
-          </div>
-          {latestRentChange && (
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (
-              {latestRentChange.newRent > latestRentChange.oldRent ? "increased" : "decreased"}{" "}
-              {latestRentChange.changeDate})
-            </div>
-          )}
-          <div className="mt-2 flex flex-wrap gap-1">
-            {tenant.bondAmount ? (
-              <Badge variant="secondary" className="gap-1">
-                <ShieldCheck className="h-3 w-3" /> Bond Secured — {fmtCurrency(tenant.bondAmount)}
-              </Badge>
-            ) : null}
-            {tenant.leaseDocumentFileName && tenant.leaseDocumentFileData && (
-              <a href={tenant.leaseDocumentFileData} download={tenant.leaseDocumentFileName}>
-                <Badge variant="outline" className="gap-1">
-                  <FileText className="h-3 w-3" /> Lease PDF
-                </Badge>
-              </a>
-            )}
-            {tenant.idProofFileName && tenant.idProofFileData && (
-              <a href={tenant.idProofFileData} download={tenant.idProofFileName}>
-                <Badge variant="outline" className="gap-1">
-                  <IdCard className="h-3 w-3" /> ID Proof
-                </Badge>
-              </a>
-            )}
-            {tenant.bondTransferFileName && tenant.bondTransferFileData && (
-              <a href={tenant.bondTransferFileData} download={tenant.bondTransferFileName}>
-                <Badge variant="outline" className="gap-1">
-                  <FileText className="h-3 w-3" /> Bond Transfer
-                </Badge>
-              </a>
-            )}
-            {!tenant.leaseExpiry && <Badge variant="outline">Periodic</Badge>}
-          </div>
-        </div>
-        <div className="flex gap-1">
-          {property && (
-            <LeaseAgreementWizard property={property} tenant={tenant}>
-              <Button size="icon" variant="ghost" title="Generate tenancy agreement">
-                <FileSignature className="h-4 w-4" />
-              </Button>
-            </LeaseAgreementWizard>
-          )}
-          <IncreaseRentDialog tenant={tenant} />
-          <RenewLeaseDialog tenant={tenant} />
-          <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
-            <Button size="icon" variant="ghost">
-              <Pencil className="h-4 w-4" />
-            </Button>
-          </TenantDialog>
-          <DeleteTenantDialog tenant={tenant} />
-        </div>
-      </div>
-      {isExpiredFixedTerm && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
-          <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-          <span>Fixed-term lease ended {tenant.leaseExpiry}.</span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 px-2 text-xs"
-            onClick={() => {
-              if (
-                confirm(
-                  `Continue ${tenant.name} on a periodic (rolling) tenancy at the same rent? The fixed term will be archived to lease history — you can still renew into a new fixed term later.`,
-                )
-              ) {
-                convertToPeriodic(tenant.id);
-                toast.success("Converted to periodic tenancy. Fixed-term lease archived to history.");
-              }
-            }}
-          >
-            Convert to Periodic
-          </Button>
-          <span className="text-muted-foreground">or use Renew Lease above for a new fixed term.</span>
-        </div>
-      )}
-      {(history.length > 0 || rentChanges.length > 0) && (
-        <div className="mt-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-xs"
-            onClick={() => setShowHist((v) => !v)}
-          >
-            <History className="h-3 w-3" /> {showHist ? "Hide" : "Show"} lease &amp; rent history (
-            {history.length + rentChanges.length})
-          </Button>
-          {showHist && (
-            <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
-              {history.map((h) => (
-                <LeaseHistoryRow key={h.id} entry={h} />
-              ))}
-              {rentChanges.map((r) => (
-                <RentChangeRow key={r.id} entry={r} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RentChangeRow({ entry }: { entry: RentChange }) {
+export function RentChangeRow({ entry }: { entry: RentChange }) {
   const { updateRentChange, deleteRentChange } = useStore();
   const [editing, setEditing] = useState(false);
   const [changeDate, setChangeDate] = useState(entry.changeDate);
@@ -2647,7 +2514,7 @@ function RentChangeRow({ entry }: { entry: RentChange }) {
   );
 }
 
-function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
+export function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
   const { updateLeaseHistory, deleteLeaseHistory } = useStore();
   const [editing, setEditing] = useState(false);
   const [pastStartDate, setPastStartDate] = useState(entry.pastStartDate);
@@ -2898,7 +2765,7 @@ function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
  * lease-history — a single-click browser confirm() was too easy to fire by accident given how
  * much data disappears. Requires typing the tenant's exact name before the button unlocks.
  */
-function DeleteTenantDialog({ tenant }: { tenant: Tenant }) {
+export function DeleteTenantDialog({ tenant }: { tenant: Tenant }) {
   const { state, deleteTenant } = useStore();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -3053,7 +2920,7 @@ export function IncreaseRentDialog({ tenant, trigger }: { tenant: Tenant; trigge
   );
 }
 
-function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
+export function RenewLeaseDialog({ tenant, trigger }: { tenant: Tenant; trigger?: React.ReactNode }) {
   const { renewLease } = useStore();
   const [open, setOpen] = useState(false);
   const today = new Date().toISOString().slice(0, 10);
@@ -3087,9 +2954,11 @@ function RenewLeaseDialog({ tenant }: { tenant: Tenant }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="icon" variant="ghost" title="Renew lease">
-          <RefreshCw className="h-4 w-4" />
-        </Button>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" title="Renew lease">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

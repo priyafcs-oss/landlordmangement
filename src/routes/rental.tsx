@@ -40,6 +40,13 @@ import {
   TrendingUp,
   ChevronDown,
   ChevronUp,
+  History,
+  RefreshCw,
+  IdCard,
+  ShieldCheck,
+  FileText,
+  TriangleAlert,
+  Pencil,
 } from "lucide-react";
 import {
   buildTenantLedger,
@@ -53,7 +60,7 @@ import {
   fyRange,
   type LedgerRow,
 } from "@/lib/calculations";
-import type { Tenant } from "@/lib/types";
+import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
 import jsPDF from "jspdf";
@@ -61,7 +68,15 @@ import { downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
 import { supabase } from "@/integrations/supabase/client";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
-import { TenantDialog, IncreaseRentDialog } from "./portfolio";
+import {
+  TenantDialog,
+  IncreaseRentDialog,
+  RenewLeaseDialog,
+  DeleteTenantDialog,
+  LeaseAgreementWizard,
+  RentChangeRow,
+  LeaseHistoryRow,
+} from "./portfolio";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 
 export const Route = createFileRoute("/rental")({
@@ -121,6 +136,13 @@ function RentalHubPage() {
               ))}
             </SelectContent>
           </Select>
+          {property && (
+            <LeaseAgreementWizard property={property}>
+              <Button size="sm" variant="outline" className="gap-1">
+                <FileSignature className="h-4 w-4" /> Create Tenancy Agreement
+              </Button>
+            </LeaseAgreementWizard>
+          )}
           {propertyId && (
             <TenantDialog propertyId={propertyId}>
               <Button size="sm" className="gap-1">
@@ -163,7 +185,7 @@ function RentalHubPage() {
 
       {visibleTenants.map((t) => (
         <div key={t.id} className="space-y-4">
-          <TenantSummaryCard tenant={t} propertyAddress={property?.address} />
+          <TenantSummaryCard tenant={t} property={property} />
           <TenantLedgerCard tenant={t} />
         </div>
       ))}
@@ -171,8 +193,16 @@ function RentalHubPage() {
   );
 }
 
-function TenantSummaryCard({ tenant, propertyAddress }: { tenant: Tenant; propertyAddress?: string }) {
+function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Property }) {
+  const { state, convertToPeriodic } = useStore();
   const [noticeOpen, setNoticeOpen] = useState<null | TemplateKey>(null);
+  const [showHist, setShowHist] = useState(false);
+  const propertyAddress = property?.address;
+  const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
+  const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
+  const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
+  const isExpiredFixedTerm =
+    !!tenant.leaseExpiry && tenant.leaseExpiry < todayISO() && tenant.leaseDuration !== "Periodic";
   const nextIncreaseDue = (() => {
     const base = tenant.lastRentIncreaseDate ?? tenant.leaseStart;
     if (!base) return null;
@@ -184,7 +214,15 @@ function TenantSummaryCard({ tenant, propertyAddress }: { tenant: Tenant; proper
       <CardHeader>
         <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
           <span>{tenant.name}</span>
-          <span className="text-xs font-normal text-muted-foreground">{propertyAddress}</span>
+          <div className="flex items-center gap-1">
+            <span className="mr-1 text-xs font-normal text-muted-foreground">{propertyAddress}</span>
+            <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
+              <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit tenant">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            </TenantDialog>
+            <DeleteTenantDialog tenant={tenant} />
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -194,25 +232,149 @@ function TenantSummaryCard({ tenant, propertyAddress }: { tenant: Tenant; proper
           <Stat label="Last rent increase" value={tenant.lastRentIncreaseDate || "—"} />
           <Stat label="Next increase eligible" value={nextIncreaseDue || "—"} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1"
-            onClick={() => setNoticeOpen("renewal")}
-          >
-            <FileSignature className="h-3.5 w-3.5" /> Send Lease Renewal Offer
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1"
-            onClick={() => setNoticeOpen("arrears")}
-          >
-            <Mail className="h-3.5 w-3.5" /> Generate Arrears Notice
-          </Button>
-          <RentIncreaseLetterButton tenant={tenant} propertyAddress={propertyAddress} />
+
+        <div className="flex flex-wrap items-center gap-1">
+          {tenant.bondAmount ? (
+            <Badge variant="secondary" className="gap-1">
+              <ShieldCheck className="h-3 w-3" /> Bond Secured — {fmtCurrency(tenant.bondAmount)}
+            </Badge>
+          ) : null}
+          {tenant.leaseDocumentFileName && tenant.leaseDocumentFileData && (
+            <a href={tenant.leaseDocumentFileData} download={tenant.leaseDocumentFileName}>
+              <Badge variant="outline" className="gap-1">
+                <FileText className="h-3 w-3" /> Lease PDF
+              </Badge>
+            </a>
+          )}
+          {tenant.idProofFileName && tenant.idProofFileData && (
+            <a href={tenant.idProofFileData} download={tenant.idProofFileName}>
+              <Badge variant="outline" className="gap-1">
+                <IdCard className="h-3 w-3" /> ID Proof
+              </Badge>
+            </a>
+          )}
+          {tenant.bondTransferFileName && tenant.bondTransferFileData && (
+            <a href={tenant.bondTransferFileData} download={tenant.bondTransferFileName}>
+              <Badge variant="outline" className="gap-1">
+                <FileText className="h-3 w-3" /> Bond Transfer
+              </Badge>
+            </a>
+          )}
+          {!tenant.leaseExpiry && <Badge variant="outline">Periodic</Badge>}
+          {latestRentChange && (
+            <span className="text-xs text-muted-foreground">
+              Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (
+              {latestRentChange.newRent > latestRentChange.oldRent ? "increased" : "decreased"}{" "}
+              {latestRentChange.changeDate})
+            </span>
+          )}
         </div>
+
+        {isExpiredFixedTerm && (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <span>Fixed-term lease ended {tenant.leaseExpiry}.</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              onClick={() => {
+                if (
+                  confirm(
+                    `Continue ${tenant.name} on a periodic (rolling) tenancy at the same rent? The fixed term will be archived to lease history — you can still renew into a new fixed term later.`,
+                  )
+                ) {
+                  convertToPeriodic(tenant.id);
+                  toast.success("Converted to periodic tenancy. Fixed-term lease archived to history.");
+                }
+              }}
+            >
+              Convert to Periodic
+            </Button>
+            <span className="text-muted-foreground">or renew into a new fixed term below.</span>
+          </div>
+        )}
+
+        <div>
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Tenancy actions
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {property && (
+              <LeaseAgreementWizard property={property} tenant={tenant}>
+                <Button size="sm" variant="outline" className="gap-1">
+                  <FileSignature className="h-3.5 w-3.5" /> Tenancy Agreement
+                </Button>
+              </LeaseAgreementWizard>
+            )}
+            <IncreaseRentDialog
+              tenant={tenant}
+              trigger={
+                <Button size="sm" variant="outline" className="gap-1">
+                  <TrendingUp className="h-3.5 w-3.5" /> Change Rent
+                </Button>
+              }
+            />
+            <RenewLeaseDialog
+              tenant={tenant}
+              trigger={
+                <Button size="sm" variant="outline" className="gap-1">
+                  <RefreshCw className="h-3.5 w-3.5" /> Renew Lease
+                </Button>
+              }
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Notices &amp; letters
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              onClick={() => setNoticeOpen("renewal")}
+            >
+              <FileSignature className="h-3.5 w-3.5" /> Send Lease Renewal Offer
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1"
+              onClick={() => setNoticeOpen("arrears")}
+            >
+              <Mail className="h-3.5 w-3.5" /> Generate Arrears Notice
+            </Button>
+            <RentIncreaseLetterButton tenant={tenant} propertyAddress={propertyAddress} />
+          </div>
+        </div>
+
+        {(history.length > 0 || rentChanges.length > 0) && (
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+              onClick={() => setShowHist((v) => !v)}
+            >
+              <History className="h-3 w-3" /> {showHist ? "Hide" : "Show"} lease &amp; rent history (
+              {history.length + rentChanges.length})
+            </Button>
+            {showHist && (
+              <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
+                {history.map((h) => (
+                  <LeaseHistoryRow key={h.id} entry={h} />
+                ))}
+                {rentChanges.map((r) => (
+                  <RentChangeRow key={r.id} entry={r} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <Dialog open={!!noticeOpen} onOpenChange={(o) => !o && setNoticeOpen(null)}>
           {noticeOpen && (
             <TemplateModal
