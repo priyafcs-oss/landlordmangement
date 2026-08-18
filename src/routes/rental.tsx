@@ -204,79 +204,61 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
   const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
   const isExpiredFixedTerm =
     !!tenant.leaseExpiry && tenant.leaseExpiry < todayISO() && tenant.leaseDuration !== "Periodic";
-  const nextIncreaseDue = (() => {
-    const base = tenant.lastRentIncreaseDate ?? tenant.leaseStart;
-    if (!base) return null;
-    return addMonths(base, 12);
-  })();
+  const hasLeaseDoc = tenant.leaseDocumentFileName && tenant.leaseDocumentFileData;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
+        <CardTitle className="text-base flex flex-wrap items-center gap-2">
           <span>{tenant.name}</span>
-          <div className="flex items-center gap-1">
-            <span className="mr-1 text-xs font-normal text-muted-foreground">{propertyAddress}</span>
-            <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
-              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs">
-                <Pencil className="h-3.5 w-3.5" /> Edit tenant
-              </Button>
-            </TenantDialog>
-            <DeleteTenantDialog
-              tenant={tenant}
-              trigger={
-                <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs text-destructive">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete tenant
-                </Button>
-              }
-            />
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-4">
-          <Stat label="Lease start" value={tenant.leaseStart || "—"} />
-          <Stat label="Lease end" value={tenant.leaseExpiry || "Periodic"} />
-          <Stat label="Last rent increase" value={tenant.lastRentIncreaseDate || "—"} />
-          <Stat label="Next increase eligible" value={nextIncreaseDue || "—"} />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1">
           {tenant.bondAmount ? (
-            <Badge variant="secondary" className="gap-1">
+            <Badge variant="secondary" className="gap-1 font-normal">
               <ShieldCheck className="h-3 w-3" /> Bond Secured — {fmtCurrency(tenant.bondAmount)}
             </Badge>
           ) : null}
-          {tenant.leaseDocumentFileName && tenant.leaseDocumentFileData && (
-            <a href={tenant.leaseDocumentFileData} download={tenant.leaseDocumentFileName}>
-              <Badge variant="outline" className="gap-1">
-                <FileText className="h-3 w-3" /> Lease PDF
-              </Badge>
-            </a>
-          )}
-          {tenant.idProofFileName && tenant.idProofFileData && (
-            <a href={tenant.idProofFileData} download={tenant.idProofFileName}>
-              <Badge variant="outline" className="gap-1">
-                <IdCard className="h-3 w-3" /> ID Proof
-              </Badge>
-            </a>
-          )}
-          {tenant.bondTransferFileName && tenant.bondTransferFileData && (
-            <a href={tenant.bondTransferFileData} download={tenant.bondTransferFileName}>
-              <Badge variant="outline" className="gap-1">
-                <FileText className="h-3 w-3" /> Bond Transfer
-              </Badge>
-            </a>
-          )}
-          {!tenant.leaseExpiry && <Badge variant="outline">Periodic</Badge>}
-          {latestRentChange && (
-            <span className="text-xs text-muted-foreground">
-              Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (
-              {latestRentChange.newRent > latestRentChange.oldRent ? "increased" : "decreased"}{" "}
-              {latestRentChange.changeDate})
-            </span>
-          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div>
+            <div className="text-muted-foreground">Lease start</div>
+            <div className="mt-0.5 font-medium">{tenant.leaseStart || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Lease end</div>
+            <div className="mt-0.5 font-medium">{tenant.leaseExpiry || "Periodic"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Last rent increase</div>
+            <div className="mt-0.5 font-medium">{tenant.lastRentIncreaseDate || "—"}</div>
+          </div>
         </div>
+
+        {(tenant.idProofFileName || tenant.bondTransferFileName || latestRentChange) && (
+          <div className="flex flex-wrap items-center gap-1">
+            {tenant.idProofFileName && tenant.idProofFileData && (
+              <a href={tenant.idProofFileData} download={tenant.idProofFileName}>
+                <Badge variant="outline" className="gap-1">
+                  <IdCard className="h-3 w-3" /> ID Proof
+                </Badge>
+              </a>
+            )}
+            {tenant.bondTransferFileName && tenant.bondTransferFileData && (
+              <a href={tenant.bondTransferFileData} download={tenant.bondTransferFileName}>
+                <Badge variant="outline" className="gap-1">
+                  <FileText className="h-3 w-3" /> Bond Transfer
+                </Badge>
+              </a>
+            )}
+            {latestRentChange && (
+              <span className="text-xs text-muted-foreground">
+                Previously {fmtCurrency(latestRentChange.oldRent)}/{tenant.rentFrequency} (
+                {latestRentChange.newRent > latestRentChange.oldRent ? "increased" : "decreased"}{" "}
+                {latestRentChange.changeDate})
+              </span>
+            )}
+          </div>
+        )}
 
         {isExpiredFixedTerm && (
           <div className="flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
@@ -315,6 +297,34 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
           </Button>
           {showActions && (
             <div className="mt-2 space-y-3">
+              <div>
+                <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Tenant record
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
+                    <Button size="sm" variant="outline" className="gap-1">
+                      <Pencil className="h-3.5 w-3.5" /> Edit tenant
+                    </Button>
+                  </TenantDialog>
+                  <DeleteTenantDialog
+                    tenant={tenant}
+                    trigger={
+                      <Button size="sm" variant="outline" className="gap-1 text-destructive">
+                        <Trash2 className="h-3.5 w-3.5" /> Delete tenant
+                      </Button>
+                    }
+                  />
+                  {hasLeaseDoc && (
+                    <a href={tenant.leaseDocumentFileData} download={tenant.leaseDocumentFileName}>
+                      <Badge variant="outline" className="gap-1">
+                        <FileText className="h-3 w-3" /> Lease PDF
+                      </Badge>
+                    </a>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Tenancy actions
@@ -370,33 +380,36 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
                   <RentIncreaseLetterButton tenant={tenant} propertyAddress={propertyAddress} />
                 </div>
               </div>
+
+              {(history.length > 0 || rentChanges.length > 0) && (
+                <div>
+                  <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Lease &amp; rent history
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs"
+                    onClick={() => setShowHist((v) => !v)}
+                  >
+                    <History className="h-3 w-3" /> {showHist ? "Hide" : "Show"} history (
+                    {history.length + rentChanges.length})
+                  </Button>
+                  {showHist && (
+                    <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
+                      {history.map((h) => (
+                        <LeaseHistoryRow key={h.id} entry={h} />
+                      ))}
+                      {rentChanges.map((r) => (
+                        <RentChangeRow key={r.id} entry={r} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
-
-        {(history.length > 0 || rentChanges.length > 0) && (
-          <div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 px-2 text-xs"
-              onClick={() => setShowHist((v) => !v)}
-            >
-              <History className="h-3 w-3" /> {showHist ? "Hide" : "Show"} lease &amp; rent history (
-              {history.length + rentChanges.length})
-            </Button>
-            {showHist && (
-              <div className="mt-2 space-y-1 rounded bg-muted/50 p-2 text-xs">
-                {history.map((h) => (
-                  <LeaseHistoryRow key={h.id} entry={h} />
-                ))}
-                {rentChanges.map((r) => (
-                  <RentChangeRow key={r.id} entry={r} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         <Dialog open={!!noticeOpen} onOpenChange={(o) => !o && setNoticeOpen(null)}>
           {noticeOpen && (
