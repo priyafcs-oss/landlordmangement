@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
@@ -69,6 +69,15 @@ interface ExtractResult {
   confidence?: number;
 }
 
+const IMAGE_EXT_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+function openDataUrl(fileName: string | undefined, base64: string | undefined) {
+  if (!base64) return;
+  const ext = (fileName ?? "").toLowerCase().split(".").pop() ?? "";
+  const mime = IMAGE_EXT_MIME[ext] ?? "application/pdf";
+  window.open(`data:${mime};base64,${base64}`, "_blank");
+}
+
 function mapBillType(category?: string): BillType {
   const exact = BILL_TYPES.find((t) => t.toLowerCase() === (category ?? "").trim().toLowerCase());
   if (exact) return exact;
@@ -95,6 +104,15 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
   const [busy, setBusy] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [extractSummary, setExtractSummary] = useState<{
+    vendor: string;
+    amount: number;
+    dueDate: string;
+    propertyMatched: boolean;
+    instalmentCount: number;
+  } | null>(null);
+  const [extractEmpty, setExtractEmpty] = useState(false);
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? "",
@@ -127,6 +145,8 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
     setInstalments([]);
     setLineItems([{ key: uid("li"), description: "", category: form.billType, amount: "", gst: "" }]);
     setConfidence(null);
+    setExtractSummary(null);
+    setExtractEmpty(false);
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
@@ -135,6 +155,8 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
 
   const extract = async (file: File) => {
     setBusy(true);
+    setExtractSummary(null);
+    setExtractEmpty(false);
     try {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -193,12 +215,32 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         );
       }
       setConfidence(data.confidence ?? null);
-      toast.success("Extracted — review the fields below before saving");
+
+      if (!data.vendor && !data.amount) {
+        setExtractEmpty(true);
+        toast.warning("Couldn't find bill details in this file — the fields below are ready for manual entry");
+      } else {
+        setExtractSummary({
+          vendor: data.vendor ?? "",
+          amount: data.amount ?? 0,
+          dueDate: data.due_date ?? "",
+          propertyMatched: !!matchedProperty,
+          instalmentCount: data.future_instalments?.length ?? 0,
+        });
+        toast.success("Extracted — review the fields below before saving");
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Extraction failed");
     } finally {
       setBusy(false);
     }
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) void extract(f);
   };
 
   const addInstalment = () =>
@@ -305,10 +347,20 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
-          <div className="rounded-md border border-dashed p-3">
-            <div className="flex items-center justify-between gap-2">
+          <div
+            className={
+              "rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
+            }
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs text-muted-foreground">
-                Upload a bill and the fields below get pre-filled — review before saving.
+                {busy ? "Reading document…" : "Drop a bill here, or choose a file — the fields below get pre-filled."}
               </div>
               <div className="flex items-center gap-2">
                 <Input
@@ -325,7 +377,40 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
               </div>
             </div>
             {form.sourceFileName && (
-              <div className="mt-1 text-xs text-muted-foreground">Attached: {form.sourceFileName}</div>
+              <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
+                <span className="text-xs">Attached: {form.sourceFileName}</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 gap-1 text-xs"
+                  onClick={() => openDataUrl(form.sourceFileName, form.sourceFileData)}
+                >
+                  <Eye className="h-3 w-3" /> View
+                </Button>
+              </div>
+            )}
+            {extractSummary && (
+              <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
+                <div className="flex items-center gap-1 font-medium">
+                  <CheckCircle2 className="h-3 w-3" /> Found in this document
+                </div>
+                <div>
+                  {extractSummary.vendor || "Unknown vendor"} — {fmtCurrency(extractSummary.amount)}
+                  {extractSummary.dueDate ? ` due ${extractSummary.dueDate}` : ""}
+                </div>
+                <div className="text-emerald-800">
+                  {extractSummary.propertyMatched ? "Property matched automatically. " : "Couldn't match a property — select one below. "}
+                  {extractSummary.instalmentCount > 0
+                    ? `${extractSummary.instalmentCount} future instalment(s) added.`
+                    : "No future instalments found."}
+                </div>
+              </div>
+            )}
+            {extractEmpty && (
+              <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Couldn't find bill details in this file — the document is still attached, fill in the fields manually.
+              </div>
             )}
             {confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD && (
               <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
