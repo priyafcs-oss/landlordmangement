@@ -1,4 +1,5 @@
 import { buildDocumentParts, callGeminiJSON } from "../parse-inbound-bill/gemini.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 interface ExtractRequest {
   fileBase64?: string;
@@ -58,8 +59,11 @@ function isSupportedAttachment(contentType: string): boolean {
  * statements — this just adds a PDF/photo source into that same matching step.
  */
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   let body: ExtractRequest;
@@ -68,20 +72,20 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
   if (!body.fileBase64 || !body.fileName || !body.mimeType) {
     return new Response(JSON.stringify({ error: "fileBase64, fileName and mimeType are required" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
   if (!isSupportedAttachment(body.mimeType)) {
     return new Response(JSON.stringify({ error: "Only PDF and image files are supported" }), {
       status: 422,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -90,7 +94,7 @@ Deno.serve(async (req) => {
     console.error("[extract-bank-statement] GEMINI_API_KEY is not configured");
     return new Response(JSON.stringify({ error: "Server misconfigured" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -104,13 +108,13 @@ Deno.serve(async (req) => {
     const parsed = await callGeminiJSON<ParsedBankStatement>(apiKey, parts, SCHEMA);
     return new Response(JSON.stringify({ ok: true, transactions: parsed.transactions ?? [] }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("[extract-bank-statement] unhandled error", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Extraction failed" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

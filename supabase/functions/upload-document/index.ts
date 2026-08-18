@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { routeInboundDocument } from "../parse-inbound-bill/router.ts";
 import type { NormalizedBillInput } from "../parse-inbound-bill/types.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 interface UploadRequest {
   fileBase64?: string;
@@ -22,8 +23,11 @@ function isSupportedAttachment(contentType: string): boolean {
  * webhook which has no user session to authenticate.
  */
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   let body: UploadRequest;
@@ -32,20 +36,20 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
   if (!body.fileBase64 || !body.fileName || !body.mimeType) {
     return new Response(JSON.stringify({ error: "fileBase64, fileName and mimeType are required" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
   if (!isSupportedAttachment(body.mimeType)) {
     return new Response(JSON.stringify({ error: "Only PDF and image files are supported" }), {
       status: 422,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -68,18 +72,18 @@ Deno.serve(async (req) => {
       console.error("[upload-document] parse failed", result.error);
       return new Response(JSON.stringify({ error: result.error }), {
         status: 422,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     return new Response(JSON.stringify(result), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("[upload-document] unhandled error", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Internal error" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

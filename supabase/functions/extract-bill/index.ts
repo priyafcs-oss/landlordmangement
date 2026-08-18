@@ -1,4 +1,5 @@
 import { extractBillFields } from "../parse-inbound-bill/core-parser.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 interface ExtractRequest {
   fileBase64?: string;
@@ -17,8 +18,11 @@ function isSupportedAttachment(contentType: string): boolean {
  * database: the landlord reviews/edits the pre-filled form and hits Save themselves.
  */
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
   let body: ExtractRequest;
@@ -27,20 +31,20 @@ Deno.serve(async (req) => {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
   if (!body.fileBase64 || !body.fileName || !body.mimeType) {
     return new Response(JSON.stringify({ error: "fileBase64, fileName and mimeType are required" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
   if (!isSupportedAttachment(body.mimeType)) {
     return new Response(JSON.stringify({ error: "Only PDF and image files are supported" }), {
       status: 422,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -48,7 +52,7 @@ Deno.serve(async (req) => {
     console.error("[extract-bill] GEMINI_API_KEY is not configured");
     return new Response(JSON.stringify({ error: "Server misconfigured" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -62,13 +66,13 @@ Deno.serve(async (req) => {
     });
     return new Response(JSON.stringify({ ok: true, ...parsed }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("[extract-bill] unhandled error", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Extraction failed" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
