@@ -4,6 +4,7 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BillRow } from "@/components/BillRow";
+import { AddBillDialog } from "@/components/AddBillDialog";
 import { Receipt } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { AssetType, BillType } from "@/lib/types";
@@ -54,9 +55,12 @@ function BillsPage() {
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Bills</h1>
-        <p className="text-sm text-muted-foreground">Every bill across the portfolio — nothing slides quietly.</p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Bills</h1>
+          <p className="text-sm text-muted-foreground">Every bill across the portfolio — nothing slides quietly.</p>
+        </div>
+        <AddBillDialog />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

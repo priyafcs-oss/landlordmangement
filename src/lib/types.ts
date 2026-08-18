@@ -348,6 +348,9 @@ export interface Provider {
   abn?: string;
   address?: string;
   notes?: string;
+  portalUrl?: string;
+  portalUsername?: string;
+  passwordNote?: string;
 }
 
 export type EntityType = "Individual" | "Joint" | "Trust" | "SMSF" | "Company";
@@ -477,6 +480,14 @@ export type BillType =
   | "Gas"
   | "Other";
 
+/** One cost line on a bill — e.g. a council notice broken into rates/waste/environment charges. */
+export interface BillLineItem {
+  description: string;
+  category?: string;
+  amount: number;
+  gst?: number;
+}
+
 export interface PropertyBill {
   id: string;
   propertyId?: string;
@@ -487,12 +498,29 @@ export interface PropertyBill {
   dueDate: string;
   status: "Unpaid" | "Paid" | "Overdue";
   paidDate?: string;
+  /** @deprecated portal login now lives on the Provider record — kept for bills saved before that move. */
   portalUrl?: string;
+  /** @deprecated see portalUrl. */
   portalUsername?: string;
+  /** @deprecated see portalUrl. */
   passwordNote?: string;
   notes?: string;
   /** If set, marking this bill Paid auto-creates the next cycle N months later. */
   recurrenceMonths?: number;
+  /** Shared across every instalment row created from one notice/one Add Bill submission. */
+  billGroupId?: string;
+  /** e.g. "Instalment 2" — set when this row is one of several sharing a billGroupId. */
+  label?: string;
+  providerName?: string;
+  referenceNumber?: string;
+  issueDate?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  lineItems?: BillLineItem[];
+  sourceFileName?: string;
+  sourceFileData?: string;
+  /** Set only on the bill row the email-ingestion pipeline creates alongside its paired Expense. */
+  linkedExpenseId?: string;
 }
 
 /** Extracted-but-unconfirmed lease details from an inbound rent/lease agreement. */

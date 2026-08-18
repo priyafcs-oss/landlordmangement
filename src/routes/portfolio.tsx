@@ -69,6 +69,7 @@ import type {
 import { toast } from "sonner";
 import { BillRow } from "@/components/BillRow";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
+import { AddBillDialog } from "@/components/AddBillDialog";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { FileSignature } from "lucide-react";
@@ -2367,87 +2368,16 @@ export function LeaseAgreementWizard({
 }
 
 export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
-  const { state, addBill, deleteBill, markBillPaid } = useStore();
+  const { state, deleteBill, markBillPaid } = useStore();
   const bills = state.bills.filter((b) => b.propertyId === propertyId);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    billType: "Water" as BillType,
-    amount: "",
-    dueDate: todayISO(),
-    portalUrl: "",
-    portalUsername: "",
-    passwordNote: "",
-    notes: "",
-    recurrenceMonths: "",
-  });
-
-  const save = () => {
-    if (!form.amount) return toast.error("Amount required");
-    addBill({
-      propertyId,
-      billType: form.billType,
-      amount: parseFloat(form.amount) || 0,
-      dueDate: form.dueDate,
-      status: "Unpaid",
-      portalUrl: form.portalUrl || undefined,
-      portalUsername: form.portalUsername || undefined,
-      passwordNote: form.passwordNote || undefined,
-      notes: form.notes || undefined,
-      recurrenceMonths: form.recurrenceMonths ? parseInt(form.recurrenceMonths, 10) : undefined,
-    });
-    setOpen(false);
-    setForm({ billType: "Water", amount: "", dueDate: todayISO(), portalUrl: "", portalUsername: "", passwordNote: "", notes: "", recurrenceMonths: "" });
-    toast.success("Bill added");
-  };
 
   return (
     <div className="space-y-3 text-sm">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          Utility portal credentials are stored locally in your browser only.
+          Bills processed by email, upload or entered here all show up below, with their source document linked.
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1"><Plus className="h-3 w-3" /> Add Bill</Button>
-          </DialogTrigger>
-          <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-            <DialogHeader><DialogTitle>New bill</DialogTitle></DialogHeader>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Bill type">
-                <Select value={form.billType} onValueChange={(v) => setForm({ ...form, billType: v as BillType })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(["Water","Council Rates","Strata","Insurance","Electricity","Gas","Other"] as BillType[]).map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Amount (AUD)">
-                <Input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-              </Field>
-              <Field label="Due date">
-                <Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
-              </Field>
-              <Field label="Recurrence (months)">
-                <Input type="number" placeholder="e.g. 3 for quarterly" value={form.recurrenceMonths} onChange={(e) => setForm({ ...form, recurrenceMonths: e.target.value })} />
-              </Field>
-              <Field label="Portal URL">
-                <Input value={form.portalUrl} onChange={(e) => setForm({ ...form, portalUrl: e.target.value })} placeholder="https://…" />
-              </Field>
-              <Field label="Portal username">
-                <Input value={form.portalUsername} onChange={(e) => setForm({ ...form, portalUsername: e.target.value })} />
-              </Field>
-              <Field label="Password note (stored locally)">
-                <Input value={form.passwordNote} onChange={(e) => setForm({ ...form, passwordNote: e.target.value })} />
-              </Field>
-              <Field label="Notes">
-                <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-              </Field>
-            </div>
-            <DialogFooter><Button onClick={save}>Save</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <AddBillDialog propertyId={propertyId} />
       </div>
 
       {bills.length === 0 && (
@@ -2635,6 +2565,9 @@ function ProviderDialog({
     abn: provider?.abn ?? "",
     address: provider?.address ?? "",
     notes: provider?.notes ?? "",
+    portalUrl: provider?.portalUrl ?? "",
+    portalUsername: provider?.portalUsername ?? "",
+    passwordNote: provider?.passwordNote ?? "",
   });
 
   const save = () => {
@@ -2651,6 +2584,9 @@ function ProviderDialog({
       abn: form.abn.trim() || undefined,
       address: form.address.trim() || undefined,
       notes: form.notes.trim() || undefined,
+      portalUrl: form.portalUrl.trim() || undefined,
+      portalUsername: form.portalUsername.trim() || undefined,
+      passwordNote: form.passwordNote.trim() || undefined,
     };
     if (provider) {
       updateProvider(provider.id, payload);
@@ -2704,6 +2640,17 @@ function ProviderDialog({
               <Input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
             </Field>
           </div>
+          <Field label="Portal URL">
+            <Input value={form.portalUrl} onChange={(e) => setForm((f) => ({ ...f, portalUrl: e.target.value }))} placeholder="https://…" />
+          </Field>
+          <Field label="Portal username">
+            <Input value={form.portalUsername} onChange={(e) => setForm((f) => ({ ...f, portalUsername: e.target.value }))} />
+          </Field>
+          <div className="col-span-2">
+            <Field label="Password note (stored locally)">
+              <Input value={form.passwordNote} onChange={(e) => setForm((f) => ({ ...f, passwordNote: e.target.value }))} />
+            </Field>
+          </div>
           <div className="col-span-2">
             <Field label="Notes">
               <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={2} />
@@ -2733,6 +2680,17 @@ function ProviderRow({ provider }: { provider: Provider }) {
         {details && <div className="mt-0.5 text-muted-foreground">{details}</div>}
         {provider.address && <div className="text-muted-foreground">{provider.address}</div>}
         {provider.abn && <div className="text-muted-foreground">ABN {provider.abn}</div>}
+        {provider.portalUrl && (
+          <a href={provider.portalUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-flex items-center gap-1 text-primary">
+            Open portal <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+        {(provider.portalUsername || provider.passwordNote) && (
+          <div className="text-muted-foreground">
+            {provider.portalUsername && <>User: <span className="font-mono">{provider.portalUsername}</span></>}
+            {provider.passwordNote && <> • Note: <span className="font-mono">{provider.passwordNote}</span></>}
+          </div>
+        )}
         {provider.notes && <div className="mt-1 whitespace-pre-wrap">{provider.notes}</div>}
       </div>
       <div className="flex shrink-0 gap-1">

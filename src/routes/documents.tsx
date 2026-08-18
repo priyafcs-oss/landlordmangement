@@ -40,6 +40,15 @@ function DocumentsPage() {
   const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
   const [query, setQuery] = useState("");
 
+  const seenBillGroups = new Set<string>();
+  const dedupedBills = state.bills.filter((b) => {
+    if (!b.sourceFileData) return false;
+    const key = b.billGroupId ?? b.id;
+    if (seenBillGroups.has(key)) return false;
+    seenBillGroups.add(key);
+    return true;
+  });
+
   const entries: DocumentEntry[] = [
     ...state.expenses
       .filter((e) => e.invoiceFileData || e.sourceEmailBody)
@@ -56,6 +65,17 @@ function DocumentsPage() {
         subject: e.sourceSubject,
         emailBody: e.sourceEmailBody,
       })),
+    ...dedupedBills.map((b) => ({
+      id: b.id,
+      kind: "Bill" as const,
+      date: b.dueDate,
+      propertyId: b.propertyId,
+      label: b.providerName ? `${b.billType} — ${b.providerName}` : b.billType,
+      amount: b.amount,
+      status: b.status,
+      fileName: b.sourceFileName,
+      fileData: b.sourceFileData,
+    })),
     ...state.aiProposals.map((p) => {
       const kind: DocumentEntry["kind"] =
         p.kind === "tenant_lease" ? "Lease Agreement" : p.kind === "property_detail" ? "Property Document" : "Rent Statement";

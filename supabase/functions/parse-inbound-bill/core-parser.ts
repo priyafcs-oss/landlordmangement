@@ -76,12 +76,14 @@ const BILL_SCHEMA = {
   ],
 };
 
-async function callGemini(input: NormalizedBillInput): Promise<ParsedBillFields> {
+/** Shared with extract-bill (the stateless upload-and-preview endpoint behind the Add Bill dialog). */
+export async function extractBillFields(input: NormalizedBillInput): Promise<ParsedBillFields> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
   const parts = buildDocumentParts(BILL_PROMPT, input);
   return callGeminiJSON<ParsedBillFields>(apiKey, parts, BILL_SCHEMA);
 }
+const callGemini = extractBillFields;
 
 function validateParsed(parsed: ParsedBillFields): string | null {
   if (!parsed.vendor || typeof parsed.vendor !== "string") return "Missing vendor";
@@ -128,6 +130,9 @@ async function scheduleFutureInstalments(
   propertyId: string,
   billType: BillType,
   instalments: { due_date: string; amount: number }[],
+  billGroupId: string,
+  providerName: string,
+  source: { fileName?: string; fileData?: string },
 ): Promise<number> {
   if (instalments.length === 0) return 0;
 
@@ -144,7 +149,7 @@ async function scheduleFutureInstalments(
       const t = new Date(i.due_date).getTime();
       return !existingDates.some((d) => Math.abs(d - t) <= 3 * DAY_MS);
     })
-    .map((i) => ({
+    .map((i, idx) => ({
       id: `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
       propertyId,
       billType,
@@ -152,6 +157,11 @@ async function scheduleFutureInstalments(
       dueDate: i.due_date,
       status: "Unpaid" as const,
       notes: "Auto-scheduled from a future instalment on an emailed bill notice.",
+      billGroupId,
+      label: `Instalment ${idx + 2}`,
+      providerName,
+      sourceFileName: source.fileName,
+      sourceFileData: source.fileData,
     }));
 
   if (rows.length === 0) return 0;
@@ -375,12 +385,36 @@ export async function parseInboundBill(
   let scheduledBillsCreated = 0;
   if (matchedPropertyId) {
     const billType = mapBillType(parsed.bill_category, parsed.vendor);
+    const billGroupId = `bg_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const source = { fileName: input.pdfFileName, fileData: input.pdfBase64 };
+
+    // Bills tab lives on property_bills, not expenses — without this row, the currently-due
+    // instalment would only ever show up in Expenses/Documents, never in the Bills tab itself.
+    await supabase.from("property_bills").insert({
+      id: `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      propertyId: matchedPropertyId,
+      billType,
+      amount: parsed.amount,
+      dueDate: parsed.due_date,
+      status: "Unpaid",
+      providerName: parsed.vendor,
+      referenceNumber: parsed.bpay_reference ?? undefined,
+      billGroupId,
+      label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
+      sourceFileName: source.fileName,
+      sourceFileData: source.fileData,
+      linkedExpenseId: row.id,
+    });
+
     if (parsed.future_instalments?.length) {
       scheduledBillsCreated = await scheduleFutureInstalments(
         supabase,
         matchedPropertyId,
         billType,
         parsed.future_instalments,
+        billGroupId,
+        parsed.vendor,
+        source,
       );
     }
     await upsertProviderFromBill(supabase, matchedPropertyId, billType, parsed);

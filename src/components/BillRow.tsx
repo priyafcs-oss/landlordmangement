@@ -1,8 +1,17 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, ExternalLink, Receipt, Trash2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Paperclip, Receipt, Trash2 } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
+
+const IMAGE_EXT_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+function openSourceDocument(bill: PropertyBill) {
+  if (!bill.sourceFileData) return;
+  const ext = (bill.sourceFileName ?? "").toLowerCase().split(".").pop() ?? "";
+  const mime = IMAGE_EXT_MIME[ext] ?? "application/pdf";
+  window.open(`data:${mime};base64,${bill.sourceFileData}`, "_blank");
+}
 
 export function BillRow({
   bill,
@@ -28,11 +37,22 @@ export function BillRow({
               {overdue ? "Overdue" : bill.status}
             </Badge>
             {bill.recurrenceMonths ? <Badge variant="outline">Every {bill.recurrenceMonths}mo</Badge> : null}
+            {bill.label ? <Badge variant="secondary">{bill.label}</Badge> : null}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
             Due {bill.dueDate} • {fmtCurrency(bill.amount)}
             {propertyLabel && <> • {propertyLabel}</>}
+            {bill.providerName && <> • {bill.providerName}</>}
           </div>
+          {bill.sourceFileData && (
+            <button
+              type="button"
+              onClick={() => openSourceDocument(bill)}
+              className="mt-1 inline-flex items-center gap-1 text-xs text-primary"
+            >
+              <Paperclip className="h-3 w-3" /> {bill.sourceFileName || "Source document"}
+            </button>
+          )}
           {bill.portalUrl && (
             <a href={bill.portalUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-primary">
               Open portal <ExternalLink className="h-3 w-3" />
