@@ -26,7 +26,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 import { Route as ApiVisionRouteImport } from './routes/api/vision'
-import { Route as AssetsAssetIdRouteImport } from './routes/assets.$assetId'
+import { Route as AssetsAssetIdRouteImport } from './routes/assets_.$assetId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -114,14 +114,14 @@ const ApiVisionRoute = ApiVisionRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const AssetsAssetIdRoute = AssetsAssetIdRouteImport.update({
-  id: '/$assetId',
-  path: '/$assetId',
-  getParentRoute: () => AssetsRoute,
+  id: '/assets_/$assetId',
+  path: '/assets/$assetId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/assets': typeof AssetsRouteWithChildren
+  '/assets': typeof AssetsRoute
   '/bills': typeof BillsRoute
   '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
@@ -141,7 +141,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/assets': typeof AssetsRouteWithChildren
+  '/assets': typeof AssetsRoute
   '/bills': typeof BillsRoute
   '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
@@ -162,7 +162,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/assets': typeof AssetsRouteWithChildren
+  '/assets': typeof AssetsRoute
   '/bills': typeof BillsRoute
   '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
@@ -178,7 +178,7 @@ export interface FileRoutesById {
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
-  '/assets/$assetId': typeof AssetsAssetIdRoute
+  '/assets_/$assetId': typeof AssetsAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -240,12 +240,12 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
-    | '/assets/$assetId'
+    | '/assets_/$assetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AssetsRoute: typeof AssetsRouteWithChildren
+  AssetsRoute: typeof AssetsRoute
   BillsRoute: typeof BillsRoute
   BuffersRoute: typeof BuffersRoute
   CopilotRoute: typeof CopilotRoute
@@ -261,6 +261,7 @@ export interface RootRouteChildren {
   TransactionsRoute: typeof TransactionsRoute
   ApiCopilotRoute: typeof ApiCopilotRoute
   ApiVisionRoute: typeof ApiVisionRoute
+  AssetsAssetIdRoute: typeof AssetsAssetIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -384,30 +385,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiVisionRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/assets/$assetId': {
-      id: '/assets/$assetId'
-      path: '/$assetId'
+    '/assets_/$assetId': {
+      id: '/assets_/$assetId'
+      path: '/assets/$assetId'
       fullPath: '/assets/$assetId'
       preLoaderRoute: typeof AssetsAssetIdRouteImport
-      parentRoute: typeof AssetsRoute
+      parentRoute: typeof rootRouteImport
     }
   }
 }
 
-interface AssetsRouteChildren {
-  AssetsAssetIdRoute: typeof AssetsAssetIdRoute
-}
-
-const AssetsRouteChildren: AssetsRouteChildren = {
-  AssetsAssetIdRoute: AssetsAssetIdRoute,
-}
-
-const AssetsRouteWithChildren =
-  AssetsRoute._addFileChildren(AssetsRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AssetsRoute: AssetsRouteWithChildren,
+  AssetsRoute: AssetsRoute,
   BillsRoute: BillsRoute,
   BuffersRoute: BuffersRoute,
   CopilotRoute: CopilotRoute,
@@ -423,6 +413,7 @@ const rootRouteChildren: RootRouteChildren = {
   TransactionsRoute: TransactionsRoute,
   ApiCopilotRoute: ApiCopilotRoute,
   ApiVisionRoute: ApiVisionRoute,
+  AssetsAssetIdRoute: AssetsAssetIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

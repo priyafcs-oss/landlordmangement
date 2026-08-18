@@ -32,7 +32,7 @@ import {
   PropertyMediaTab,
 } from "./portfolio";
 
-export const Route = createFileRoute("/assets/$assetId")({
+export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
     meta: [{ title: "Property — Landlord OS" }],
   }),
