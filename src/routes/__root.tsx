@@ -15,7 +15,6 @@ import { StoreProvider } from "@/lib/store";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppHeader } from "@/components/AppHeader";
-import { AuthGate } from "@/components/AuthGate";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -99,10 +98,10 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const isPublic = pathname.startsWith("/maintenance");
-  // StoreProvider's initial data fetch only runs once, on mount — it must sit INSIDE AuthGate so
-  // it mounts fresh (and actually fetches) only once a session exists, rather than firing once
-  // pre-login (denied by RLS, silently empty) and never retrying after sign-in. The public
-  // /maintenance route has no gate at all, so StoreProvider sits directly under it there.
+  // Auth gate removed for now (2026-08-18, explicit request — free tier, single landlord, heavy
+  // active development, not worth the friction right now). RLS was reverted alongside this
+  // (see the matching migration) so the anon key has full access again, same as before Phase 1
+  // auth existed. AuthGate.tsx is left in the codebase, just unused, in case this gets re-enabled.
   if (isPublic) {
     return (
       <QueryClientProvider client={queryClient}>
@@ -118,20 +117,18 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthGate>
-        <StoreProvider>
-          <SidebarProvider>
-            <AppSidebar />
-            <SidebarInset className="min-w-0">
-              <AppHeader />
-              <main className="flex-1 overflow-x-hidden">
-                <Outlet />
-              </main>
-            </SidebarInset>
-          </SidebarProvider>
-          <Toaster richColors position="top-right" />
-        </StoreProvider>
-      </AuthGate>
+      <StoreProvider>
+        <SidebarProvider>
+          <AppSidebar />
+          <SidebarInset className="min-w-0">
+            <AppHeader />
+            <main className="flex-1 overflow-x-hidden">
+              <Outlet />
+            </main>
+          </SidebarInset>
+        </SidebarProvider>
+        <Toaster richColors position="top-right" />
+      </StoreProvider>
     </QueryClientProvider>
   );
 }

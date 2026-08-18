@@ -99,9 +99,6 @@ export function AppHeader() {
             </div>
           </>
         )}
-        <Button size="icon" variant="ghost" title="Log out" onClick={() => void supabase.auth.signOut()}>
-          <LogOut className="h-4 w-4" />
-        </Button>
       </div>
     </header>
   );
