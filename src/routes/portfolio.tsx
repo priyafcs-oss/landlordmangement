@@ -1094,7 +1094,7 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
   );
 }
 
-function PropertyOverviewTab({ prop, loan, tenants }: { prop: Property; loan?: Loan; tenants: Tenant[] }) {
+export function PropertyOverviewTab({ prop, loan, tenants }: { prop: Property; loan?: Loan; tenants: Tenant[] }) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const { start, end } = fyRange(currentFY);
@@ -1132,7 +1132,7 @@ function PropertyOverviewTab({ prop, loan, tenants }: { prop: Property; loan?: L
   );
 }
 
-function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loan }) {
+export function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loan }) {
   return (
     <div className="grid grid-cols-2 gap-3 text-sm">
       <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
@@ -1151,7 +1151,7 @@ function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loan }) {
   );
 }
 
-function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
+export function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
   const currentFY = ausFinancialYear(todayISO());
   const { start, end } = fyRange(currentFY);
   const activeTenant = tenants[0];
@@ -1184,7 +1184,7 @@ function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop: Prope
   );
 }
 
-function PropertyCostBaseTab({ prop, expenses, depreciationItems }: { prop: Property; expenses: Expense[]; depreciationItems: DepreciationItem[] }) {
+export function PropertyCostBaseTab({ prop, expenses, depreciationItems }: { prop: Property; expenses: Expense[]; depreciationItems: DepreciationItem[] }) {
   const capitalWorks = expenses.filter((e) => e.taxCategory === "Capital Works").reduce((s, e) => s + e.cost, 0);
   const costBase = prop.purchasePrice + (prop.stampDuty ?? 0) + capitalWorks;
   const totalDepreciationClaimed = depreciationItems.reduce((s, d) => s + d.purchaseCost, 0);
@@ -1206,7 +1206,7 @@ function PropertyCostBaseTab({ prop, expenses, depreciationItems }: { prop: Prop
   );
 }
 
-function DepreciationTab({ assetId }: { assetId?: string }) {
+export function DepreciationTab({ assetId }: { assetId?: string }) {
   const { state, addDepreciationItem, deleteDepreciationItem } = useStore();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -1306,7 +1306,7 @@ function DepreciationTab({ assetId }: { assetId?: string }) {
   );
 }
 
-function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
+export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const { start, end } = fyRange(currentFY);
@@ -1337,7 +1337,7 @@ function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loa
   );
 }
 
-function PropertyComplianceTab({ prop }: { prop: Property }) {
+export function PropertyComplianceTab({ prop }: { prop: Property }) {
   return (
     <div className="space-y-4 text-sm">
       <div>
@@ -1365,6 +1365,125 @@ function PropertyComplianceTab({ prop }: { prop: Property }) {
           <Stat label="Smoke alarm check due" value={prop.smokeAlarmCheckDueDate || "—"} />
           {prop.hasSwimmingPool && <Stat label="Pool safety cert expiry" value={prop.poolSafetyCertExpiry || "—"} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function PropertyDetailsTab({
+  prop,
+  expenses,
+  tenants,
+}: {
+  prop: Property;
+  expenses: Expense[];
+  tenants: Tenant[];
+}) {
+  const { state } = useStore();
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="mb-2 text-xs font-medium text-muted-foreground">Operational</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat
+            label="Entity"
+            value={state.entities.find((e) => e.id === prop.entityId)?.name || "Unassigned"}
+          />
+          <Stat label="Occupancy" value={prop.occupancyType || "—"} />
+          <Stat label="Tenant code" value={prop.tenantCode || "—"} />
+          <Stat label="Property manager" value={prop.managerName || "—"} />
+          <Stat label="Manager phone" value={prop.managerPhone || "—"} />
+          <Stat label="Manager email" value={prop.managerEmail || "—"} />
+          <Stat label="Council rate ref" value={prop.councilRateRef || "—"} />
+          <Stat label="Water account #" value={prop.waterAccountRef || "—"} />
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-xs font-medium text-muted-foreground">Annual running costs</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label="Council rates" value={prop.councilRatesAnnual ? fmtCurrency(prop.councilRatesAnnual) : "—"} />
+          <Stat label="Water rates" value={prop.waterRatesAnnual ? fmtCurrency(prop.waterRatesAnnual) : "—"} />
+          <Stat label="Insurance" value={prop.insuranceAnnual ? fmtCurrency(prop.insuranceAnnual) : "—"} />
+          <Stat label="Strata fees" value={prop.strataFeesAnnual ? fmtCurrency(prop.strataFeesAnnual) : "—"} />
+          <Stat label="Land tax" value={prop.landTaxAnnual ? fmtCurrency(prop.landTaxAnnual) : "—"} />
+          <Stat
+            label="Repairs & maintenance"
+            value={prop.repairsMaintenanceAnnual ? fmtCurrency(prop.repairsMaintenanceAnnual) : "—"}
+          />
+          <Stat label="PM fee" value={prop.pmFeePercent ? `${prop.pmFeePercent}%` : "—"} />
+        </div>
+      </div>
+
+      {prop.notes && (
+        <div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">Notes</div>
+          <div className="whitespace-pre-wrap rounded bg-muted p-3 text-sm">{prop.notes}</div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-dashed p-3 text-xs">
+        <span className="text-muted-foreground">
+          {tenants.length === 0
+            ? "No tenants linked."
+            : `${tenants.length} tenant${tenants.length === 1 ? "" : "s"} — leases, rent changes and tenancy actions live in Rental Hub now.`}
+        </span>
+        <Button asChild size="sm" variant="outline" className="h-7 gap-1 text-xs">
+          <Link to="/rental">
+            Open in Rental Hub <ArrowRight className="h-3 w-3" />
+          </Link>
+        </Button>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-medium">Document vault ({expenses.length})</div>
+        {expenses.length === 0 && <div className="text-muted-foreground text-xs">No documents.</div>}
+        {expenses
+          .filter((e) => e.invoiceFileName)
+          .map((e) => (
+            <div key={e.id} className="flex justify-between rounded border p-2 text-xs">
+              <span>{e.itemName}</span>
+              {e.invoiceFileData ? (
+                <a href={e.invoiceFileData} download={e.invoiceFileName} className="text-primary underline">
+                  {e.invoiceFileName}
+                </a>
+              ) : (
+                <span className="text-muted-foreground">{e.invoiceFileName}</span>
+              )}
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+export function PropertyMediaTab({ prop }: { prop: Property }) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="mb-2 text-sm font-medium">Photos ({prop.photos?.length ?? 0})</div>
+        {!prop.photos?.length && <div className="text-xs text-muted-foreground">No photos yet.</div>}
+        {!!prop.photos?.length && (
+          <div className="flex flex-wrap gap-2">
+            {prop.photos.map((p, i) => (
+              <a key={i} href={p.data} download={p.name}>
+                <img src={p.data} alt={p.name} className="h-20 w-20 rounded object-cover" />
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+      <div>
+        <div className="mb-2 text-sm font-medium">Videos ({prop.videos?.length ?? 0})</div>
+        {!prop.videos?.length && <div className="text-xs text-muted-foreground">No videos yet.</div>}
+        {prop.videos?.map((v, i) => (
+          <div key={i} className="mb-2 rounded border p-2">
+            <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+              <VideoIcon className="h-3 w-3" /> {v.name}
+            </div>
+            <video src={v.data} controls className="max-h-48 w-full rounded" />
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1443,78 +1562,8 @@ function PropertyDrawer({
             <TabsContent value="compliance" className="text-sm">
               <PropertyComplianceTab prop={prop} />
             </TabsContent>
-            <TabsContent value="details" className="space-y-4 text-sm">
-              <div>
-                <div className="mb-2 text-xs font-medium text-muted-foreground">Operational</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Stat
-                    label="Entity"
-                    value={state.entities.find((e) => e.id === prop.entityId)?.name || "Unassigned"}
-                  />
-                  <Stat label="Occupancy" value={prop.occupancyType || "—"} />
-                  <Stat label="Tenant code" value={prop.tenantCode || "—"} />
-                  <Stat label="Property manager" value={prop.managerName || "—"} />
-                  <Stat label="Manager phone" value={prop.managerPhone || "—"} />
-                  <Stat label="Manager email" value={prop.managerEmail || "—"} />
-                  <Stat label="Council rate ref" value={prop.councilRateRef || "—"} />
-                  <Stat label="Water account #" value={prop.waterAccountRef || "—"} />
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-xs font-medium text-muted-foreground">Annual running costs</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Stat label="Council rates" value={prop.councilRatesAnnual ? fmtCurrency(prop.councilRatesAnnual) : "—"} />
-                  <Stat label="Water rates" value={prop.waterRatesAnnual ? fmtCurrency(prop.waterRatesAnnual) : "—"} />
-                  <Stat label="Insurance" value={prop.insuranceAnnual ? fmtCurrency(prop.insuranceAnnual) : "—"} />
-                  <Stat label="Strata fees" value={prop.strataFeesAnnual ? fmtCurrency(prop.strataFeesAnnual) : "—"} />
-                  <Stat label="Land tax" value={prop.landTaxAnnual ? fmtCurrency(prop.landTaxAnnual) : "—"} />
-                  <Stat
-                    label="Repairs & maintenance"
-                    value={prop.repairsMaintenanceAnnual ? fmtCurrency(prop.repairsMaintenanceAnnual) : "—"}
-                  />
-                  <Stat label="PM fee" value={prop.pmFeePercent ? `${prop.pmFeePercent}%` : "—"} />
-                </div>
-              </div>
-
-              {prop.notes && (
-                <div>
-                  <div className="mb-1 text-xs font-medium text-muted-foreground">Notes</div>
-                  <div className="whitespace-pre-wrap rounded bg-muted p-3">{prop.notes}</div>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-dashed p-3 text-xs">
-                <span className="text-muted-foreground">
-                  {tenants.length === 0
-                    ? "No tenants linked."
-                    : `${tenants.length} tenant${tenants.length === 1 ? "" : "s"} — leases, rent changes and tenancy actions live in Rental Hub now.`}
-                </span>
-                <Button asChild size="sm" variant="outline" className="h-7 gap-1 text-xs">
-                  <Link to="/rental">
-                    Open in Rental Hub <ArrowRight className="h-3 w-3" />
-                  </Link>
-                </Button>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-medium">Document vault ({expenses.length})</div>
-                {expenses.length === 0 && <div className="text-muted-foreground text-xs">No documents.</div>}
-                {expenses
-                  .filter((e) => e.invoiceFileName)
-                  .map((e) => (
-                    <div key={e.id} className="flex justify-between rounded border p-2 text-xs">
-                      <span>{e.itemName}</span>
-                      {e.invoiceFileData ? (
-                        <a href={e.invoiceFileData} download={e.invoiceFileName} className="text-primary underline">
-                          {e.invoiceFileName}
-                        </a>
-                      ) : (
-                        <span className="text-muted-foreground">{e.invoiceFileName}</span>
-                      )}
-                    </div>
-                  ))}
-              </div>
+            <TabsContent value="details" className="text-sm">
+              <PropertyDetailsTab prop={prop} expenses={expenses} tenants={tenants} />
             </TabsContent>
             <TabsContent value="housekeeping">
               <PropertyBillsTab propertyId={prop.id} />
@@ -1522,32 +1571,8 @@ function PropertyDrawer({
             <TabsContent value="providers">
               <PropertyProvidersTab propertyId={prop.id} />
             </TabsContent>
-            <TabsContent value="media" className="space-y-4 text-sm">
-              <div>
-                <div className="mb-2 text-sm font-medium">Photos ({prop.photos?.length ?? 0})</div>
-                {!prop.photos?.length && <div className="text-xs text-muted-foreground">No photos yet.</div>}
-                {!!prop.photos?.length && (
-                  <div className="flex flex-wrap gap-2">
-                    {prop.photos.map((p, i) => (
-                      <a key={i} href={p.data} download={p.name}>
-                        <img src={p.data} alt={p.name} className="h-20 w-20 rounded object-cover" />
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <div className="mb-2 text-sm font-medium">Videos ({prop.videos?.length ?? 0})</div>
-                {!prop.videos?.length && <div className="text-xs text-muted-foreground">No videos yet.</div>}
-                {prop.videos?.map((v, i) => (
-                  <div key={i} className="mb-2 rounded border p-2">
-                    <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                      <VideoIcon className="h-3 w-3" /> {v.name}
-                    </div>
-                    <video src={v.data} controls className="max-h-48 w-full rounded" />
-                  </div>
-                ))}
-              </div>
+            <TabsContent value="media" className="text-sm">
+              <PropertyMediaTab prop={prop} />
             </TabsContent>
           </Tabs>
         )}
@@ -2341,7 +2366,7 @@ export function LeaseAgreementWizard({
   );
 }
 
-function PropertyBillsTab({ propertyId }: { propertyId: string }) {
+export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
   const { state, addBill, deleteBill, markBillPaid } = useStore();
   const bills = state.bills.filter((b) => b.propertyId === propertyId);
   const [open, setOpen] = useState(false);
@@ -2734,7 +2759,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
   );
 }
 
-function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
+export function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
   const providers = state.providers.filter((p) => p.propertyId === propertyId);
   return (

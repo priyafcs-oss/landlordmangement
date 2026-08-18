@@ -26,6 +26,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 import { Route as ApiVisionRouteImport } from './routes/api/vision'
+import { Route as AssetsAssetIdRouteImport } from './routes/assets.$assetId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -112,10 +113,15 @@ const ApiVisionRoute = ApiVisionRouteImport.update({
   path: '/api/vision',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AssetsAssetIdRoute = AssetsAssetIdRouteImport.update({
+  id: '/$assetId',
+  path: '/$assetId',
+  getParentRoute: () => AssetsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/assets': typeof AssetsRoute
+  '/assets': typeof AssetsRouteWithChildren
   '/bills': typeof BillsRoute
   '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
@@ -131,10 +137,11 @@ export interface FileRoutesByFullPath {
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
+  '/assets/$assetId': typeof AssetsAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/assets': typeof AssetsRoute
+  '/assets': typeof AssetsRouteWithChildren
   '/bills': typeof BillsRoute
   '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
@@ -150,11 +157,12 @@ export interface FileRoutesByTo {
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
+  '/assets/$assetId': typeof AssetsAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/assets': typeof AssetsRoute
+  '/assets': typeof AssetsRouteWithChildren
   '/bills': typeof BillsRoute
   '/buffers': typeof BuffersRoute
   '/copilot': typeof CopilotRoute
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
+  '/assets/$assetId': typeof AssetsAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -191,6 +200,7 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
+    | '/assets/$assetId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -210,6 +220,7 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
+    | '/assets/$assetId'
   id:
     | '__root__'
     | '/'
@@ -229,11 +240,12 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
+    | '/assets/$assetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AssetsRoute: typeof AssetsRoute
+  AssetsRoute: typeof AssetsRouteWithChildren
   BillsRoute: typeof BillsRoute
   BuffersRoute: typeof BuffersRoute
   CopilotRoute: typeof CopilotRoute
@@ -372,12 +384,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiVisionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/assets/$assetId': {
+      id: '/assets/$assetId'
+      path: '/$assetId'
+      fullPath: '/assets/$assetId'
+      preLoaderRoute: typeof AssetsAssetIdRouteImport
+      parentRoute: typeof AssetsRoute
+    }
   }
 }
 
+interface AssetsRouteChildren {
+  AssetsAssetIdRoute: typeof AssetsAssetIdRoute
+}
+
+const AssetsRouteChildren: AssetsRouteChildren = {
+  AssetsAssetIdRoute: AssetsAssetIdRoute,
+}
+
+const AssetsRouteWithChildren =
+  AssetsRoute._addFileChildren(AssetsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AssetsRoute: AssetsRoute,
+  AssetsRoute: AssetsRouteWithChildren,
   BillsRoute: BillsRoute,
   BuffersRoute: BuffersRoute,
   CopilotRoute: CopilotRoute,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -418,6 +418,7 @@ function assetIcon(type: AssetType) {
 
 function AssetsPage() {
   const { state } = useStore();
+  const navigate = useNavigate();
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<"__all__" | AssetType>("__all__");
 
@@ -470,8 +471,8 @@ function AssetsPage() {
           return (
             <Card
               key={a.id}
-              className={a.assetType === "Property" ? "" : "cursor-pointer hover:border-primary/50"}
-              onClick={() => a.assetType !== "Property" && setDrawerId(a.id)}
+              className="cursor-pointer hover:border-primary/50"
+              onClick={() => (a.assetType === "Property" ? navigate({ to: "/assets/$assetId", params: { assetId: a.id } }) : setDrawerId(a.id))}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2">
@@ -497,13 +498,6 @@ function AssetsPage() {
                     </div>
                   )}
                 </div>
-                {a.assetType === "Property" && (
-                  <Button asChild size="sm" variant="ghost" className="mt-2 h-7 gap-1 px-2 text-xs">
-                    <Link to="/portfolio">
-                      View in Portfolio Manager <ArrowRight className="h-3 w-3" />
-                    </Link>
-                  </Button>
-                )}
               </CardContent>
             </Card>
           );
