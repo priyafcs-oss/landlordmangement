@@ -3,12 +3,21 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Receipt } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
 import type { AssetType } from "@/lib/types";
+import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
+import { AddTransactionDialog } from "@/components/AddTransactionDialog";
+import jsPDF from "jspdf";
+
+function pdfSafe(s: string): string {
+  return s.replace(/−/g, "-").replace(/ /g, " ");
+}
 
 export const Route = createFileRoute("/transactions")({
   head: () => ({
@@ -20,6 +29,30 @@ export const Route = createFileRoute("/transactions")({
   component: TransactionsPage,
 });
 
+function TransactionsPage() {
+  return (
+    <div className="space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
+        <p className="text-sm text-muted-foreground">Every income and expense line item across the portfolio.</p>
+      </div>
+
+      <Tabs defaultValue="ledger">
+        <TabsList>
+          <TabsTrigger value="ledger">Ledger</TabsTrigger>
+          <TabsTrigger value="eofy">EOFY Report</TabsTrigger>
+        </TabsList>
+        <TabsContent value="ledger" className="mt-4">
+          <LedgerTab />
+        </TabsContent>
+        <TabsContent value="eofy" className="mt-4">
+          <EofyReport />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
 interface TxRow {
   id: string;
   date: string;
@@ -30,7 +63,7 @@ interface TxRow {
   amount: number; // positive = income, negative = outgoing
 }
 
-function TransactionsPage() {
+export function LedgerTab() {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const [fy, setFy] = useState(currentFY);
@@ -45,8 +78,9 @@ function TransactionsPage() {
     return years;
   }, []);
 
-  // Normalize three independent sources into one row shape. Note: a bill marked Paid here and
-  // separately logged as an Expense will double-count — the two datasets aren't linked today.
+  // Every bill that's ever marked Paid is guaranteed a paired Expense (markBillPaid creates one
+  // the first time, the email-intake path pairs one at creation) — so state.expenses alone already
+  // covers paid bills; adding state.bills here too would double-count them.
   const allRows: TxRow[] = [
     ...state.ledger
       .filter((e) => e.credit > 0)
@@ -70,17 +104,6 @@ function TransactionsPage() {
       assetId: e.assetId,
       amount: e.direction === "Income" ? e.cost : -e.cost,
     })),
-    ...state.bills
-      .filter((b) => b.status === "Paid")
-      .map((b) => ({
-        id: `bill_${b.id}`,
-        date: b.paidDate ?? b.dueDate,
-        description: `${b.billType} bill`,
-        category: b.billType,
-        propertyId: b.propertyId,
-        assetId: b.assetId,
-        amount: -b.amount,
-      })),
   ];
 
   const assetTypeOf = (r: TxRow) => state.assets.find((a) => a.id === r.assetId)?.assetType;
@@ -112,16 +135,15 @@ function TransactionsPage() {
   };
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
-          <p className="text-sm text-muted-foreground">Every income and expense line item across the portfolio.</p>
-        </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button size="sm" variant="outline" className="gap-1" onClick={exportCsv}>
           <Download className="h-3.5 w-3.5" /> CSV
         </Button>
+        <AddTransactionDialog />
       </div>
+
+      <NeedsReviewBanner />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-3 lg:col-span-2">
@@ -234,6 +256,254 @@ function TransactionsPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function EofyReport() {
+  const { state, addReportHistoryEntry } = useStore();
+  const currentFY = ausFinancialYear(todayISO());
+  const [scope, setScope] = useState("all");
+  const [fy, setFy] = useState(currentFY);
+  const [report, setReport] = useState<null | {
+    gross: number;
+    byCategory: Record<string, number>;
+    interest: number;
+    total: number;
+    net: number;
+    scopeLabel: string;
+  }>(null);
+
+  const scopeProperties = () => {
+    if (scope === "all") return state.properties;
+    if (scope.startsWith("entity:")) {
+      const entityId = scope.slice("entity:".length);
+      return state.properties.filter((p) => p.entityId === entityId);
+    }
+    const propertyId = scope.slice("property:".length);
+    return state.properties.filter((p) => p.id === propertyId);
+  };
+
+  const scopeLabel = () => {
+    if (scope === "all") return "All properties";
+    if (scope.startsWith("entity:")) {
+      const entityId = scope.slice("entity:".length);
+      return state.entities.find((e) => e.id === entityId)?.name ?? "Entity";
+    }
+    const propertyId = scope.slice("property:".length);
+    const p = state.properties.find((x) => x.id === propertyId);
+    return p?.alias || p?.address || "Property";
+  };
+
+  const generate = () => {
+    const properties = scopeProperties();
+    if (properties.length === 0) return toast.error("No properties in this scope");
+    const { start, end } = fyRange(fy);
+    let gross = 0;
+    let totalExp = 0;
+    let interest = 0;
+    const byCategory: Record<string, number> = {};
+    for (const prop of properties) {
+      const tenantIds = state.tenants.filter((t) => t.propertyId === prop.id).map((t) => t.id);
+      gross += state.ledger
+        .filter((e) => tenantIds.includes(e.tenantId) && e.date >= start && e.date <= end && e.type === "Rent Payment")
+        .reduce((s, e) => s + e.credit, 0);
+      const expenses = state.expenses.filter((e) => e.propertyId === prop.id && e.date >= start && e.date <= end);
+      for (const e of expenses) byCategory[e.taxCategory] = (byCategory[e.taxCategory] ?? 0) + e.cost;
+      totalExp += expenses.reduce((s, e) => s + e.cost, 0);
+      const loan = state.loans.find((l) => l.propertyId === prop.id);
+      if (loan) interest += (loan.totalBalance * loan.interestRate) / 100;
+    }
+    const label = scopeLabel();
+    setReport({ gross, byCategory, interest, total: totalExp, net: gross - totalExp - interest, scopeLabel: label });
+    addReportHistoryEntry({ fy, scopeLabel: label, generatedAt: todayISO() });
+  };
+
+  const downloadPdf = () => {
+    if (!report) return;
+    const doc = new jsPDF();
+    const marginX = 14;
+    let y = 18;
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(pdfSafe("EOFY Tax Summary"), marginX, y);
+    y += 7;
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(85);
+    doc.text(pdfSafe(`${report.scopeLabel} - Financial Year ${fy} - Generated ${todayISO()}`), marginX, y);
+    y += 10;
+
+    const line = (label: string, value: string, bold = false) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setTextColor(17);
+      doc.setFontSize(10);
+      doc.text(pdfSafe(label), marginX, y);
+      doc.text(pdfSafe(value), marginX + 90, y);
+      y += 7;
+    };
+
+    line("Gross rent collected", fmtCurrency(report.gross), true);
+    y += 2;
+    doc.setFont("helvetica", "bold");
+    doc.text("Expenses by ATO category", marginX, y);
+    y += 6;
+    for (const [k, v] of Object.entries(report.byCategory)) {
+      line(`  ${k}`, fmtCurrency(v));
+    }
+    line("Total expenses", fmtCurrency(report.total), true);
+    y += 2;
+    line("Estimated loan interest paid", fmtCurrency(report.interest));
+    y += 2;
+    line("Net taxable profit / loss", fmtCurrency(report.net), true);
+
+    doc.save(`EOFY-${fy}-${report.scopeLabel.replace(/\s+/g, "-").toLowerCase().slice(0, 30)}.pdf`);
+    toast.success("EOFY PDF downloaded");
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">EOFY Statement Generator</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Scope">
+              <Select value={scope} onValueChange={setScope}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All properties</SelectItem>
+                  {state.entities.map((e) => (
+                    <SelectItem key={e.id} value={`entity:${e.id}`}>
+                      {e.name}
+                    </SelectItem>
+                  ))}
+                  {state.properties.map((p) => (
+                    <SelectItem key={p.id} value={`property:${p.id}`}>
+                      {p.alias || p.address}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Financial year">
+              <Select value={fy} onValueChange={setFy}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 5 }).map((_, i) => {
+                    const y = new Date().getFullYear() - 2 + i;
+                    const v = `${y}-${y + 1}`;
+                    return (
+                      <SelectItem key={v} value={v}>
+                        FY {v}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </Field>
+            <div className="flex items-end">
+              <Button onClick={generate}>Generate</Button>
+            </div>
+          </div>
+
+          {report && (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4 text-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs text-muted-foreground">Scope</div>
+                  <div className="font-medium">{report.scopeLabel}</div>
+                </div>
+                <Button size="sm" variant="outline" className="gap-1" onClick={downloadPdf}>
+                  <Download className="h-4 w-4" /> Download PDF
+                </Button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Stat label="Gross rent collected" value={fmtCurrency(report.gross)} />
+                <Stat label="Total expenses" value={fmtCurrency(report.total)} />
+                <Stat label="Loan interest (est.)" value={fmtCurrency(report.interest)} />
+                <Stat
+                  label="Net taxable profit / loss"
+                  value={fmtCurrency(report.net)}
+                  strong
+                  negative={report.net < 0}
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium">Expenses by category</div>
+                {Object.entries(report.byCategory).map(([k, v]) => (
+                  <div key={k} className="flex justify-between border-t py-1">
+                    <span>{k}</span>
+                    <span>{fmtCurrency(v)}</span>
+                  </div>
+                ))}
+                {Object.keys(report.byCategory).length === 0 && (
+                  <div className="text-xs text-muted-foreground">No expenses in this period.</div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {state.reportHistory.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Recent reports</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {state.reportHistory.map((r, i) => (
+              <div key={i} className="flex justify-between border-t py-1 first:border-t-0">
+                <span>
+                  FY {r.fy} — {r.scopeLabel}
+                </span>
+                <span className="text-muted-foreground">{r.generatedAt}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  strong,
+  negative,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  negative?: boolean;
+}) {
+  return (
+    <div className="rounded bg-background p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div
+        className={
+          "mt-1 font-medium " + (strong ? "text-base " : "") + (negative ? "text-destructive" : "")
+        }
+      >
+        {value}
       </div>
     </div>
   );

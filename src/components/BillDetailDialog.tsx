@@ -12,10 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CheckCircle2, Trash2, Plus, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency } from "@/lib/calculations";
+import { fmtCurrency, todayISO, billTypeToChargeType } from "@/lib/calculations";
 import type { BillType, BillLineItem, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 
@@ -45,12 +46,24 @@ interface LineItemRow {
   category: BillType;
   amount: string;
   gst: string;
+  rechargeToTenant: boolean;
+  tenantId: string;
+  recharged: boolean;
 }
 
 const toLineItemRows = (items?: BillLineItem[]): LineItemRow[] =>
   items && items.length > 0
-    ? items.map((li) => ({ key: uid("li"), description: li.description, category: (li.category as BillType) ?? "Other", amount: String(li.amount), gst: li.gst ? String(li.gst) : "" }))
-    : [{ key: uid("li"), description: "", category: "Other", amount: "", gst: "" }];
+    ? items.map((li) => ({
+        key: uid("li"),
+        description: li.description,
+        category: (li.category as BillType) ?? "Other",
+        amount: String(li.amount),
+        gst: li.gst ? String(li.gst) : "",
+        rechargeToTenant: li.rechargeToTenant ?? false,
+        tenantId: li.tenantId ?? "",
+        recharged: li.recharged ?? false,
+      }))
+    : [{ key: uid("li"), description: "", category: "Other", amount: "", gst: "", rechargeToTenant: false, tenantId: "", recharged: false }];
 
 /**
  * Click-through detail view for a single bill (or, when it's part of a scheduled-payment group,
@@ -68,7 +81,7 @@ export function BillDetailDialog({
   propertyLabel?: string;
   trigger: React.ReactNode;
 }) {
-  const { state, updateBill, deleteBill, addBill, markBillPaid } = useStore();
+  const { state, updateBill, deleteBill, addBill, markBillPaid, addInvoice } = useStore();
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(bill.id);
   const [editingSchedule, setEditingSchedule] = useState(false);
@@ -110,8 +123,13 @@ export function BillDetailDialog({
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
+  const tenantsForProperty = state.tenants.filter((t) => t.propertyId === selected.propertyId);
 
   const saveDetails = () => {
+    if (lineItems.some((li) => li.rechargeToTenant && !li.recharged && !li.tenantId)) {
+      return toast.error("Select a tenant for every line item flagged to recharge");
+    }
+
     const patch = {
       providerName: form.providerName || undefined,
       referenceNumber: form.referenceNumber || undefined,
@@ -121,12 +139,30 @@ export function BillDetailDialog({
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
       notes: form.notes || undefined,
-      lineItems: lineItems.filter((li) => parseFloat(li.amount) > 0).map((li) => ({
-        description: li.description || selected.billType,
-        category: li.category,
-        amount: parseFloat(li.amount) || 0,
-        gst: li.gst ? parseFloat(li.gst) : undefined,
-      })),
+      lineItems: lineItems.filter((li) => parseFloat(li.amount) > 0).map((li) => {
+        const amount = parseFloat(li.amount) || 0;
+        const nowRecharging = li.rechargeToTenant && li.tenantId && !li.recharged;
+        if (nowRecharging) {
+          addInvoice({
+            tenantId: li.tenantId,
+            chargeType: billTypeToChargeType(selected.billType),
+            amountDue: amount,
+            dateIssued: todayISO(),
+            dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+            status: "Unpaid",
+            description: li.description || selected.billType,
+          });
+        }
+        return {
+          description: li.description || selected.billType,
+          category: li.category,
+          amount,
+          gst: li.gst ? parseFloat(li.gst) : undefined,
+          rechargeToTenant: li.rechargeToTenant || undefined,
+          tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+          recharged: li.recharged || nowRecharging || undefined,
+        };
+      }),
       amount: netTotal > 0 ? netTotal : selected.amount,
     };
     // Shared fields are denormalized onto every row in the group — keep them in sync.
@@ -337,40 +373,77 @@ export function BillDetailDialog({
                 <div className="text-xs text-muted-foreground">Net: {fmtCurrency(netTotal)}</div>
               </div>
               {lineItems.map((li) => (
-                <div key={li.key} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
-                  <Field label="Description">
-                    <Input value={li.description} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))} />
-                  </Field>
-                  <Field label="Category">
-                    <Select value={li.category} onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BILL_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Amount">
-                    <Input type="number" value={li.amount} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))} />
-                  </Field>
-                  <Field label="GST">
-                    <Input type="number" value={li.gst} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))} />
-                  </Field>
-                  <Button size="icon" variant="ghost" onClick={() => setLineItems((rows) => rows.filter((r) => r.key !== li.key))}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                <div key={li.key} className="space-y-1 border-b pb-2 last:border-0 last:pb-0">
+                  <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
+                    <Field label="Description">
+                      <Input value={li.description} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))} />
+                    </Field>
+                    <Field label="Category">
+                      <Select value={li.category} onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BILL_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {t}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Amount">
+                      <Input type="number" value={li.amount} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))} />
+                    </Field>
+                    <Field label="GST">
+                      <Input type="number" value={li.gst} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))} />
+                    </Field>
+                    <Button size="icon" variant="ghost" onClick={() => setLineItems((rows) => rows.filter((r) => r.key !== li.key))}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {li.recharged ? (
+                    <div className="text-xs text-emerald-700">
+                      Recharged to {tenantsForProperty.find((t) => t.id === li.tenantId)?.name ?? "tenant"}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={li.rechargeToTenant}
+                        onCheckedChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, rechargeToTenant: v === true } : r)))}
+                      />
+                      <Label className="cursor-pointer text-xs font-normal text-muted-foreground">Recharge to tenant</Label>
+                      {li.rechargeToTenant && (
+                        <Select
+                          value={li.tenantId}
+                          onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, tenantId: v } : r)))}
+                        >
+                          <SelectTrigger className="h-7 w-[160px] text-xs">
+                            <SelectValue placeholder="Select tenant" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tenantsForProperty.map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               <Button
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                onClick={() => setLineItems((rows) => [...rows, { key: uid("li"), description: "", category: selected.billType, amount: "", gst: "" }])}
+                onClick={() =>
+                  setLineItems((rows) => [
+                    ...rows,
+                    { key: uid("li"), description: "", category: selected.billType, amount: "", gst: "", rechargeToTenant: false, tenantId: "", recharged: false },
+                  ])
+                }
               >
                 <Plus className="h-3 w-3" /> Add line item
               </Button>

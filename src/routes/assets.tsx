@@ -19,10 +19,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BillRow } from "@/components/BillRow";
-import { Coins, LineChart, Plus, Building2, ArrowRight, FileText } from "lucide-react";
+import {
+  Coins,
+  LineChart,
+  Plus,
+  Building2,
+  ArrowRight,
+  FileText,
+  LayoutGrid,
+  Receipt,
+  ListOrdered,
+  Landmark,
+  Calculator,
+  TrendingUp,
+  ShieldCheck,
+  FolderOpen,
+} from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
 import { PropertyDialog, AiProposalsSection } from "@/components/PropertyShared";
+import { BillsBoard } from "@/components/BillsBoard";
+import { LedgerTab } from "@/routes/transactions";
+import { LoanSummaryTab } from "@/components/LoanSummaryTab";
+import { PortfolioCostBaseTab, PortfolioDepreciationTab, PortfolioPnLTab } from "@/components/PortfolioRollups";
+import { ForecastsContent } from "@/routes/forecasts";
+import { BuffersContent } from "@/routes/buffers";
+import { DocumentsContent } from "@/routes/documents";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/assets")({
@@ -416,7 +438,7 @@ function assetIcon(type: AssetType) {
   return <LineChart className="h-3.5 w-3.5" />;
 }
 
-function AssetsPage() {
+function AllAssetsContent() {
   const { state } = useStore();
   const navigate = useNavigate();
   const [drawerId, setDrawerId] = useState<string | null>(null);
@@ -430,12 +452,8 @@ function AssetsPage() {
   const totalValue = filtered.reduce((s, a) => s + a.currentValue, 0);
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Assets</h1>
-          <p className="text-sm text-muted-foreground">Everything you own, in one register — property, gold, ETFs.</p>
-        </div>
         <div className="flex flex-wrap items-center gap-2">
           <PropertyDialog property={null} onDone={() => {}} />
           <AssetDialog />
@@ -507,6 +525,84 @@ function AssetsPage() {
       </div>
 
       <AssetDetailSheet assetId={drawerId} onClose={() => setDrawerId(null)} />
+    </div>
+  );
+}
+
+type Section = "all" | "bills" | "transactions" | "loans" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents";
+
+const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
+  { section: "all", label: "All Assets", icon: LayoutGrid },
+  { section: "bills", label: "Bills", icon: Receipt, group: "Finance" },
+  { section: "transactions", label: "Transactions", icon: ListOrdered, group: "Finance" },
+  { section: "loans", label: "Loans", icon: Landmark, group: "Finance" },
+  { section: "costbase", label: "Cost Base", icon: Calculator, group: "Finance" },
+  { section: "depreciation", label: "Depreciation", icon: LineChart, group: "Finance" },
+  { section: "pnl", label: "YTD P&L", icon: FileText, group: "Finance" },
+  { section: "forecasts", label: "Forecasts", icon: TrendingUp },
+  { section: "buffers", label: "Buffers", icon: ShieldCheck },
+  { section: "documents", label: "Documents", icon: FolderOpen },
+];
+
+function AssetsPage() {
+  const { state } = useStore();
+  const [section, setSection] = useState<Section>("all");
+
+  const groups: { group: string | null; items: typeof NAV }[] = [];
+  for (const item of NAV) {
+    const key = item.group ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.group === key) last.items.push(item);
+    else groups.push({ group: key, items: [item] });
+  }
+
+  return (
+    <div className="flex min-h-[calc(100vh-1px)] flex-col sm:flex-row">
+      <div className="w-full shrink-0 border-b p-3 sm:w-56 sm:border-b-0 sm:border-r sm:p-4">
+        <div className="mb-3">
+          <div className="font-semibold leading-tight">Assets</div>
+          <div className="text-xs text-muted-foreground">Property, gold, ETFs — one register.</div>
+        </div>
+        <nav className="space-y-3">
+          {groups.map((g, i) => (
+            <div key={i}>
+              {g.group && (
+                <div className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {g.group}
+                </div>
+              )}
+              <div className="space-y-0.5">
+                {g.items.map((item) => (
+                  <button
+                    key={item.section}
+                    type="button"
+                    onClick={() => setSection(item.section)}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
+                      section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
+                    }`}
+                  >
+                    <item.icon className="h-3.5 w-3.5 shrink-0" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+      </div>
+
+      <div className="min-w-0 flex-1 p-4 sm:p-6">
+        {section === "all" && <AllAssetsContent />}
+        {section === "bills" && <BillsBoard bills={state.bills} />}
+        {section === "transactions" && <LedgerTab />}
+        {section === "loans" && <LoanSummaryTab />}
+        {section === "costbase" && <PortfolioCostBaseTab />}
+        {section === "depreciation" && <PortfolioDepreciationTab />}
+        {section === "pnl" && <PortfolioPnLTab />}
+        {section === "forecasts" && <ForecastsContent />}
+        {section === "buffers" && <BuffersContent />}
+        {section === "documents" && <DocumentsContent />}
+      </div>
     </div>
   );
 }

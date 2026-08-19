@@ -233,17 +233,26 @@ function BufferCard({ buffer }: { buffer: CashBuffer }) {
 }
 
 function BuffersPage() {
+  return (
+    <div className="space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Buffers</h1>
+        <p className="text-sm text-muted-foreground">
+          Cash reserve targets — you update the balance yourself, this just tracks the target against it.
+        </p>
+      </div>
+      <BuffersContent />
+    </div>
+  );
+}
+
+/** Extracted so the Assets left-nav can embed the same content without the page-level heading. */
+export function BuffersContent() {
   const { state } = useStore();
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Buffers</h1>
-          <p className="text-sm text-muted-foreground">
-            Cash reserve targets — you update the balance yourself, this just tracks the target against it.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div className="flex justify-end">
         <BufferDialog />
       </div>
 

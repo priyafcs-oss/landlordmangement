@@ -35,6 +35,22 @@ interface DocumentEntry {
 }
 
 function DocumentsPage() {
+  return (
+    <div className="space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
+        <p className="text-sm text-muted-foreground">
+          Every bill, rent statement and lease agreement forwarded by email — kept here for reference
+          regardless of whether it was applied or dismissed.
+        </p>
+      </div>
+      <DocumentsContent />
+    </div>
+  );
+}
+
+/** Extracted so the Assets left-nav can embed the same content without the page-level heading. */
+export function DocumentsContent() {
   const { state } = useStore();
   const [propertyId, setPropertyId] = useState("__all__");
   const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
@@ -108,15 +124,7 @@ function DocumentsPage() {
   });
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
-        <p className="text-sm text-muted-foreground">
-          Every bill, rent statement and lease agreement forwarded by email — kept here for reference
-          regardless of whether it was applied or dismissed.
-        </p>
-      </div>
-
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <Input
           placeholder="Search…"

@@ -241,10 +241,16 @@ export interface Expense {
   warrantyExpiry?: string;
   rechargeToTenant: boolean;
   tenantId?: string;
+  /** Set once a TenantInvoice has actually been created for the recharge, so re-saving never double-charges. */
+  recharged?: boolean;
   status: "needs_review" | "approved" | "paid";
-  source: "manual" | "email_auto";
+  source: "manual" | "email_auto" | "upload";
   bpayBillerCode?: string;
   bpayReference?: string;
+  referenceNumber?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  notes?: string;
   paidDate?: string;
   rawPropertyAddress?: string;
   emailMessageId?: string;
@@ -486,6 +492,10 @@ export interface BillLineItem {
   category?: string;
   amount: number;
   gst?: number;
+  rechargeToTenant?: boolean;
+  tenantId?: string;
+  /** Set once a TenantInvoice has actually been created for this item, so re-saving never double-charges. */
+  recharged?: boolean;
 }
 
 export interface PropertyBill {

@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { TenantPortal } from "./TenantPortal";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 
 export function AppHeader() {
   const { state } = useStore();
@@ -70,6 +71,7 @@ export function AppHeader() {
         <div className="hidden truncate text-sm font-medium sm:block">Landlord Operating System</div>
       </div>
       <div className="flex items-center gap-2">
+        <UploadDocumentDialog />
         <AiBudgetBadge />
         <CreatorMasterPanel />
 

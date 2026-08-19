@@ -210,7 +210,7 @@ function PropertyAssetPage() {
         </nav>
         <div className="mt-4 border-t pt-3 text-xs text-muted-foreground">
           Portfolio-wide:{" "}
-          <Link to="/expenses" className="underline">
+          <Link to="/transactions" className="underline">
             Reports
           </Link>
           {" · "}

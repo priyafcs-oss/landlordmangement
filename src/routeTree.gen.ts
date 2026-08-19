@@ -16,7 +16,6 @@ import { Route as BuffersRouteImport } from './routes/buffers'
 import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as EntitiesRouteImport } from './routes/entities'
-import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as ForecastsRouteImport } from './routes/forecasts'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
@@ -60,11 +59,6 @@ const DocumentsRoute = DocumentsRouteImport.update({
 const EntitiesRoute = EntitiesRouteImport.update({
   id: '/entities',
   path: '/entities',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExpensesRoute = ExpensesRouteImport.update({
-  id: '/expenses',
-  path: '/expenses',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForecastsRoute = ForecastsRouteImport.update({
@@ -121,7 +115,6 @@ export interface FileRoutesByFullPath {
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
-  '/expenses': typeof ExpensesRoute
   '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
@@ -140,7 +133,6 @@ export interface FileRoutesByTo {
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
-  '/expenses': typeof ExpensesRoute
   '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
@@ -160,7 +152,6 @@ export interface FileRoutesById {
   '/copilot': typeof CopilotRoute
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
-  '/expenses': typeof ExpensesRoute
   '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
@@ -181,7 +172,6 @@ export interface FileRouteTypes {
     | '/copilot'
     | '/documents'
     | '/entities'
-    | '/expenses'
     | '/forecasts'
     | '/inspections'
     | '/maintenance'
@@ -200,7 +190,6 @@ export interface FileRouteTypes {
     | '/copilot'
     | '/documents'
     | '/entities'
-    | '/expenses'
     | '/forecasts'
     | '/inspections'
     | '/maintenance'
@@ -219,7 +208,6 @@ export interface FileRouteTypes {
     | '/copilot'
     | '/documents'
     | '/entities'
-    | '/expenses'
     | '/forecasts'
     | '/inspections'
     | '/maintenance'
@@ -239,7 +227,6 @@ export interface RootRouteChildren {
   CopilotRoute: typeof CopilotRoute
   DocumentsRoute: typeof DocumentsRoute
   EntitiesRoute: typeof EntitiesRoute
-  ExpensesRoute: typeof ExpensesRoute
   ForecastsRoute: typeof ForecastsRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
@@ -300,13 +287,6 @@ declare module '@tanstack/react-router' {
       path: '/entities'
       fullPath: '/entities'
       preLoaderRoute: typeof EntitiesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/expenses': {
-      id: '/expenses'
-      path: '/expenses'
-      fullPath: '/expenses'
-      preLoaderRoute: typeof ExpensesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forecasts': {
@@ -383,7 +363,6 @@ const rootRouteChildren: RootRouteChildren = {
   CopilotRoute: CopilotRoute,
   DocumentsRoute: DocumentsRoute,
   EntitiesRoute: EntitiesRoute,
-  ExpensesRoute: ExpensesRoute,
   ForecastsRoute: ForecastsRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,

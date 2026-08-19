@@ -22,6 +22,22 @@ function monthlyRent(rentAmount: number, frequency: string): number {
 }
 
 function ForecastsPage() {
+  return (
+    <div className="space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Forecasts</h1>
+        <p className="text-sm text-muted-foreground">
+          Based on known bills, current loan balances and current tenant rent — not a prediction of rent changes,
+          vacancies or capital growth.
+        </p>
+      </div>
+      <ForecastsContent />
+    </div>
+  );
+}
+
+/** Extracted so the Assets left-nav can embed the same forecast without the page-level heading. */
+export function ForecastsContent() {
   const { state } = useStore();
   const [months, setMonths] = useState<3 | 6 | 12>(6);
 
@@ -63,15 +79,7 @@ function ForecastsPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Forecasts</h1>
-        <p className="text-sm text-muted-foreground">
-          Based on known bills, current loan balances and current tenant rent — not a prediction of rent changes,
-          vacancies or capital growth.
-        </p>
-      </div>
-
+    <div className="space-y-6">
       <div className="flex gap-1">
         {[3, 6, 12].map((m) => (
           <Button key={m} size="sm" variant={months === m ? "secondary" : "ghost"} onClick={() => setMonths(m as 3 | 6 | 12)}>

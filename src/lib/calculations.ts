@@ -8,7 +8,37 @@ import type {
   RentChange,
   Expense,
   AiIntakeProposal,
+  BillType,
 } from "./types";
+
+/** Maps a bill's type onto the tenant-invoice charge-type enum, for recharging a bill line item to a tenant. */
+export function billTypeToChargeType(billType: BillType): TenantInvoice["chargeType"] {
+  return billType === "Water" ? "Water Usage" : "Other";
+}
+
+/** Categories offered on a transaction's line items — broader than BillType since a one-off
+ * transaction can be almost anything, not just a recurring utility/rates bill. */
+export const EXPENSE_CATEGORIES = [
+  "Repairs & Maintenance",
+  "Management Fees",
+  "Insurance",
+  "Council Rates",
+  "Water",
+  "Legal & Professional",
+  "Advertising",
+  "Cleaning",
+  "Gardening",
+  "Travel",
+  "Capital Works",
+  "Other",
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/** Only "Capital Works" maps to the Capital Works ATO category — everything else is an
+ * immediate deduction, matching how the email-intake pipeline's mapAtoCategory defaults. */
+export function expenseCategoryToTaxCategory(category: string): Expense["taxCategory"] {
+  return category === "Capital Works" ? "Capital Works" : "Immediate Deduction";
+}
 
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;

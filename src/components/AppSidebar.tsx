@@ -10,20 +10,17 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, Wallet, Wrench, Sparkles, Home, Settings, ClipboardCheck, FolderOpen, Users2, Receipt, ListOrdered, Coins, TrendingUp, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Wallet, Sparkles, Home, Settings, ClipboardCheck, Users2, Coins } from "lucide-react";
 
+// Bills, Transactions, Forecasts, Buffers and Documents are all reachable from the Assets
+// left-nav now (assets.tsx) — same reasoning as Portfolio Manager's removal: one way in, not a
+// separate sidebar entry per underlying route.
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Assets", url: "/assets", icon: Coins },
   { title: "Entities", url: "/entities", icon: Users2 },
   { title: "Rental Hub", url: "/rental", icon: Wallet },
-  { title: "Bills", url: "/bills", icon: Receipt },
-  { title: "Transactions", url: "/transactions", icon: ListOrdered },
-  { title: "Forecasts", url: "/forecasts", icon: TrendingUp },
-  { title: "Buffers", url: "/buffers", icon: ShieldCheck },
   { title: "Inspections", url: "/inspections", icon: ClipboardCheck },
-  { title: "Expenses", url: "/expenses", icon: Wrench },
-  { title: "Documents", url: "/documents", icon: FolderOpen },
   { title: "AI Co-Pilot", url: "/copilot", icon: Sparkles },
   { title: "Settings", url: "/settings", icon: Settings },
 ] as const;

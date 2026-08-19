@@ -1193,7 +1193,7 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
         <Stat label="Net taxable profit / loss" value={fmtCurrency(net)} />
       </div>
       <Button asChild size="sm" variant="outline" className="gap-1">
-        <Link to="/expenses">
+        <Link to="/transactions">
           Full EOFY report <ArrowRight className="h-3 w-3" />
         </Link>
       </Button>

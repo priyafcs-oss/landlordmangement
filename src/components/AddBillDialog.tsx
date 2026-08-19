@@ -23,7 +23,7 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO } from "@/lib/calculations";
+import { fmtCurrency, todayISO, billTypeToChargeType } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { BillType, BillLineItem } from "@/lib/types";
@@ -55,6 +55,8 @@ interface LineItemRow {
   category: BillType;
   amount: string;
   gst: string;
+  rechargeToTenant: boolean;
+  tenantId: string;
 }
 
 interface ExtractResult {
@@ -94,7 +96,7 @@ function mapBillType(category?: string): BillType {
  * never import from portfolio.tsx.
  */
 export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: string }) {
-  const { state, addBill, addProvider, updateProvider } = useStore();
+  const { state, addBill, addProvider, updateProvider, addInvoice } = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -129,16 +131,24 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
     sourceFileData: undefined as string | undefined,
   });
 
+  const blankLineItem = (category: BillType = "Water"): LineItemRow => ({
+    key: uid("li"),
+    description: "",
+    category,
+    amount: "",
+    gst: "",
+    rechargeToTenant: false,
+    tenantId: "",
+  });
+
   const [form, setForm] = useState(blankForm());
   const [instalments, setInstalments] = useState<InstalmentRow[]>([]);
-  const [lineItems, setLineItems] = useState<LineItemRow[]>([
-    { key: uid("li"), description: "", category: "Water", amount: "", gst: "" },
-  ]);
+  const [lineItems, setLineItems] = useState<LineItemRow[]>([blankLineItem()]);
 
   const reset = () => {
     setForm(blankForm());
     setInstalments([]);
-    setLineItems([{ key: uid("li"), description: "", category: form.billType, amount: "", gst: "" }]);
+    setLineItems([blankLineItem(form.billType)]);
     setConfidence(null);
     setExtractSummary(null);
     setExtractEmpty(false);
@@ -146,7 +156,9 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
 
-  const providersForProperty = state.providers.filter((p) => p.propertyId === (form.propertyId || lockedPropertyId));
+  const propertyId = form.propertyId || lockedPropertyId || "";
+  const providersForProperty = state.providers.filter((p) => p.propertyId === propertyId);
+  const tenantsForProperty = state.tenants.filter((t) => t.propertyId === propertyId);
 
   const extract = async (file: File) => {
     setBusy(true);
@@ -193,11 +205,9 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
       }));
       setLineItems([
         {
-          key: uid("li"),
+          ...blankLineItem(mapBillType(data.bill_category)),
           description: data.vendor ?? "",
-          category: mapBillType(data.bill_category),
           amount: data.amount ? String(data.amount) : "",
-          gst: "",
         },
       ]);
       if (data.future_instalments?.length) {
@@ -246,12 +256,10 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
     ]);
   const removeInstalment = (key: string) => setInstalments((rows) => rows.filter((r) => r.key !== key));
 
-  const addLineItem = () =>
-    setLineItems((rows) => [...rows, { key: uid("li"), description: "", category: form.billType, amount: "", gst: "" }]);
+  const addLineItem = () => setLineItems((rows) => [...rows, blankLineItem(form.billType)]);
   const removeLineItem = (key: string) => setLineItems((rows) => rows.filter((r) => r.key !== key));
 
   const save = () => {
-    const propertyId = form.propertyId || lockedPropertyId || "";
     if (!propertyId) return toast.error("Property is required");
     if (!form.providerName.trim()) return toast.error("Provider name is required");
     if (!form.dueDate) return toast.error("Due date is required");
@@ -259,15 +267,36 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
     if (form.hasInstalments && instalments.some((i) => !i.dueDate || !parseFloat(i.amount))) {
       return toast.error("Every instalment needs a due date and amount");
     }
+    if (lineItems.some((li) => li.rechargeToTenant && !li.tenantId)) {
+      return toast.error("Select a tenant for every line item flagged to recharge");
+    }
 
     const finalLineItems: BillLineItem[] = lineItems
       .filter((li) => parseFloat(li.amount) > 0)
-      .map((li) => ({
-        description: li.description || form.billType,
-        category: li.category,
-        amount: parseFloat(li.amount) || 0,
-        gst: li.gst ? parseFloat(li.gst) : undefined,
-      }));
+      .map((li) => {
+        const amount = parseFloat(li.amount) || 0;
+        const recharge = !!(li.rechargeToTenant && li.tenantId);
+        if (recharge) {
+          addInvoice({
+            tenantId: li.tenantId,
+            chargeType: billTypeToChargeType(form.billType),
+            amountDue: amount,
+            dateIssued: todayISO(),
+            dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+            status: "Unpaid",
+            description: li.description || form.billType,
+          });
+        }
+        return {
+          description: li.description || form.billType,
+          category: li.category,
+          amount,
+          gst: li.gst ? parseFloat(li.gst) : undefined,
+          rechargeToTenant: li.rechargeToTenant || undefined,
+          tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+          recharged: recharge || undefined,
+        };
+      });
 
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;
     const shared = {
@@ -576,51 +605,79 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
                 <div className="text-xs text-muted-foreground">Net: {fmtCurrency(netTotal)}</div>
               </div>
               {lineItems.map((li) => (
-                <div key={li.key} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
-                  <Field label="Description">
-                    <Input
-                      value={li.description}
-                      onChange={(e) =>
-                        setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))
+                <div key={li.key} className="space-y-1 border-b pb-2 last:border-0 last:pb-0">
+                  <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
+                    <Field label="Description">
+                      <Input
+                        value={li.description}
+                        onChange={(e) =>
+                          setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))
+                        }
+                      />
+                    </Field>
+                    <Field label="Category">
+                      <Select
+                        value={li.category}
+                        onValueChange={(v) =>
+                          setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BILL_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {t}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Amount">
+                      <Input
+                        type="number"
+                        value={li.amount}
+                        onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))}
+                      />
+                    </Field>
+                    <Field label="GST">
+                      <Input
+                        type="number"
+                        value={li.gst}
+                        onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))}
+                      />
+                    </Field>
+                    <Button size="icon" variant="ghost" onClick={() => removeLineItem(li.key)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      checked={li.rechargeToTenant}
+                      onCheckedChange={(v) =>
+                        setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, rechargeToTenant: v === true } : r)))
                       }
                     />
-                  </Field>
-                  <Field label="Category">
-                    <Select
-                      value={li.category}
-                      onValueChange={(v) =>
-                        setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BILL_TYPES.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Amount">
-                    <Input
-                      type="number"
-                      value={li.amount}
-                      onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))}
-                    />
-                  </Field>
-                  <Field label="GST">
-                    <Input
-                      type="number"
-                      value={li.gst}
-                      onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))}
-                    />
-                  </Field>
-                  <Button size="icon" variant="ghost" onClick={() => removeLineItem(li.key)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                    <Label className="cursor-pointer text-xs font-normal text-muted-foreground">Recharge to tenant</Label>
+                    {li.rechargeToTenant && (
+                      <Select
+                        value={li.tenantId}
+                        onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, tenantId: v } : r)))}
+                      >
+                        <SelectTrigger className="h-7 w-[160px] text-xs">
+                          <SelectValue placeholder="Select tenant" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {tenantsForProperty.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
                 </div>
               ))}
               <Button size="sm" variant="outline" className="gap-1" onClick={addLineItem}>
