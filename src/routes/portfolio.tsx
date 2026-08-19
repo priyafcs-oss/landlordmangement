@@ -67,7 +67,7 @@ import type {
   Expense,
 } from "@/lib/types";
 import { toast } from "sonner";
-import { BillRow } from "@/components/BillRow";
+import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
@@ -2368,7 +2368,7 @@ export function LeaseAgreementWizard({
 }
 
 export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
-  const { state, deleteBill, markBillPaid } = useStore();
+  const { state } = useStore();
   const bills = state.bills.filter((b) => b.propertyId === propertyId);
 
   return (
@@ -2380,15 +2380,7 @@ export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
         <AddBillDialog propertyId={propertyId} />
       </div>
 
-      {bills.length === 0 && (
-        <div className="rounded-md border p-4 text-center text-muted-foreground text-xs">
-          No bills yet. Add water, rates, strata or insurance bills to track them here.
-        </div>
-      )}
-
-      {bills.sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)).map((b) => (
-        <BillRow key={b.id} bill={b} onPaid={() => { markBillPaid(b.id); toast.success("Marked paid" + (b.recurrenceMonths ? " — next cycle scheduled" : "")); }} onDelete={() => { deleteBill(b.id); toast.success("Bill removed"); }} />
-      ))}
+      <BillsBoard bills={bills} showPropertyFilter={false} />
     </div>
   );
 }
