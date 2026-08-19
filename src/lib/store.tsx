@@ -869,9 +869,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const bill = s.bills.find((b) => b.id === id);
         if (!bill) return s;
         const today = new Date().toISOString().slice(0, 10);
-        void updateRow(TABLES.bills, id, { status: "Paid", paidDate: today });
+
+        // Paying a bill posts it to Transactions/P&L too — every bill except ones the email
+        // pipeline already paired with an Expense at intake gets one created here, the first
+        // time it's actually paid.
+        let linkedExpenseId = bill.linkedExpenseId;
+        let newExpense: Expense | null = null;
+        if (!linkedExpenseId) {
+          newExpense = {
+            id: uid("ex"),
+            itemName: bill.providerName || bill.billType,
+            cost: bill.amount,
+            date: today,
+            propertyId: bill.propertyId,
+            assetId: bill.assetId,
+            taxCategory: "Immediate Deduction",
+            hasWarranty: false,
+            rechargeToTenant: false,
+            status: "approved",
+            source: "manual",
+            bpayBillerCode: bill.bpayBillerCode,
+            bpayReference: bill.bpayReference,
+          };
+          linkedExpenseId = newExpense.id;
+          void upsertRow(TABLES.expenses, newExpense as unknown as Record<string, unknown>);
+        }
+
+        void updateRow(TABLES.bills, id, { status: "Paid", paidDate: today, linkedExpenseId });
         const updated = s.bills.map((b) =>
-          b.id === id ? { ...b, status: "Paid" as const, paidDate: today } : b,
+          b.id === id ? { ...b, status: "Paid" as const, paidDate: today, linkedExpenseId } : b,
         );
         // Auto-create next cycle
         if (bill.recurrenceMonths && bill.recurrenceMonths > 0) {
@@ -881,11 +907,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             dueDate: addMonthsISO(bill.dueDate, bill.recurrenceMonths),
             status: "Unpaid",
             paidDate: undefined,
+            linkedExpenseId: undefined,
           };
           void upsertRow(TABLES.bills, { ...next, paidDate: null } as unknown as Record<string, unknown>);
           updated.push(next);
         }
-        return { ...s, bills: updated };
+        return { ...s, bills: updated, expenses: newExpense ? [...s.expenses, newExpense] : s.expenses };
       }),
 
     dismissProposal: (id) => {

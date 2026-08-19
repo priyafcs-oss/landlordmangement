@@ -513,6 +513,8 @@ export interface PropertyBill {
   label?: string;
   providerName?: string;
   referenceNumber?: string;
+  bpayBillerCode?: string;
+  bpayReference?: string;
   issueDate?: string;
   periodStart?: string;
   periodEnd?: string;
@@ -521,6 +523,9 @@ export interface PropertyBill {
   sourceFileData?: string;
   /** Set only on the bill row the email-ingestion pipeline creates alongside its paired Expense. */
   linkedExpenseId?: string;
+  /** How this bill entered the system — shown as a small badge so a landlord can tell an
+   * AI-read bill apart from one they typed in by hand. */
+  source?: "Manual" | "Upload" | "Email";
 }
 
 /** Extracted-but-unconfirmed lease details from an inbound rent/lease agreement. */

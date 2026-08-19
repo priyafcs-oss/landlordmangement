@@ -160,6 +160,7 @@ async function scheduleFutureInstalments(
       billGroupId,
       label: `Instalment ${idx + 2}`,
       providerName,
+      source: "Email",
       sourceFileName: source.fileName,
       sourceFileData: source.fileData,
     }));
@@ -398,7 +399,9 @@ export async function parseInboundBill(
       dueDate: parsed.due_date,
       status: "Unpaid",
       providerName: parsed.vendor,
-      referenceNumber: parsed.bpay_reference ?? undefined,
+      bpayBillerCode: parsed.bpay_biller_code ?? undefined,
+      bpayReference: parsed.bpay_reference ?? undefined,
+      source: "Email",
       billGroupId,
       label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
       sourceFileName: source.fileName,

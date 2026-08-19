@@ -280,6 +280,8 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
       status: "Unpaid" as const,
       providerName: form.providerName.trim(),
       referenceNumber: form.referenceNumber || undefined,
+      bpayBillerCode: form.bpayBillerCode || undefined,
+      bpayReference: form.bpayReference || undefined,
       issueDate: form.issueDate || undefined,
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
@@ -287,6 +289,7 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
       notes: form.notes || undefined,
       sourceFileName: form.sourceFileName,
       sourceFileData: form.sourceFileData,
+      source: (form.sourceFileData ? "Upload" : "Manual") as "Upload" | "Manual",
       billGroupId,
     };
 
