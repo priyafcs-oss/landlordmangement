@@ -260,7 +260,7 @@ function EntitiesPage() {
         <Card>
           <CardContent className="p-6 text-center text-sm text-muted-foreground">
             <Building2 className="mx-auto mb-2 h-6 w-6" />
-            No entities yet. Add one, then assign properties to it from Portfolio Manager.
+            No entities yet. Add one, then assign properties to it from Assets.
           </CardContent>
         </Card>
       )}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
@@ -75,52 +74,6 @@ import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { FileSignature } from "lucide-react";
 
 
-export const Route = createFileRoute("/portfolio")({
-  head: () => ({
-    meta: [
-      { title: "Portfolio Manager — Landlord OS" },
-      { name: "description", content: "Manage properties, tenants, leases and bond records." },
-    ],
-  }),
-  component: PortfolioPage,
-});
-
-function PortfolioPage() {
-  const { state } = useStore();
-  const [openProp, setOpenProp] = useState<Property | null>(null);
-  const [drawerId, setDrawerId] = useState<string | null>(null);
-
-  return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Portfolio Manager</h1>
-          <p className="text-sm text-muted-foreground">Properties, tenants and leases.</p>
-        </div>
-        <PropertyDialog key={openProp?.id ?? "new"} onDone={() => setOpenProp(null)} property={openProp} />
-      </div>
-
-      <AiProposalsSection />
-
-      {state.properties.length === 0 && (
-        <Card>
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            No properties yet. Add your first property to get started.
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {state.properties.map((p) => (
-          <PropertyCard key={p.id} property={p} onOpen={() => setDrawerId(p.id)} onEdit={() => setOpenProp(p)} />
-        ))}
-      </div>
-
-      <PropertyDrawer propertyId={drawerId} onClose={() => setDrawerId(null)} onEdit={(p) => setOpenProp(p)} />
-    </div>
-  );
-}
-
 /** "View PDF" / "View email" affordances for anything with source-document provenance columns. */
 function DocumentViewLinks({
   fileName,
@@ -161,7 +114,9 @@ function DocumentViewLinks({
   );
 }
 
-function AiProposalsSection() {
+/** Pending AI-extracted proposals (new tenant leases, property-detail updates, rent statements)
+ * awaiting review — surfaced on the Assets page since that's the entry point for properties now. */
+export function AiProposalsSection() {
   const { state, dismissProposal } = useStore();
   const pending = state.aiProposals.filter((p) => p.status === "pending");
   if (pending.length === 0) return null;
@@ -528,98 +483,6 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
           </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function PropertyCard({
-  property,
-  onOpen,
-  onEdit,
-}: {
-  property: Property;
-  onOpen: () => void;
-  onEdit: () => void;
-}) {
-  const { state, deleteProperty } = useStore();
-  const tenants = state.tenants.filter((t) => t.propertyId === property.id);
-  const loan = state.loans.find((l) => l.propertyId === property.id);
-  const equity = property.currentValue - (loan?.totalBalance ?? 0);
-  return (
-    <Card className="group overflow-hidden transition hover:shadow-md">
-      <div className="flex h-32 items-center justify-center bg-gradient-to-br from-primary/10 to-accent">
-        <Building2 className="h-10 w-10 text-primary/40" />
-      </div>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <button className="min-w-0 text-left" onClick={onOpen}>
-            <div className="truncate text-sm font-semibold">{property.alias || property.address}</div>
-            {property.alias && (
-              <div className="truncate text-xs text-muted-foreground">{property.address}</div>
-            )}
-            <div className="mt-1 text-xs text-muted-foreground">
-              {property.currentValue > 0 ? `Value ${fmtCurrency(property.currentValue)}` : "Add portfolio details"}
-            </div>
-            {property.managerName && (
-              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                <UserCog className="h-3 w-3" /> {property.managerName}
-              </div>
-            )}
-          </button>
-          <div className="flex shrink-0 gap-1">
-            <Button size="icon" variant="ghost" onClick={onEdit}>
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => {
-                if (confirm("Delete this property and all its tenants/records?")) {
-                  deleteProperty(property.id);
-                  toast.success("Property removed");
-                }
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded bg-muted p-2">
-            <div className="text-muted-foreground">Equity</div>
-            <div className="font-medium">{fmtCurrency(equity)}</div>
-          </div>
-          <div className="rounded bg-muted p-2">
-            <div className="text-muted-foreground">Tenants</div>
-            <div className="font-medium">{tenants.length}</div>
-          </div>
-        </div>
-
-        <div className="mt-3">
-          {tenants.length > 0 ? (
-            tenants.map((t) => (
-              <div key={t.id} className="mt-2 flex items-center gap-2 text-xs">
-                <User className="h-3 w-3" />
-                <span className="truncate">
-                  {t.name} • {fmtCurrency(t.rentAmount)}/{t.rentFrequency}
-                </span>
-                {t.bondAmount ? (
-                  <Badge variant="secondary" className="gap-1">
-                    <ShieldCheck className="h-3 w-3" /> Bond
-                  </Badge>
-                ) : null}
-              </div>
-            ))
-          ) : (
-            <TenantDialog propertyId={property.id}>
-              <Button size="sm" variant="outline" className="mt-2 w-full">
-                <Plus className="mr-1 h-3 w-3" /> Add Tenant
-              </Button>
-            </TenantDialog>
-          )}
         </div>
       </CardContent>
     </Card>
@@ -1487,98 +1350,6 @@ export function PropertyMediaTab({ prop }: { prop: Property }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function PropertyDrawer({
-  propertyId,
-  onClose,
-  onEdit,
-}: {
-  propertyId: string | null;
-  onClose: () => void;
-  onEdit: (p: Property) => void;
-}) {
-  const { state } = useStore();
-  const prop = state.properties.find((p) => p.id === propertyId);
-  const tenants = state.tenants.filter((t) => t.propertyId === propertyId);
-  const loan = state.loans.find((l) => l.propertyId === propertyId);
-  const expenses = state.expenses.filter((e) => e.propertyId === propertyId);
-  return (
-    <Sheet open={!!propertyId} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
-        <SheetHeader>
-          <div className="flex items-center justify-between gap-2 pr-8">
-            <div>
-              <SheetTitle>{prop?.alias || prop?.address}</SheetTitle>
-              {prop?.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
-            </div>
-            {prop && (
-              <div className="flex shrink-0 gap-2">
-                <UploadDocumentDialog />
-                <Button size="sm" variant="outline" className="gap-1" onClick={() => onEdit(prop)}>
-                  <Pencil className="h-3.5 w-3.5" /> Edit property
-                </Button>
-              </div>
-            )}
-          </div>
-        </SheetHeader>
-        {prop && (
-          <Tabs defaultValue="overview" className="mt-4">
-            <TabsList className="flex-wrap h-auto">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="details">Details</TabsTrigger>
-              <TabsTrigger value="purchase">Purchase &amp; Settlement</TabsTrigger>
-              <TabsTrigger value="performance">Performance</TabsTrigger>
-              <TabsTrigger value="costbase">Cost Base</TabsTrigger>
-              <TabsTrigger value="depreciation">Depreciation</TabsTrigger>
-              <TabsTrigger value="pnl">P&amp;L</TabsTrigger>
-              <TabsTrigger value="compliance">Compliance</TabsTrigger>
-              <TabsTrigger value="housekeeping">Housekeeping &amp; Bills</TabsTrigger>
-              <TabsTrigger value="providers">Providers</TabsTrigger>
-              <TabsTrigger value="media">Media</TabsTrigger>
-            </TabsList>
-            <TabsContent value="overview" className="text-sm">
-              <PropertyOverviewTab prop={prop} loan={loan} tenants={tenants} />
-            </TabsContent>
-            <TabsContent value="purchase" className="text-sm">
-              <PropertyPurchaseTab prop={prop} loan={loan} />
-            </TabsContent>
-            <TabsContent value="performance" className="text-sm">
-              <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
-            </TabsContent>
-            <TabsContent value="costbase" className="text-sm">
-              <PropertyCostBaseTab
-                prop={prop}
-                expenses={expenses}
-                depreciationItems={prop.assetId ? state.depreciationItems.filter((d) => d.assetId === prop.assetId) : []}
-              />
-            </TabsContent>
-            <TabsContent value="depreciation" className="text-sm">
-              <DepreciationTab assetId={prop.assetId} />
-            </TabsContent>
-            <TabsContent value="pnl" className="text-sm">
-              <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
-            </TabsContent>
-            <TabsContent value="compliance" className="text-sm">
-              <PropertyComplianceTab prop={prop} />
-            </TabsContent>
-            <TabsContent value="details" className="text-sm">
-              <PropertyDetailsTab prop={prop} expenses={expenses} tenants={tenants} />
-            </TabsContent>
-            <TabsContent value="housekeeping">
-              <PropertyBillsTab propertyId={prop.id} />
-            </TabsContent>
-            <TabsContent value="providers">
-              <PropertyProvidersTab propertyId={prop.id} />
-            </TabsContent>
-            <TabsContent value="media" className="text-sm">
-              <PropertyMediaTab prop={prop} />
-            </TabsContent>
-          </Tabs>
-        )}
-      </SheetContent>
-    </Sheet>
   );
 }
 

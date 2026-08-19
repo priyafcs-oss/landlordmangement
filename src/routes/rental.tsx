@@ -76,7 +76,7 @@ import {
   LeaseAgreementWizard,
   RentChangeRow,
   LeaseHistoryRow,
-} from "./portfolio";
+} from "@/components/PropertyShared";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 
 export const Route = createFileRoute("/rental")({
@@ -158,7 +158,7 @@ function RentalHubPage() {
       {!property && (
         <Card>
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            Add a property in the Portfolio Manager to get started.
+            Add a property in Assets to get started.
           </CardContent>
         </Card>
       )}

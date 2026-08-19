@@ -22,7 +22,7 @@ import { BillRow } from "@/components/BillRow";
 import { Coins, LineChart, Plus, Building2, ArrowRight, FileText } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
-import { PropertyDialog } from "./portfolio";
+import { PropertyDialog, AiProposalsSection } from "@/components/PropertyShared";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/assets")({
@@ -441,6 +441,8 @@ function AssetsPage() {
           <AssetDialog />
         </div>
       </div>
+
+      <AiProposalsSection />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as typeof typeFilter)}>

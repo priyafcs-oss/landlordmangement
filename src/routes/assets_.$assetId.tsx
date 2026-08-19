@@ -30,7 +30,7 @@ import {
   PropertyComplianceTab,
   PropertyProvidersTab,
   PropertyMediaTab,
-} from "./portfolio";
+} from "@/components/PropertyShared";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({

@@ -61,7 +61,7 @@ export function UploadDocumentDialog() {
             : "Bill uploaded and added to Expenses",
         );
       } else if (data.proposalId) {
-        toast.success("Uploaded — staged for review in Documents / Portfolio Manager");
+        toast.success("Uploaded — staged for review in Documents / Assets");
       } else {
         toast.success("Document processed");
       }

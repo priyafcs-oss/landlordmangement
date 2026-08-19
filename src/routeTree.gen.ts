@@ -20,7 +20,6 @@ import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as ForecastsRouteImport } from './routes/forecasts'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
-import { Route as PortfolioRouteImport } from './routes/portfolio'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TransactionsRouteImport } from './routes/transactions'
@@ -83,11 +82,6 @@ const MaintenanceRoute = MaintenanceRouteImport.update({
   path: '/maintenance',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PortfolioRoute = PortfolioRouteImport.update({
-  id: '/portfolio',
-  path: '/portfolio',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const RentalRoute = RentalRouteImport.update({
   id: '/rental',
   path: '/rental',
@@ -131,7 +125,6 @@ export interface FileRoutesByFullPath {
   '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
-  '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
@@ -151,7 +144,6 @@ export interface FileRoutesByTo {
   '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
-  '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
@@ -172,7 +164,6 @@ export interface FileRoutesById {
   '/forecasts': typeof ForecastsRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
-  '/portfolio': typeof PortfolioRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
@@ -194,7 +185,6 @@ export interface FileRouteTypes {
     | '/forecasts'
     | '/inspections'
     | '/maintenance'
-    | '/portfolio'
     | '/rental'
     | '/settings'
     | '/transactions'
@@ -214,7 +204,6 @@ export interface FileRouteTypes {
     | '/forecasts'
     | '/inspections'
     | '/maintenance'
-    | '/portfolio'
     | '/rental'
     | '/settings'
     | '/transactions'
@@ -234,7 +223,6 @@ export interface FileRouteTypes {
     | '/forecasts'
     | '/inspections'
     | '/maintenance'
-    | '/portfolio'
     | '/rental'
     | '/settings'
     | '/transactions'
@@ -255,7 +243,6 @@ export interface RootRouteChildren {
   ForecastsRoute: typeof ForecastsRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
-  PortfolioRoute: typeof PortfolioRoute
   RentalRoute: typeof RentalRoute
   SettingsRoute: typeof SettingsRoute
   TransactionsRoute: typeof TransactionsRoute
@@ -343,13 +330,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MaintenanceRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/portfolio': {
-      id: '/portfolio'
-      path: '/portfolio'
-      fullPath: '/portfolio'
-      preLoaderRoute: typeof PortfolioRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/rental': {
       id: '/rental'
       path: '/rental'
@@ -407,7 +387,6 @@ const rootRouteChildren: RootRouteChildren = {
   ForecastsRoute: ForecastsRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
-  PortfolioRoute: PortfolioRoute,
   RentalRoute: RentalRoute,
   SettingsRoute: SettingsRoute,
   TransactionsRoute: TransactionsRoute,

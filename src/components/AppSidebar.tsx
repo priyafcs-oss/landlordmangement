@@ -10,12 +10,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, Building2, Wallet, Wrench, Sparkles, Home, Settings, ClipboardCheck, FolderOpen, Users2, Receipt, ListOrdered, Coins, TrendingUp, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Wallet, Wrench, Sparkles, Home, Settings, ClipboardCheck, FolderOpen, Users2, Receipt, ListOrdered, Coins, TrendingUp, ShieldCheck } from "lucide-react";
 
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Assets", url: "/assets", icon: Coins },
-  { title: "Portfolio Manager", url: "/portfolio", icon: Building2 },
   { title: "Entities", url: "/entities", icon: Users2 },
   { title: "Rental Hub", url: "/rental", icon: Wallet },
   { title: "Bills", url: "/bills", icon: Receipt },
