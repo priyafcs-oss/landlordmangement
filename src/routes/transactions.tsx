@@ -3,10 +3,19 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Download, Receipt } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Download, Receipt, Search, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
@@ -61,6 +70,8 @@ interface TxRow {
   propertyId?: string;
   assetId?: string;
   amount: number; // positive = income, negative = outgoing
+  source?: "Manual" | "Email" | "Upload";
+  needsAttention?: boolean;
 }
 
 export function LedgerTab() {
@@ -69,6 +80,10 @@ export function LedgerTab() {
   const [fy, setFy] = useState(currentFY);
   const [propertyId, setPropertyId] = useState("__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
+  const [query, setQuery] = useState("");
+  const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
+  const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
+  const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false });
   const { start, end } = fyRange(fy);
 
   const fys = useMemo(() => {
@@ -93,6 +108,7 @@ export function LedgerTab() {
           category: e.type,
           propertyId: tenant?.propertyId,
           amount: e.credit,
+          source: "Manual" as const,
         };
       }),
     ...state.expenses.map((e) => ({
@@ -103,15 +119,29 @@ export function LedgerTab() {
       propertyId: e.propertyId,
       assetId: e.assetId,
       amount: e.direction === "Income" ? e.cost : -e.cost,
+      source: e.source === "email_auto" ? ("Email" as const) : e.source === "upload" ? ("Upload" as const) : ("Manual" as const),
+      needsAttention: e.status === "needs_review",
     })),
   ];
 
   const assetTypeOf = (r: TxRow) => state.assets.find((a) => a.id === r.assetId)?.assetType;
+  const anyTypeFilter = typeFilter.income || typeFilter.expense;
+  const anySourceFilter = sourceFilter.manual || sourceFilter.email || sourceFilter.upload;
 
   const filtered = allRows
     .filter((r) => r.date >= start && r.date <= end)
     .filter((r) => propertyId === "__all__" || r.propertyId === propertyId)
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
+    .filter((r) => !query || `${r.description} ${r.category}`.toLowerCase().includes(query.toLowerCase()))
+    .filter((r) => !needsAttentionOnly || r.needsAttention)
+    .filter((r) => !anyTypeFilter || (typeFilter.income && r.amount > 0) || (typeFilter.expense && r.amount < 0))
+    .filter(
+      (r) =>
+        !anySourceFilter ||
+        (sourceFilter.manual && r.source === "Manual") ||
+        (sourceFilter.email && r.source === "Email") ||
+        (sourceFilter.upload && r.source === "Upload"),
+    )
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   const totalIncome = filtered.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
@@ -122,13 +152,19 @@ export function LedgerTab() {
       acc[r.category] = (acc[r.category] ?? 0) + Math.abs(r.amount);
       return acc;
     }, {});
+  const byTaxCategory = filtered
+    .filter((r) => r.amount < 0 && (r.category === "Immediate Deduction" || r.category === "Capital Works"))
+    .reduce<Record<string, number>>((acc, r) => {
+      acc[r.category] = (acc[r.category] ?? 0) + Math.abs(r.amount);
+      return acc;
+    }, {});
 
   const exportCsv = () => {
-    const header = ["Date", "Description", "Category", "Asset", "Amount"];
+    const header = ["Date", "Description", "Category", "Source", "Asset", "Amount"];
     const rows = filtered.map((r) => {
       const prop = state.properties.find((p) => p.id === r.propertyId);
       const asset = state.assets.find((a) => a.id === r.assetId);
-      return [r.date, r.description, r.category, prop?.alias || prop?.address || asset?.name || "", r.amount];
+      return [r.date, r.description, r.category, r.source ?? "", prop?.alias || prop?.address || asset?.name || "", r.amount];
     });
     downloadCsv(`transactions-${fy}.csv`, header, rows);
     toast.success("Transactions CSV downloaded");
@@ -136,86 +172,146 @@ export function LedgerTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button size="sm" variant="outline" className="gap-1" onClick={exportCsv}>
-          <Download className="h-3.5 w-3.5" /> CSV
-        </Button>
-        <AddTransactionDialog />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Search transactions…" value={query} onChange={(e) => setQuery(e.target.value)} className="w-[200px] pl-7" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={fy} onValueChange={setFy}>
+            <SelectTrigger className="w-[130px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {fys.map((y) => (
+                <SelectItem key={y} value={y}>
+                  FY {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={propertyId} onValueChange={setPropertyId}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All properties" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All properties</SelectItem>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.alias || p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
+            <SelectTrigger className="w-[130px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All asset types</SelectItem>
+              <SelectItem value="Property">Property</SelectItem>
+              <SelectItem value="Gold">Gold</SelectItem>
+              <SelectItem value="ETF">ETF</SelectItem>
+            </SelectContent>
+          </Select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                <SlidersHorizontal className="h-3.5 w-3.5" /> Filters
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuCheckboxItem checked={needsAttentionOnly} onCheckedChange={setNeedsAttentionOnly}>
+                Needs attention
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Type</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem checked={typeFilter.income} onCheckedChange={(v) => setTypeFilter((f) => ({ ...f, income: v === true }))}>
+                Income
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={typeFilter.expense} onCheckedChange={(v) => setTypeFilter((f) => ({ ...f, expense: v === true }))}>
+                Expense
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Source</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem checked={sourceFilter.manual} onCheckedChange={(v) => setSourceFilter((f) => ({ ...f, manual: v === true }))}>
+                Manual
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={sourceFilter.email} onCheckedChange={(v) => setSourceFilter((f) => ({ ...f, email: v === true }))}>
+                Email
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={sourceFilter.upload} onCheckedChange={(v) => setSourceFilter((f) => ({ ...f, upload: v === true }))}>
+                Upload
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button size="sm" variant="outline" className="gap-1" onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" /> CSV
+          </Button>
+          <AddTransactionDialog />
+        </div>
       </div>
 
       <NeedsReviewBanner />
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-3 lg:col-span-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={fy} onValueChange={setFy}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {fys.map((y) => (
-                  <SelectItem key={y} value={y}>
-                    FY {y}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="All properties" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All properties</SelectItem>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All asset types</SelectItem>
-                <SelectItem value="Property">Property</SelectItem>
-                <SelectItem value="Gold">Gold</SelectItem>
-                <SelectItem value="ETF">ETF</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            {filtered.length === 0 && (
-              <Card>
-                <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                  <Receipt className="mx-auto mb-2 h-6 w-6" />
-                  No transactions in this range.
-                </CardContent>
-              </Card>
+        <div className="lg:col-span-2">
+          <Card>
+            {filtered.length === 0 ? (
+              <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                <Receipt className="mx-auto mb-2 h-6 w-6" />
+                No transactions match these filters.
+              </CardContent>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Date</th>
+                      <th className="px-3 py-2 font-medium">Description</th>
+                      <th className="px-3 py-2 font-medium">Category</th>
+                      <th className="px-3 py-2 font-medium">Source</th>
+                      <th className="px-3 py-2 text-right font-medium">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((r) => {
+                      const prop = state.properties.find((p) => p.id === r.propertyId);
+                      const asset = state.assets.find((a) => a.id === r.assetId);
+                      const label = prop?.alias || prop?.address || asset?.name;
+                      return (
+                        <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="whitespace-nowrap px-3 py-2 text-xs">{r.date}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5 font-medium">
+                              {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
+                              {r.description}
+                            </div>
+                            {label && <div className="text-xs text-muted-foreground">{label}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{r.source ?? "—"}</td>
+                          <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
+                            {r.amount < 0 ? "−" : "+"}
+                            {fmtCurrency(Math.abs(r.amount))}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-            {filtered.map((r) => {
-              const prop = state.properties.find((p) => p.id === r.propertyId);
-              const asset = state.assets.find((a) => a.id === r.assetId);
-              const label = prop?.alias || prop?.address || asset?.name;
-              return (
-                <div key={r.id} className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm">
-                  <div className="min-w-0">
-                    <div className="font-medium">{r.description}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {r.date} • {r.category}
-                      {label && <> • {label}</>}
-                    </div>
-                  </div>
-                  <div className={`shrink-0 font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
-                    {r.amount < 0 ? "−" : "+"}
-                    {fmtCurrency(Math.abs(r.amount))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+              <span>
+                {filtered.length} of {allRows.filter((r) => r.date >= start && r.date <= end).length} transactions
+              </span>
+              <span>
+                Income <span className="text-emerald-600">{fmtCurrency(totalIncome)}</span> · Expenses{" "}
+                <span className="text-destructive">{fmtCurrency(Math.abs(totalExpenses))}</span>
+              </span>
+            </div>
+          </Card>
         </div>
 
         <div className="space-y-4">
@@ -253,6 +349,22 @@ export function LedgerTab() {
                     <span className="font-medium">{fmtCurrency(amount)}</span>
                   </div>
                 ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">For tax</CardTitle>
+              <div className="text-xs text-muted-foreground">Claimable vs capital</div>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {Object.keys(byTaxCategory).length === 0 && <div className="text-xs text-muted-foreground">No expenses in this range.</div>}
+              {Object.entries(byTaxCategory).map(([cat, amount]) => (
+                <div key={cat} className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{cat}</span>
+                  <span className="font-medium">{fmtCurrency(amount)}</span>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </div>
