@@ -4,15 +4,7 @@ import { CheckCircle2, ExternalLink, Paperclip, Receipt, Trash2 } from "lucide-r
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
-
-const IMAGE_EXT_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
-
-function openSourceDocument(bill: PropertyBill) {
-  if (!bill.sourceFileData) return;
-  const ext = (bill.sourceFileName ?? "").toLowerCase().split(".").pop() ?? "";
-  const mime = IMAGE_EXT_MIME[ext] ?? "application/pdf";
-  window.open(`data:${mime};base64,${bill.sourceFileData}`, "_blank");
-}
+import { openBillDocument } from "@/lib/files";
 
 export function BillRow({
   bill,
@@ -68,7 +60,7 @@ export function BillRow({
       {bill.sourceFileData && (
         <button
           type="button"
-          onClick={() => openSourceDocument(bill)}
+          onClick={() => openBillDocument(bill.sourceFileName, bill.sourceFileData)}
           className="mt-1 inline-flex items-center gap-1 text-xs text-primary"
         >
           <Paperclip className="h-3 w-3" /> {bill.sourceFileName || "Source document"}

@@ -13,10 +13,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CheckCircle2, Trash2, Plus, Pencil, FileX } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency } from "@/lib/calculations";
 import type { BillType, BillLineItem, PropertyBill } from "@/lib/types";
+import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -26,37 +27,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1">
       <Label className="text-xs">{label}</Label>
       {children}
-    </div>
-  );
-}
-
-const IMAGE_EXT_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
-
-function DocumentViewer({ fileName, fileData }: { fileName?: string; fileData?: string }) {
-  if (!fileData) {
-    return (
-      <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-2 rounded-md border border-dashed text-xs text-muted-foreground">
-        <FileX className="h-6 w-6" />
-        No document attached
-      </div>
-    );
-  }
-  const ext = (fileName ?? "").toLowerCase().split(".").pop() ?? "";
-  const imageMime = IMAGE_EXT_MIME[ext];
-  const src = `data:${imageMime ?? "application/pdf"};base64,${fileData}`;
-  return (
-    <div className="flex h-full min-h-[300px] flex-col overflow-hidden rounded-md border">
-      <div className="flex items-center justify-between border-b bg-muted/40 px-2 py-1 text-xs">
-        <span className="truncate">{fileName || "Document"}</span>
-        <a href={src} download={fileName} className="shrink-0 text-primary">
-          Download
-        </a>
-      </div>
-      {imageMime ? (
-        <img src={src} alt={fileName} className="max-h-full w-full flex-1 overflow-auto object-contain" />
-      ) : (
-        <iframe title={fileName || "Bill document"} src={src} className="min-h-[400px] flex-1" />
-      )}
     </div>
   );
 }
@@ -238,7 +208,7 @@ export function BillDetailDialog({
         </DialogHeader>
 
         <div className="grid gap-4 text-sm md:grid-cols-2">
-          <DocumentViewer fileName={selected.sourceFileName} fileData={selected.sourceFileData} />
+          <BillDocumentViewer fileName={selected.sourceFileName} fileData={selected.sourceFileData} />
 
           <div className="space-y-4">
             {siblings.length > 1 && (

@@ -24,6 +24,8 @@ import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, Ch
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
+import { openBillDocument } from "@/lib/files";
+import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { BillType, BillLineItem } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
@@ -69,15 +71,6 @@ interface ExtractResult {
   confidence?: number;
 }
 
-const IMAGE_EXT_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
-
-function openDataUrl(fileName: string | undefined, base64: string | undefined) {
-  if (!base64) return;
-  const ext = (fileName ?? "").toLowerCase().split(".").pop() ?? "";
-  const mime = IMAGE_EXT_MIME[ext] ?? "application/pdf";
-  window.open(`data:${mime};base64,${base64}`, "_blank");
-}
-
 function mapBillType(category?: string): BillType {
   const exact = BILL_TYPES.find((t) => t.toLowerCase() === (category ?? "").trim().toLowerCase());
   if (exact) return exact;
@@ -92,11 +85,13 @@ function mapBillType(category?: string): BillType {
 }
 
 /**
- * Rich Add Bill dialog: upload-and-extract, a "scheduled payments" instalment schedule, provider
- * details (with portal login, which upserts a Provider record rather than living on the bill), and
- * line items. Shared between /bills (no propertyId — full property picker) and a property's Bills
- * tab (propertyId locked). Lives in src/components rather than portfolio.tsx because rental.tsx and
- * bills.tsx both need it and must never import from portfolio.tsx.
+ * Rich Add Bill dialog: a document pane (upload/drag-drop, previewed live) alongside a
+ * scheduled-payment instalment schedule, provider details (with portal login, which upserts a
+ * Provider record rather than living on the bill), and line items. Shared between /bills (no
+ * propertyId — full property picker) and a property's Bills tab (propertyId defaulted but still
+ * editable, in case the document turns out to be for a different property). Lives in
+ * src/components rather than portfolio.tsx because rental.tsx and bills.tsx both need it and must
+ * never import from portfolio.tsx.
  */
 export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: string }) {
   const { state, addBill, addProvider, updateProvider } = useStore();
@@ -165,6 +160,9 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         reader.readAsDataURL(file);
       });
       const base64 = dataUrl.split(",")[1] ?? "";
+      // Attach immediately so the document pane shows the file even if extraction fails below.
+      setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
+
       const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-bill", {
         body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
       });
@@ -192,8 +190,6 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         bpayReference: data.bpay_reference ?? f.bpayReference,
         referenceNumber: data.bpay_reference ?? f.referenceNumber,
         hasInstalments: (data.future_instalments?.length ?? 0) > 0,
-        sourceFileName: file.name,
-        sourceFileData: base64,
       }));
       setLineItems([
         {
@@ -227,7 +223,7 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
           propertyMatched: !!matchedProperty,
           instalmentCount: data.future_instalments?.length ?? 0,
         });
-        toast.success("Extracted — review the fields below before saving");
+        toast.success("Extracted — review the fields before saving");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Extraction failed");
@@ -255,7 +251,7 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
   const removeLineItem = (key: string) => setLineItems((rows) => rows.filter((r) => r.key !== key));
 
   const save = () => {
-    const propertyId = lockedPropertyId ?? form.propertyId;
+    const propertyId = form.propertyId || lockedPropertyId || "";
     if (!propertyId) return toast.error("Property is required");
     if (!form.providerName.trim()) return toast.error("Provider name is required");
     if (!form.dueDate) return toast.error("Due date is required");
@@ -344,139 +340,144 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
           <Plus className="h-3 w-3" /> Add Bill
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New bill</DialogTitle>
+          <div className="text-xs text-muted-foreground">Upload a bill for AI extraction, or enter the details manually.</div>
         </DialogHeader>
 
-        <div className="space-y-4 text-sm">
-          <div
-            className={
-              "rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
-            }
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={onDrop}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs text-muted-foreground">
-                {busy ? "Reading document…" : "Drop a bill here, or choose a file — the fields below get pre-filled."}
+        <div className="grid gap-4 text-sm md:grid-cols-[340px_1fr]">
+          <div className="space-y-3">
+            <div
+              className={
+                "rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
+              }
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+            >
+              <div className="flex flex-col gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {busy ? "Reading document…" : "Drop a bill here, or choose a file."}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="h-8 text-xs"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void extract(f);
+                    }}
+                  />
+                  <FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="file"
-                  accept="application/pdf,image/*"
-                  className="h-8 w-[220px] text-xs"
-                  disabled={busy}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void extract(f);
-                  }}
-                />
-                <FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </div>
+              {form.sourceFileName && (
+                <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
+                  <span className="truncate text-xs">{form.sourceFileName}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 shrink-0 gap-1 text-xs"
+                    onClick={() => openBillDocument(form.sourceFileName, form.sourceFileData)}
+                  >
+                    <Eye className="h-3 w-3" /> View
+                  </Button>
+                </div>
+              )}
+              {extractSummary && (
+                <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
+                  <div className="flex items-center gap-1 font-medium">
+                    <CheckCircle2 className="h-3 w-3" /> Found in this document
+                  </div>
+                  <div>
+                    {extractSummary.vendor || "Unknown vendor"} — {fmtCurrency(extractSummary.amount)}
+                    {extractSummary.dueDate ? ` due ${extractSummary.dueDate}` : ""}
+                  </div>
+                  <div className="text-emerald-800">
+                    {extractSummary.propertyMatched ? "Property matched automatically. " : "Couldn't match a property — select one to the right. "}
+                    {extractSummary.instalmentCount > 0
+                      ? `${extractSummary.instalmentCount} future instalment(s) added.`
+                      : "No future instalments found."}
+                  </div>
+                </div>
+              )}
+              {extractEmpty && (
+                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  Couldn't find bill details in this file — the document is still attached, fill in the fields manually.
+                </div>
+              )}
+              {confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD && (
+                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  Low-confidence extraction — double-check every field before saving.
+                </div>
+              )}
             </div>
-            {form.sourceFileName && (
-              <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
-                <span className="text-xs">Attached: {form.sourceFileName}</span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 gap-1 text-xs"
-                  onClick={() => openDataUrl(form.sourceFileName, form.sourceFileData)}
-                >
-                  <Eye className="h-3 w-3" /> View
+
+            <BillDocumentViewer fileName={form.sourceFileName} fileData={form.sourceFileData} />
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 rounded-md border p-2">
+              <Checkbox
+                checked={form.hasInstalments}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, hasInstalments: v === true }))}
+              />
+              <Label className="cursor-pointer text-xs" onClick={() => setForm((f) => ({ ...f, hasInstalments: !f.hasInstalments }))}>
+                This bill has scheduled payments (future instalments)
+              </Label>
+            </div>
+
+            {form.hasInstalments && (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="text-xs font-medium">Payment plan</div>
+                {instalments.map((inst) => (
+                  <div key={inst.key} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
+                    <Field label="Label">
+                      <Input
+                        value={inst.label}
+                        onChange={(e) =>
+                          setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, label: e.target.value } : r)))
+                        }
+                      />
+                    </Field>
+                    <Field label="Due date">
+                      <Input
+                        type="date"
+                        value={inst.dueDate}
+                        onChange={(e) =>
+                          setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, dueDate: e.target.value } : r)))
+                        }
+                      />
+                    </Field>
+                    <Field label="Amount">
+                      <Input
+                        type="number"
+                        value={inst.amount}
+                        onChange={(e) =>
+                          setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, amount: e.target.value } : r)))
+                        }
+                      />
+                    </Field>
+                    <Button size="icon" variant="ghost" onClick={() => removeInstalment(inst.key)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button size="sm" variant="outline" className="gap-1" onClick={addInstalment}>
+                  <Plus className="h-3 w-3" /> Add payment
                 </Button>
               </div>
             )}
-            {extractSummary && (
-              <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
-                <div className="flex items-center gap-1 font-medium">
-                  <CheckCircle2 className="h-3 w-3" /> Found in this document
-                </div>
-                <div>
-                  {extractSummary.vendor || "Unknown vendor"} — {fmtCurrency(extractSummary.amount)}
-                  {extractSummary.dueDate ? ` due ${extractSummary.dueDate}` : ""}
-                </div>
-                <div className="text-emerald-800">
-                  {extractSummary.propertyMatched ? "Property matched automatically. " : "Couldn't match a property — select one below. "}
-                  {extractSummary.instalmentCount > 0
-                    ? `${extractSummary.instalmentCount} future instalment(s) added.`
-                    : "No future instalments found."}
-                </div>
-              </div>
-            )}
-            {extractEmpty && (
-              <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                <AlertTriangle className="h-3 w-3 shrink-0" />
-                Couldn't find bill details in this file — the document is still attached, fill in the fields manually.
-              </div>
-            )}
-            {confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD && (
-              <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                <AlertTriangle className="h-3 w-3 shrink-0" />
-                Low-confidence extraction — double-check every field before saving.
-              </div>
-            )}
-          </div>
 
-          <div className="flex items-center gap-2 rounded-md border p-2">
-            <Checkbox
-              checked={form.hasInstalments}
-              onCheckedChange={(v) => setForm((f) => ({ ...f, hasInstalments: v === true }))}
-            />
-            <Label className="cursor-pointer text-xs" onClick={() => setForm((f) => ({ ...f, hasInstalments: !f.hasInstalments }))}>
-              This bill has scheduled payments (future instalments)
-            </Label>
-          </div>
-
-          {form.hasInstalments && (
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="text-xs font-medium">Payment plan</div>
-              {instalments.map((inst) => (
-                <div key={inst.key} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
-                  <Field label="Label">
-                    <Input
-                      value={inst.label}
-                      onChange={(e) =>
-                        setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, label: e.target.value } : r)))
-                      }
-                    />
-                  </Field>
-                  <Field label="Due date">
-                    <Input
-                      type="date"
-                      value={inst.dueDate}
-                      onChange={(e) =>
-                        setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, dueDate: e.target.value } : r)))
-                      }
-                    />
-                  </Field>
-                  <Field label="Amount">
-                    <Input
-                      type="number"
-                      value={inst.amount}
-                      onChange={(e) =>
-                        setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, amount: e.target.value } : r)))
-                      }
-                    />
-                  </Field>
-                  <Button size="icon" variant="ghost" onClick={() => removeInstalment(inst.key)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-              <Button size="sm" variant="outline" className="gap-1" onClick={addInstalment}>
-                <Plus className="h-3 w-3" /> Add payment
-              </Button>
-            </div>
-          )}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            {!lockedPropertyId && (
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <Field label="Property">
                   <Select value={form.propertyId} onValueChange={(v) => setForm((f) => ({ ...f, propertyId: v }))}>
@@ -493,158 +494,158 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
                   </Select>
                 </Field>
               </div>
-            )}
-            <Field label="Bill type">
-              <Select value={form.billType} onValueChange={(v) => setForm((f) => ({ ...f, billType: v as BillType }))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BILL_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Reference #">
-              <Input value={form.referenceNumber} onChange={(e) => setForm((f) => ({ ...f, referenceNumber: e.target.value }))} />
-            </Field>
-            <Field label="Issue date">
-              <Input type="date" value={form.issueDate} onChange={(e) => setForm((f) => ({ ...f, issueDate: e.target.value }))} />
-            </Field>
-            <Field label="Due date">
-              <Input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} />
-            </Field>
-            <Field label="BPAY biller code">
-              <Input value={form.bpayBillerCode} onChange={(e) => setForm((f) => ({ ...f, bpayBillerCode: e.target.value }))} />
-            </Field>
-            <Field label="BPAY reference">
-              <Input value={form.bpayReference} onChange={(e) => setForm((f) => ({ ...f, bpayReference: e.target.value }))} />
-            </Field>
-            <Field label="Period start">
-              <Input type="date" value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />
-            </Field>
-            <Field label="Period end">
-              <Input type="date" value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />
-            </Field>
-          </div>
-
-          <div className="space-y-2 rounded-md border p-3">
-            <div className="text-xs font-medium">Provider information</div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Field label="Provider name">
-                  <Input
-                    list="add-bill-providers"
-                    value={form.providerName}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      const match = providersForProperty.find((p) => p.name.toLowerCase() === name.toLowerCase());
-                      setForm((f) => ({
-                        ...f,
-                        providerName: name,
-                        portalUrl: match?.portalUrl ?? f.portalUrl,
-                        portalUsername: match?.portalUsername ?? f.portalUsername,
-                        passwordNote: match?.passwordNote ?? f.passwordNote,
-                      }));
-                    }}
-                  />
-                  <datalist id="add-bill-providers">
-                    {providersForProperty.map((p) => (
-                      <option key={p.id} value={p.name} />
+              <Field label="Bill type">
+                <Select value={form.billType} onValueChange={(v) => setForm((f) => ({ ...f, billType: v as BillType }))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BILL_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
                     ))}
-                  </datalist>
-                </Field>
-              </div>
-              <Field label="Portal URL">
-                <Input value={form.portalUrl} onChange={(e) => setForm((f) => ({ ...f, portalUrl: e.target.value }))} placeholder="https://…" />
+                  </SelectContent>
+                </Select>
               </Field>
-              <Field label="Portal username">
-                <Input value={form.portalUsername} onChange={(e) => setForm((f) => ({ ...f, portalUsername: e.target.value }))} />
+              <Field label="Reference #">
+                <Input value={form.referenceNumber} onChange={(e) => setForm((f) => ({ ...f, referenceNumber: e.target.value }))} />
               </Field>
-              <Field label="Password note">
-                <Input value={form.passwordNote} onChange={(e) => setForm((f) => ({ ...f, passwordNote: e.target.value }))} />
+              <Field label="Issue date">
+                <Input type="date" value={form.issueDate} onChange={(e) => setForm((f) => ({ ...f, issueDate: e.target.value }))} />
+              </Field>
+              <Field label="Due date">
+                <Input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} />
+              </Field>
+              <Field label="BPAY biller code">
+                <Input value={form.bpayBillerCode} onChange={(e) => setForm((f) => ({ ...f, bpayBillerCode: e.target.value }))} />
+              </Field>
+              <Field label="BPAY reference">
+                <Input value={form.bpayReference} onChange={(e) => setForm((f) => ({ ...f, bpayReference: e.target.value }))} />
+              </Field>
+              <Field label="Period start">
+                <Input type="date" value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />
+              </Field>
+              <Field label="Period end">
+                <Input type="date" value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />
               </Field>
             </div>
-          </div>
 
-          <div className="space-y-2 rounded-md border p-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-medium">Line items</div>
-              <div className="text-xs text-muted-foreground">Net: {fmtCurrency(netTotal)}</div>
-            </div>
-            {lineItems.map((li) => (
-              <div key={li.key} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
-                <Field label="Description">
-                  <Input
-                    value={li.description}
-                    onChange={(e) =>
-                      setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))
-                    }
-                  />
-                </Field>
-                <Field label="Category">
-                  <Select
-                    value={li.category}
-                    onValueChange={(v) =>
-                      setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BILL_TYPES.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {t}
-                        </SelectItem>
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="text-xs font-medium">Provider information</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <Field label="Provider name">
+                    <Input
+                      list="add-bill-providers"
+                      value={form.providerName}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const match = providersForProperty.find((p) => p.name.toLowerCase() === name.toLowerCase());
+                        setForm((f) => ({
+                          ...f,
+                          providerName: name,
+                          portalUrl: match?.portalUrl ?? f.portalUrl,
+                          portalUsername: match?.portalUsername ?? f.portalUsername,
+                          passwordNote: match?.passwordNote ?? f.passwordNote,
+                        }));
+                      }}
+                    />
+                    <datalist id="add-bill-providers">
+                      {providersForProperty.map((p) => (
+                        <option key={p.id} value={p.name} />
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </datalist>
+                  </Field>
+                </div>
+                <Field label="Portal URL">
+                  <Input value={form.portalUrl} onChange={(e) => setForm((f) => ({ ...f, portalUrl: e.target.value }))} placeholder="https://…" />
                 </Field>
-                <Field label="Amount">
-                  <Input
-                    type="number"
-                    value={li.amount}
-                    onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))}
-                  />
+                <Field label="Portal username">
+                  <Input value={form.portalUsername} onChange={(e) => setForm((f) => ({ ...f, portalUsername: e.target.value }))} />
                 </Field>
-                <Field label="GST">
-                  <Input
-                    type="number"
-                    value={li.gst}
-                    onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))}
-                  />
+                <Field label="Password note">
+                  <Input value={form.passwordNote} onChange={(e) => setForm((f) => ({ ...f, passwordNote: e.target.value }))} />
                 </Field>
-                <Button size="icon" variant="ghost" onClick={() => removeLineItem(li.key)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
               </div>
-            ))}
-            <Button size="sm" variant="outline" className="gap-1" onClick={addLineItem}>
-              <Plus className="h-3 w-3" /> Add line item
-            </Button>
-          </div>
+            </div>
 
-          <div>
-            <button
-              type="button"
-              className="flex items-center gap-1 text-xs text-muted-foreground"
-              onClick={() => setNotesOpen((o) => !o)}
-            >
-              {notesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              Add notes
-            </button>
-            {notesOpen && (
-              <Textarea
-                className="mt-2"
-                rows={2}
-                value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              />
-            )}
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium">Line items</div>
+                <div className="text-xs text-muted-foreground">Net: {fmtCurrency(netTotal)}</div>
+              </div>
+              {lineItems.map((li) => (
+                <div key={li.key} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
+                  <Field label="Description">
+                    <Input
+                      value={li.description}
+                      onChange={(e) =>
+                        setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))
+                      }
+                    />
+                  </Field>
+                  <Field label="Category">
+                    <Select
+                      value={li.category}
+                      onValueChange={(v) =>
+                        setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BILL_TYPES.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Amount">
+                    <Input
+                      type="number"
+                      value={li.amount}
+                      onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))}
+                    />
+                  </Field>
+                  <Field label="GST">
+                    <Input
+                      type="number"
+                      value={li.gst}
+                      onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))}
+                    />
+                  </Field>
+                  <Button size="icon" variant="ghost" onClick={() => removeLineItem(li.key)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button size="sm" variant="outline" className="gap-1" onClick={addLineItem}>
+                <Plus className="h-3 w-3" /> Add line item
+              </Button>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs text-muted-foreground"
+                onClick={() => setNotesOpen((o) => !o)}
+              >
+                {notesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                Add notes
+              </button>
+              {notesOpen && (
+                <Textarea
+                  className="mt-2"
+                  rows={2}
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                />
+              )}
+            </div>
           </div>
         </div>
 
