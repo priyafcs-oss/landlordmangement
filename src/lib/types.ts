@@ -76,6 +76,28 @@ export interface Property {
   insuranceSumInsured?: number;
   smokeAlarmCheckDueDate?: string;
   poolSafetyCertExpiry?: string;
+  // Domain API-fillable property attributes (also editable by hand).
+  bedrooms?: number;
+  bathrooms?: number;
+  carSpaces?: number;
+  landSizeSqm?: number;
+  /** Domain's own category, e.g. "House" | "Townhouse" | "Unit" — distinct from dwellingConfiguration below. */
+  domainPropertyType?: string;
+  /** One title holding more than one dwelling (a house + granny flat, or a genuine dual-key build).
+   * Purchase price/loan/cost base stay on this one Property record either way — only `units` below
+   * changes, giving each dwelling its own address/bedroom count for tenant-facing purposes. */
+  dwellingConfiguration?: "House" | "Dual Key" | "House + Granny Flat";
+  units?: PropertyUnit[];
+}
+
+/** One dwelling on a multi-dwelling title — see Property.dwellingConfiguration/units. */
+export interface PropertyUnit {
+  label: string;
+  address?: string;
+  bedrooms?: number;
+  bathrooms?: number;
+  carSpaces?: number;
+  notes?: string;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,6 +64,7 @@ import type {
   DepreciationItem,
   Loan,
   Expense,
+  PropertyUnit,
 } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
@@ -71,7 +72,25 @@ import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
+import { supabase } from "@/integrations/supabase/client";
 import { FileSignature } from "lucide-react";
+
+const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
+
+interface DomainSuggestResult {
+  ok?: boolean;
+  suggestions?: { id: string; address: string }[];
+  error?: string;
+}
+interface DomainDetailsResult {
+  ok?: boolean;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  carSpaces?: number | null;
+  landSizeSqm?: number | null;
+  domainPropertyType?: string | null;
+  error?: string;
+}
 
 
 /** "View PDF" / "View email" affordances for anything with source-document provenance columns. */
@@ -533,9 +552,73 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
     smokeAlarmCheckDueDate: property?.smokeAlarmCheckDueDate ?? "",
     poolSafetyCertExpiry: property?.poolSafetyCertExpiry ?? "",
     notes: property?.notes ?? "",
+    bedrooms: property?.bedrooms?.toString() ?? "",
+    bathrooms: property?.bathrooms?.toString() ?? "",
+    carSpaces: property?.carSpaces?.toString() ?? "",
+    landSizeSqm: property?.landSizeSqm?.toString() ?? "",
+    domainPropertyType: property?.domainPropertyType ?? "",
+    dwellingConfiguration: (property?.dwellingConfiguration ?? "House") as Property["dwellingConfiguration"],
   });
   const [photos, setPhotos] = useState<{ name: string; data: string }[]>(property?.photos ?? []);
   const [videos, setVideos] = useState<{ name: string; data: string }[]>(property?.videos ?? []);
+  const [units, setUnits] = useState<PropertyUnit[]>(property?.units ?? []);
+  const [addressSuggestions, setAddressSuggestions] = useState<{ id: string; address: string }[]>([]);
+  const [addressLookupBusy, setAddressLookupBusy] = useState(false);
+  const suggestTimer = useRef<number | null>(null);
+
+  const onAddressChange = (value: string) => {
+    setForm((f) => ({ ...f, address: value }));
+    if (suggestTimer.current) window.clearTimeout(suggestTimer.current);
+    if (value.trim().length < 5) {
+      setAddressSuggestions([]);
+      return;
+    }
+    suggestTimer.current = window.setTimeout(async () => {
+      try {
+        const { data } = await supabase.functions.invoke<DomainSuggestResult>("domain-lookup", {
+          body: { mode: "suggest", query: value },
+        });
+        setAddressSuggestions(data?.ok ? (data.suggestions ?? []) : []);
+      } catch {
+        // Domain lookup is a convenience only — never blocks typing a plain address by hand.
+        setAddressSuggestions([]);
+      }
+    }, 400);
+  };
+
+  const pickAddressSuggestion = async (s: { id: string; address: string }) => {
+    setForm((f) => ({ ...f, address: s.address }));
+    setAddressSuggestions([]);
+    setAddressLookupBusy(true);
+    try {
+      const { data } = await supabase.functions.invoke<DomainDetailsResult>("domain-lookup", {
+        body: { mode: "details", propertyId: s.id },
+      });
+      if (data?.ok) {
+        setForm((f) => ({
+          ...f,
+          bedrooms: f.bedrooms || (data.bedrooms != null ? String(data.bedrooms) : f.bedrooms),
+          bathrooms: f.bathrooms || (data.bathrooms != null ? String(data.bathrooms) : f.bathrooms),
+          carSpaces: f.carSpaces || (data.carSpaces != null ? String(data.carSpaces) : f.carSpaces),
+          landSizeSqm: f.landSizeSqm || (data.landSizeSqm != null ? String(data.landSizeSqm) : f.landSizeSqm),
+          domainPropertyType: f.domainPropertyType || data.domainPropertyType || f.domainPropertyType,
+        }));
+        toast.success("Filled details from Domain");
+      } else if (data?.error) {
+        toast.error(data.error);
+      }
+    } catch {
+      toast.error("Couldn't fetch property details from Domain");
+    } finally {
+      setAddressLookupBusy(false);
+    }
+  };
+
+  const addUnit = () =>
+    setUnits((rows) => [...rows, { label: rows.length === 0 ? "Main house" : `Unit ${rows.length + 1}` }]);
+  const removeUnit = (idx: number) => setUnits((rows) => rows.filter((_, i) => i !== idx));
+  const updateUnit = (idx: number, patch: Partial<PropertyUnit>) =>
+    setUnits((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   // Open the advanced section by default for properties that already have acquisition/loan
   // data on file, so editing doesn't silently hide fields the landlord already filled in.
   const [advancedOpen, setAdvancedOpen] = useState(
@@ -601,9 +684,96 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
           <DialogTitle>{property ? "Edit property" : "New property"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <Field label="Address">
-            <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <div className="relative">
+            <Field label="Address">
+              <Input
+                value={form.address}
+                onChange={(e) => onAddressChange(e.target.value)}
+                onBlur={() => window.setTimeout(() => setAddressSuggestions([]), 150)}
+                placeholder="Start typing — Domain will suggest matches"
+              />
+            </Field>
+            {addressSuggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md">
+                {addressSuggestions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onMouseDown={() => pickAddressSuggestion(s)}
+                    className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    {s.address}
+                  </button>
+                ))}
+              </div>
+            )}
+            {addressLookupBusy && <div className="mt-1 text-xs text-muted-foreground">Fetching property details from Domain…</div>}
+          </div>
+
+          <Field label="Dwelling configuration">
+            <Select
+              value={form.dwellingConfiguration}
+              onValueChange={(v) => {
+                const next = v as Property["dwellingConfiguration"];
+                setForm({ ...form, dwellingConfiguration: next });
+                if (next !== "House" && units.length === 0) {
+                  setUnits(
+                    next === "Dual Key"
+                      ? [{ label: "Unit 1" }, { label: "Unit 2" }]
+                      : [{ label: "Main house" }, { label: "Granny flat" }],
+                  );
+                }
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="House">House (single dwelling)</SelectItem>
+                <SelectItem value="Dual Key">Dual Key</SelectItem>
+                <SelectItem value="House + Granny Flat">House + Granny Flat</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
+
+          {form.dwellingConfiguration !== "House" && (
+            <div className="rounded-md border p-3">
+              <div className="mb-2 text-sm font-medium">Dwellings on this title</div>
+              <div className="space-y-2">
+                {units.map((u, idx) => (
+                  <div key={idx} className="grid grid-cols-[1fr_2fr_1fr_1fr_auto] items-end gap-2">
+                    <Field label="Label">
+                      <Input value={u.label} onChange={(e) => updateUnit(idx, { label: e.target.value })} />
+                    </Field>
+                    <Field label="Address">
+                      <Input value={u.address ?? ""} onChange={(e) => updateUnit(idx, { address: e.target.value })} placeholder="e.g. 10A Facer Ct" />
+                    </Field>
+                    <Field label="Beds">
+                      <Input
+                        type="number"
+                        value={u.bedrooms ?? ""}
+                        onChange={(e) => updateUnit(idx, { bedrooms: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      />
+                    </Field>
+                    <Field label="Baths">
+                      <Input
+                        type="number"
+                        value={u.bathrooms ?? ""}
+                        onChange={(e) => updateUnit(idx, { bathrooms: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      />
+                    </Field>
+                    <Button size="icon" variant="ghost" onClick={() => removeUnit(idx)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="outline" className="mt-2 gap-1" onClick={addUnit}>
+                <Plus className="h-3 w-3" /> Add dwelling
+              </Button>
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Property name / alias">
               <Input
@@ -717,6 +887,23 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
                       onChange={(e) => setForm({ ...form, physicalAttributes: e.target.value })}
                       placeholder="e.g. 3 bed / 2 bath / 1 car"
                     />
+                  </Field>
+                </div>
+                <Field label="Bedrooms">
+                  <Input type="number" value={form.bedrooms} onChange={(e) => setForm({ ...form, bedrooms: e.target.value })} />
+                </Field>
+                <Field label="Bathrooms">
+                  <Input type="number" value={form.bathrooms} onChange={(e) => setForm({ ...form, bathrooms: e.target.value })} />
+                </Field>
+                <Field label="Car spaces">
+                  <Input type="number" value={form.carSpaces} onChange={(e) => setForm({ ...form, carSpaces: e.target.value })} />
+                </Field>
+                <Field label="Land size (m²)">
+                  <Input type="number" value={form.landSizeSqm} onChange={(e) => setForm({ ...form, landSizeSqm: e.target.value })} />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Property type (Domain)">
+                    <Input value={form.domainPropertyType} onChange={(e) => setForm({ ...form, domainPropertyType: e.target.value })} placeholder="e.g. House, Townhouse, Unit" />
                   </Field>
                 </div>
               </div>
@@ -942,6 +1129,13 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
                 notes: form.notes || undefined,
                 photos: photos.length > 0 ? photos : undefined,
                 videos: videos.length > 0 ? videos : undefined,
+                bedrooms: form.bedrooms ? parseFloat(form.bedrooms) : undefined,
+                bathrooms: form.bathrooms ? parseFloat(form.bathrooms) : undefined,
+                carSpaces: form.carSpaces ? parseFloat(form.carSpaces) : undefined,
+                landSizeSqm: form.landSizeSqm ? parseFloat(form.landSizeSqm) : undefined,
+                domainPropertyType: form.domainPropertyType || undefined,
+                dwellingConfiguration: form.dwellingConfiguration,
+                units: form.dwellingConfiguration !== "House" && units.length > 0 ? units : undefined,
               };
               if (property) updateProperty(property.id, payload);
               else addProperty(payload);
@@ -2914,10 +3108,16 @@ export function TenantDialog({
           <div className="col-span-2">
             <Field label="Unit / dwelling address (optional)">
               <Input
+                list="tenant-unit-addresses"
                 value={form.unitAddress}
                 onChange={(e) => setForm({ ...form, unitAddress: e.target.value })}
                 placeholder="Only needed if this tenant's own address differs from the property's — e.g. a granny flat sharing one title"
               />
+              <datalist id="tenant-unit-addresses">
+                {(state.properties.find((p) => p.id === propertyId)?.units ?? []).map((u) => (
+                  <option key={u.label} value={u.address || u.label} />
+                ))}
+              </datalist>
             </Field>
           </div>
           <Field label="Lease start date">
