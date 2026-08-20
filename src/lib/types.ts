@@ -638,11 +638,17 @@ export interface DepreciationReportProposalPayload {
   confidence: number;
 }
 
+/** A document Gemini couldn't classify into any known type — staged so it's never silently dropped. */
+export interface UnclassifiedProposalPayload {
+  documentCategory: string;
+  confidence: number;
+}
+
 export interface AiIntakeProposal {
   id: string;
   /** Server-set on insert — when this document was received, used for the Documents archive. */
   created_at?: string;
-  kind: "tenant_lease" | "rent_ledger" | "property_detail" | "depreciation_report";
+  kind: "tenant_lease" | "rent_ledger" | "property_detail" | "depreciation_report" | "unclassified";
   status: "pending" | "applied" | "dismissed";
   propertyId?: string;
   matchedTenantId?: string;
@@ -652,7 +658,12 @@ export interface AiIntakeProposal {
   sourceFileName?: string;
   sourceFileData?: string;
   sourceEmailBody?: string;
-  payload: TenantLeaseProposalPayload | RentLedgerProposalPayload | PropertyDetailProposalPayload | DepreciationReportProposalPayload;
+  payload:
+    | TenantLeaseProposalPayload
+    | RentLedgerProposalPayload
+    | PropertyDetailProposalPayload
+    | DepreciationReportProposalPayload
+    | UnclassifiedProposalPayload;
   reviewReason?: string | null;
 }
 

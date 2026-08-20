@@ -22,7 +22,7 @@ export const Route = createFileRoute("/documents")({
 
 interface DocumentEntry {
   id: string;
-  kind: "Bill" | "Lease Agreement" | "Rent Statement" | "Property Document" | "Depreciation Report";
+  kind: "Bill" | "Lease Agreement" | "Rent Statement" | "Property Document" | "Depreciation Report" | "Unrecognised";
   date: string;
   propertyId?: string;
   label: string;
@@ -100,7 +100,9 @@ export function DocumentsContent() {
             ? "Property Document"
             : p.kind === "depreciation_report"
               ? "Depreciation Report"
-              : "Rent Statement";
+              : p.kind === "unclassified"
+                ? "Unrecognised"
+                : "Rent Statement";
       const label =
         p.kind === "tenant_lease"
           ? (p.payload as { name?: string }).name ?? "Lease agreement"
@@ -108,7 +110,9 @@ export function DocumentsContent() {
             ? (p.payload as { documentCategory?: string }).documentCategory ?? "Property document"
             : p.kind === "depreciation_report"
               ? (p.payload as { quantitySurveyor?: string }).quantitySurveyor ?? "Depreciation report"
-              : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
+              : p.kind === "unclassified"
+                ? (p.payload as { documentCategory?: string }).documentCategory ?? "Unrecognised document"
+                : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
       return {
         id: p.id,
         kind,
@@ -150,6 +154,8 @@ export function DocumentsContent() {
             <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
             <SelectItem value="Rent Statement">Rent statements</SelectItem>
             <SelectItem value="Property Document">Property documents</SelectItem>
+            <SelectItem value="Depreciation Report">Depreciation reports</SelectItem>
+            <SelectItem value="Unrecognised">Unrecognised</SelectItem>
           </SelectContent>
         </Select>
         <Select value={propertyId} onValueChange={setPropertyId}>

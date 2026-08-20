@@ -5,14 +5,17 @@ import { parseLeaseAgreement } from "./parse-lease.ts";
 import { parseRentStatement } from "./parse-ledger.ts";
 import { parsePropertyDocument } from "./parse-property-document.ts";
 import { parseDepreciationReport } from "./parse-depreciation-report.ts";
+import { stageUnclassifiedDocument } from "./parse-unclassified.ts";
 import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./types.ts";
 
 export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean };
 
 /**
  * Classifies the inbound document, then dispatches to the type-specific extractor.
- * "other" (the common case — landlords forward all sorts of things) is a silent
- * no-op, not an error: there's nothing wrong with the email, there's just nothing to do.
+ * "other" with no attachment (a marketing email, a general enquiry) is a silent no-op — there's
+ * nothing wrong with the email, there's just nothing to do. "other" WITH an attachment stages a
+ * minimal unclassified proposal instead, so a forwarded/uploaded document this pipeline doesn't
+ * have a dedicated parser for yet never just vanishes without a trace.
  */
 export async function routeInboundDocument(
   supabase: SupabaseClient,
@@ -44,7 +47,11 @@ export async function routeInboundDocument(
     case "depreciation_report":
       return parseDepreciationReport(supabase, input, emailMessageId);
     default:
-      console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), skipping`);
-      return { ok: true, skipped: true };
+      if (!input.pdfBase64) {
+        console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), no attachment, skipping`);
+        return { ok: true, skipped: true };
+      }
+      console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), staging as unclassified`);
+      return stageUnclassifiedDocument(supabase, input, emailMessageId, classification.confidence);
   }
 }

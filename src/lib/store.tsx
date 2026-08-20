@@ -189,6 +189,7 @@ interface StoreCtx {
 
   dismissProposal: (id: string) => void;
   markProposalApplied: (id: string) => void;
+  updateProposal: (id: string, patch: Partial<AiIntakeProposal>) => void;
 
   setAiEnabled: (v: boolean) => void;
   consumeAiBudget: () => { ok: boolean; reason?: string };
@@ -957,6 +958,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({
         ...s,
         aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, status: "applied" as const } : x)),
+      }));
+    },
+    updateProposal: (id, patch) => {
+      void updateRow(TABLES.aiProposals, id, patch as Record<string, unknown>);
+      set((s) => ({
+        ...s,
+        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, ...patch } : x)),
       }));
     },
 

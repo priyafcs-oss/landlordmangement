@@ -53,6 +53,8 @@ import {
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { AiProposalsSection } from "@/components/PropertyShared";
+import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -131,6 +133,9 @@ function DashboardPage() {
     .sort((a, b) => (a.pct ?? 0) - (b.pct ?? 0))[0];
   const bufferAlert = worstBuffer && (worstBuffer.pct ?? 100) < 100 ? 1 : 0;
   const attentionCount = leaseAlerts.length + warrantyAlerts.length + complianceAlerts.length + dueSoonCount + bufferAlert;
+  const pendingApprovals =
+    state.aiProposals.filter((p) => p.status === "pending").length +
+    state.expenses.filter((e) => e.status === "needs_review").length;
 
   // Chart data: real income vs expenses per month, from the ledger/expenses actually on file.
   const months: { name: string; income: number; expenses: number; cashflow: number }[] = [];
@@ -210,6 +215,14 @@ function DashboardPage() {
           </Button>
         </CardContent>
       </Card>
+
+      {pendingApprovals > 0 && (
+        <div className="space-y-3">
+          <div className="text-sm font-medium">Needs your approval ({pendingApprovals})</div>
+          <AiProposalsSection />
+          <NeedsReviewBanner />
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard icon={<Landmark className="h-4 w-4" />} label="Portfolio Value" value={fmtCurrency(totalValue)} />

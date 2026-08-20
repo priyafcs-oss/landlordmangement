@@ -67,6 +67,7 @@ import type {
   ProviderRole,
   DepreciationItem,
   DepreciationReportProposalPayload,
+  UnclassifiedProposalPayload,
   Loan,
   Expense,
   PropertyUnit,
@@ -163,6 +164,8 @@ export function AiProposalsSection() {
             <PropertyDetailProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : p.kind === "depreciation_report" ? (
             <DepreciationReportProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "unclassified" ? (
+            <UnclassifiedProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : (
             <RentLedgerProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ),
@@ -635,6 +638,70 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Add selected items
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * A document Gemini couldn't classify into any known type — no extraction was attempted, so
+ * there's nothing to review field-by-field. Assigning a property (optional) and filing it just
+ * marks it applied so it's easy to find later in Documents; the source document itself is already
+ * safe (attached to this proposal row) either way.
+ */
+function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, updateProposal } = useStore();
+  const payload = proposal.payload as UnclassifiedProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+
+  const file = () => {
+    updateProposal(proposal.id, { propertyId: propertyId || undefined, status: "applied" });
+    toast.success("Filed in Documents");
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Unrecognised document</Badge>
+          <span className="font-medium">{payload.documentCategory}</span>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Couldn't tell what kind of document this is, so nothing was extracted — the file itself is safe. Assign a
+          property (optional) and file it, or dismiss it.
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Property:</span>
+          <Select value={propertyId} onValueChange={setPropertyId}>
+            <SelectTrigger className="h-7 w-[220px] text-xs">
+              <SelectValue placeholder="No property (optional)" />
+            </SelectTrigger>
+            <SelectContent>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.alias || p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" onClick={file}>
+            File in Documents
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
