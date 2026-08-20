@@ -74,11 +74,11 @@ interface TxRow {
   needsAttention?: boolean;
 }
 
-export function LedgerTab() {
+export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const [fy, setFy] = useState(currentFY);
-  const [propertyId, setPropertyId] = useState("__all__");
+  const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [query, setQuery] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
@@ -190,30 +190,34 @@ export function LedgerTab() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={propertyId} onValueChange={setPropertyId}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="All properties" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All properties</SelectItem>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.alias || p.address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
-            <SelectTrigger className="w-[130px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All asset types</SelectItem>
-              <SelectItem value="Property">Property</SelectItem>
-              <SelectItem value="Gold">Gold</SelectItem>
-              <SelectItem value="ETF">ETF</SelectItem>
-            </SelectContent>
-          </Select>
+          {!lockedPropertyId && (
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All properties" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All properties</SelectItem>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.alias || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {!lockedPropertyId && (
+            <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All asset types</SelectItem>
+                <SelectItem value="Property">Property</SelectItem>
+                <SelectItem value="Gold">Gold</SelectItem>
+                <SelectItem value="ETF">ETF</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1">
@@ -248,7 +252,7 @@ export function LedgerTab() {
           <Button size="sm" variant="outline" className="gap-1" onClick={exportCsv}>
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
-          <AddTransactionDialog />
+          <AddTransactionDialog propertyId={lockedPropertyId} />
         </div>
       </div>
 
@@ -278,7 +282,7 @@ export function LedgerTab() {
                     {filtered.map((r) => {
                       const prop = state.properties.find((p) => p.id === r.propertyId);
                       const asset = state.assets.find((a) => a.id === r.assetId);
-                      const label = prop?.alias || prop?.address || asset?.name;
+                      const label = lockedPropertyId ? undefined : prop?.alias || prop?.address || asset?.name;
                       return (
                         <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
                           <td className="whitespace-nowrap px-3 py-2 text-xs">{r.date}</td>

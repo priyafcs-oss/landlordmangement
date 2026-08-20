@@ -31,6 +31,7 @@ import {
   PropertyProvidersTab,
   PropertyMediaTab,
 } from "@/components/PropertyShared";
+import { LedgerTab } from "@/routes/transactions";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -69,50 +70,6 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "providers", label: "Providers", icon: Users2 },
   { section: "media", label: "Media", icon: ImageIcon },
 ];
-
-function PropertyTransactionsTab({ propertyId, tenantIds }: { propertyId: string; tenantIds: string[] }) {
-  const { state } = useStore();
-  const rows = [
-    ...state.expenses
-      .filter((e) => e.propertyId === propertyId)
-      .map((e) => ({
-        id: `exp_${e.id}`,
-        date: e.date,
-        description: e.itemName,
-        category: e.taxCategory,
-        amount: e.direction === "Income" ? e.cost : -e.cost,
-      })),
-    ...state.ledger
-      .filter((e) => tenantIds.includes(e.tenantId) && e.credit > 0)
-      .map((e) => ({
-        id: `ledg_${e.id}`,
-        date: e.date,
-        description: e.type,
-        category: e.type,
-        amount: e.credit,
-      })),
-  ].sort((a, b) => (a.date < b.date ? 1 : -1));
-
-  return (
-    <div className="space-y-2 text-sm">
-      {rows.length === 0 && <div className="text-xs text-muted-foreground">No transactions for this property yet.</div>}
-      {rows.map((r) => (
-        <div key={r.id} className="flex items-center justify-between rounded border p-2 text-xs">
-          <div>
-            <div className="font-medium">{r.description}</div>
-            <div className="text-muted-foreground">
-              {r.date} • {r.category}
-            </div>
-          </div>
-          <div className={r.amount < 0 ? "text-destructive" : "text-emerald-600"}>
-            {r.amount < 0 ? "−" : "+"}
-            {fmtCurrency(Math.abs(r.amount))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
@@ -176,7 +133,6 @@ function PropertyAssetPage() {
 
   const loan = state.loans.find((l) => l.propertyId === prop.id);
   const tenants = state.tenants.filter((t) => t.propertyId === prop.id);
-  const tenantIds = tenants.map((t) => t.id);
   const expenses = state.expenses.filter((e) => e.propertyId === prop.id);
   const depreciationItems = state.depreciationItems.filter((d) => d.assetId === asset.id);
 
@@ -245,7 +201,7 @@ function PropertyAssetPage() {
         {section === "details" && <PropertyDetailsTab prop={prop} expenses={expenses} tenants={tenants} />}
         {section === "purchase" && <PropertyPurchaseTab prop={prop} loan={loan} />}
         {section === "performance" && <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
-        {section === "transactions" && <PropertyTransactionsTab propertyId={prop.id} tenantIds={tenantIds} />}
+        {section === "transactions" && <LedgerTab propertyId={prop.id} />}
         {section === "bills" && <PropertyBillsTab propertyId={prop.id} />}
         {section === "loans" && <PropertyLoansTab propertyId={prop.id} />}
         {section === "costbase" && <PropertyCostBaseTab prop={prop} expenses={expenses} depreciationItems={depreciationItems} />}

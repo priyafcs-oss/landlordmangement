@@ -79,7 +79,7 @@ interface ExtractResult {
  * bill-flavoured). Line items can split across up to two properties; each becomes its own Expense
  * row on save, since P&L/Cost Base/Tax Reports read state.expenses as flat single-category rows.
  */
-export function AddTransactionDialog() {
+export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state, addExpense, addInvoice } = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -92,7 +92,7 @@ export function AddTransactionDialog() {
   const [extractEmpty, setExtractEmpty] = useState(false);
 
   const blankForm = () => ({
-    propertyId: state.properties[0]?.id ?? "",
+    propertyId: lockedPropertyId ?? state.properties[0]?.id ?? "",
     secondPropertyId: "",
     payee: "",
     referenceNumber: "",
@@ -154,7 +154,7 @@ export function AddTransactionDialog() {
 
       setForm((f) => ({
         ...f,
-        propertyId: matchedProperty?.id ?? f.propertyId,
+        propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
         payee: data.vendor ?? f.payee,
         date: data.due_date ?? f.date,
       }));

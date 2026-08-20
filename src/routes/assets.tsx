@@ -39,6 +39,7 @@ import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
 import { PropertyDialog, AiProposalsSection } from "@/components/PropertyShared";
 import { BillsBoard } from "@/components/BillsBoard";
+import { AddBillDialog } from "@/components/AddBillDialog";
 import { LedgerTab } from "@/routes/transactions";
 import { LoanSummaryTab } from "@/components/LoanSummaryTab";
 import { PortfolioCostBaseTab, PortfolioDepreciationTab, PortfolioPnLTab } from "@/components/PortfolioRollups";
@@ -438,6 +439,21 @@ function assetIcon(type: AssetType) {
   return <LineChart className="h-3.5 w-3.5" />;
 }
 
+function PortfolioBillsContent() {
+  const { state } = useStore();
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          Bills processed by email, upload or entered here all show up below, with their source document linked.
+        </div>
+        <AddBillDialog />
+      </div>
+      <BillsBoard bills={state.bills} />
+    </div>
+  );
+}
+
 function AllAssetsContent() {
   const { state } = useStore();
   const navigate = useNavigate();
@@ -593,7 +609,7 @@ function AssetsPage() {
 
       <div className="min-w-0 flex-1 p-4 sm:p-6">
         {section === "all" && <AllAssetsContent />}
-        {section === "bills" && <BillsBoard bills={state.bills} />}
+        {section === "bills" && <PortfolioBillsContent />}
         {section === "transactions" && <LedgerTab />}
         {section === "loans" && <LoanSummaryTab />}
         {section === "costbase" && <PortfolioCostBaseTab />}
