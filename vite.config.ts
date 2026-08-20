@@ -12,4 +12,10 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // Vite's default build.assetsDir ("assets") collides with this app's own /assets route — a
+  // direct/hard load of https://.../assets was being served the static chunks directory instead
+  // of the SPA route. Moving hashed build output to /_assets/ avoids the clash.
+  vite: {
+    build: { assetsDir: "_assets" },
+  },
 });
