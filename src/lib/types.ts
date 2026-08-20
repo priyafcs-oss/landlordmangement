@@ -101,9 +101,10 @@ export interface PropertyUnit {
 }
 
 /**
- * A simplified prime-cost depreciation line for a property — NOT a full ATO Div 40/43
- * diminishing-value engine, just item/cost/effective-life so the landlord has a running log.
- * Annual claim = purchaseCost / effectiveLifeYears.
+ * A simplified depreciation line for a property — NOT a full ATO Div 40/43 engine (no low-value
+ * pooling, no part-year private-use apportionment beyond first-year day-counting, no pre-2017 150%
+ * diminishing-value rate). Prime Cost annual claim = purchaseCost / effectiveLifeYears; Diminishing
+ * Value uses a standard 200%-declining-balance projection — see buildDepreciationSchedule.
  */
 export interface DepreciationItem {
   id: string;
@@ -112,6 +113,17 @@ export interface DepreciationItem {
   purchaseCost: number;
   effectiveLifeYears: number;
   purchaseDate?: string;
+  method?: "Diminishing Value" | "Prime Cost";
+  division?: "Div 40" | "Div 43";
+  /** Items added together via one "Add depreciation report" upload share one id — same
+   * denormalized-grouping pattern as PropertyBill.billGroupId, no separate report table. */
+  reportId?: string;
+  quantitySurveyor?: string;
+  reportReference?: string;
+  reportDate?: string;
+  effectiveFrom?: string;
+  sourceFileName?: string;
+  sourceFileData?: string;
 }
 
 /** One point-in-time value for an asset — captured automatically whenever currentValue changes,
@@ -616,11 +628,21 @@ export interface PropertyDetailProposalPayload {
   confidence: number;
 }
 
+/** Extracted-but-unconfirmed line items from a forwarded quantity surveyor's depreciation schedule. */
+export interface DepreciationReportProposalPayload {
+  quantitySurveyor?: string;
+  reportReference?: string;
+  reportDate?: string;
+  effectiveFrom?: string;
+  items: { description: string; division: "Div 40" | "Div 43"; cost: number; lifeYears?: number }[];
+  confidence: number;
+}
+
 export interface AiIntakeProposal {
   id: string;
   /** Server-set on insert — when this document was received, used for the Documents archive. */
   created_at?: string;
-  kind: "tenant_lease" | "rent_ledger" | "property_detail";
+  kind: "tenant_lease" | "rent_ledger" | "property_detail" | "depreciation_report";
   status: "pending" | "applied" | "dismissed";
   propertyId?: string;
   matchedTenantId?: string;
@@ -630,7 +652,7 @@ export interface AiIntakeProposal {
   sourceFileName?: string;
   sourceFileData?: string;
   sourceEmailBody?: string;
-  payload: TenantLeaseProposalPayload | RentLedgerProposalPayload | PropertyDetailProposalPayload;
+  payload: TenantLeaseProposalPayload | RentLedgerProposalPayload | PropertyDetailProposalPayload | DepreciationReportProposalPayload;
   reviewReason?: string | null;
 }
 

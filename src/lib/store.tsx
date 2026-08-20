@@ -166,6 +166,7 @@ interface StoreCtx {
   deleteAsset: (id: string) => void;
 
   addDepreciationItem: (d: Omit<DepreciationItem, "id">) => void;
+  updateDepreciationItem: (id: string, d: Partial<DepreciationItem>) => void;
   deleteDepreciationItem: (id: string) => void;
 
   addBuffer: (b: Omit<CashBuffer, "id">) => void;
@@ -810,6 +811,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: DepreciationItem = { ...d, id: uid("depr") };
       void upsertRow(TABLES.depreciationItems, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, depreciationItems: [...s.depreciationItems, row] }));
+    },
+    updateDepreciationItem: (id, patch) => {
+      void updateRow(TABLES.depreciationItems, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, depreciationItems: s.depreciationItems.map((d) => (d.id === id ? { ...d, ...patch } : d)) }));
     },
     deleteDepreciationItem: (id) => {
       void deleteRow(TABLES.depreciationItems, id);

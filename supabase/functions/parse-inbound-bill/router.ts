@@ -4,6 +4,7 @@ import { parseInboundBill } from "./core-parser.ts";
 import { parseLeaseAgreement } from "./parse-lease.ts";
 import { parseRentStatement } from "./parse-ledger.ts";
 import { parsePropertyDocument } from "./parse-property-document.ts";
+import { parseDepreciationReport } from "./parse-depreciation-report.ts";
 import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./types.ts";
 
 export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean };
@@ -40,6 +41,8 @@ export async function routeInboundDocument(
       return parseRentStatement(supabase, input, emailMessageId);
     case "property_document":
       return parsePropertyDocument(supabase, input, emailMessageId);
+    case "depreciation_report":
+      return parseDepreciationReport(supabase, input, emailMessageId);
     default:
       console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), skipping`);
       return { ok: true, skipped: true };

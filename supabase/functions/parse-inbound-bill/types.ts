@@ -53,7 +53,13 @@ export interface ParseResult {
   error?: string;
 }
 
-export type DocumentType = "bill" | "lease_agreement" | "rent_statement" | "property_document" | "other";
+export type DocumentType =
+  | "bill"
+  | "lease_agreement"
+  | "rent_statement"
+  | "property_document"
+  | "depreciation_report"
+  | "other";
 
 export interface ClassificationResult {
   document_type: DocumentType;
@@ -119,5 +125,16 @@ export interface ParsedPropertyDocumentFields {
   strata_levy_frequency: string | null; // "Quarterly" | "Annually"
   smoke_alarm_check_due_date: string | null;
   pool_safety_cert_expiry: string | null;
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for a quantity surveyor's depreciation schedule/report. */
+export interface ParsedDepreciationReportFields {
+  property_address: string;
+  quantity_surveyor: string | null;
+  report_reference: string | null;
+  report_date: string | null; // YYYY-MM-DD
+  effective_from: string | null; // YYYY-MM-DD
+  items: { description: string; division: "Div 40" | "Div 43" | null; cost: number; life_years: number | null }[];
   confidence: number;
 }

@@ -6,6 +6,7 @@ const CLASSIFY_PROMPT = `You are triaging an email forwarded to a landlord's pro
 - "lease_agreement": a residential tenancy/lease agreement, or a lease renewal, naming a tenant, rent amount, and lease dates.
 - "rent_statement": a rent statement, ledger, or remittance advice from a managing agent listing rent payments/transactions over a period.
 - "property_document": a document that describes the PROPERTY ITSELF rather than something currently payable — a purchase/settlement statement, a conveyancer's settlement figures, an insurance certificate of currency or policy schedule, or a strata/owners-corporation notice showing the levy amount. Use this even if the document also mentions a dollar figure, as long as it's describing an ownership/policy/levy detail rather than an invoice due now.
+- "depreciation_report": a tax depreciation schedule/report from a quantity surveyor, listing depreciable plant & equipment or capital works items with costs and effective lives (often titled "Tax Depreciation Schedule" or similar).
 - "other": anything else (e.g. an ownership/income statement report, marketing, a general enquiry, or anything that doesn't fit the above).
 
 Respond with your best-guess document_type and a 0-1 confidence.`;
@@ -13,7 +14,10 @@ Respond with your best-guess document_type and a 0-1 confidence.`;
 const CLASSIFY_SCHEMA = {
   type: "OBJECT",
   properties: {
-    document_type: { type: "STRING", enum: ["bill", "lease_agreement", "rent_statement", "property_document", "other"] },
+    document_type: {
+      type: "STRING",
+      enum: ["bill", "lease_agreement", "rent_statement", "property_document", "depreciation_report", "other"],
+    },
     confidence: { type: "NUMBER" },
   },
   required: ["document_type", "confidence"],

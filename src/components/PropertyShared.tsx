@@ -43,7 +43,8 @@ import {
   IdCard,
   ArrowRight,
 } from "lucide-react";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule } from "@/lib/calculations";
+import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import type {
   Property,
   Tenant,
@@ -62,6 +63,7 @@ import type {
   Provider,
   ProviderRole,
   DepreciationItem,
+  DepreciationReportProposalPayload,
   Loan,
   Expense,
   PropertyUnit,
@@ -71,6 +73,7 @@ import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
+import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
@@ -155,6 +158,8 @@ export function AiProposalsSection() {
             <TenantLeaseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : p.kind === "property_detail" ? (
             <PropertyDetailProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "depreciation_report" ? (
+            <DepreciationReportProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : (
             <RentLedgerProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ),
@@ -525,6 +530,108 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" onClick={confirm}>
             Confirm &amp; Add Payments
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, addDepreciationItem, markProposalApplied } = useStore();
+  const payload = proposal.payload as DepreciationReportProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  const [included, setIncluded] = useState<boolean[]>(() => payload.items.map(() => true));
+
+  const confirm = () => {
+    const assetId = state.properties.find((p) => p.id === propertyId)?.assetId;
+    if (!assetId) return toast.error("Select a property first");
+    const reportId = uid("dr");
+    let count = 0;
+    payload.items.forEach((it, i) => {
+      if (!included[i]) return;
+      addDepreciationItem({
+        assetId,
+        description: it.description,
+        purchaseCost: it.cost,
+        effectiveLifeYears: it.lifeYears || 1,
+        purchaseDate: payload.effectiveFrom || undefined,
+        method: "Diminishing Value",
+        division: it.division,
+        reportId,
+        quantitySurveyor: payload.quantitySurveyor || undefined,
+        reportReference: payload.reportReference || undefined,
+        reportDate: payload.reportDate || undefined,
+        effectiveFrom: payload.effectiveFrom || undefined,
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
+      });
+      count++;
+    });
+    if (count === 0) return toast.error("Select at least one item to add");
+    markProposalApplied(proposal.id);
+    toast.success(`Added ${count} depreciation item(s) from report`);
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Depreciation report</Badge>
+          {payload.quantitySurveyor && <span className="font-medium">{payload.quantitySurveyor}</span>}
+          {payload.reportDate && <span className="text-xs text-muted-foreground">{payload.reportDate}</span>}
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">
+              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+            </span>
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger className="h-7 w-[220px] text-xs">
+                <SelectValue placeholder="Assign property" />
+              </SelectTrigger>
+              <SelectContent>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.alias || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <div className="space-y-1 rounded border p-2">
+          <div className="text-[11px] font-medium text-muted-foreground">Depreciating assets</div>
+          {payload.items.map((it, i) => (
+            <label key={i} className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={included[i]}
+                onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+              />
+              <span className="flex-1 truncate">{it.description}</span>
+              <Badge variant="outline" className="text-[10px]">{it.division}</Badge>
+              <span className="w-20 shrink-0 text-right font-medium">{fmtCurrency(it.cost)}</span>
+              <span className="w-14 shrink-0 text-right text-muted-foreground">{it.lifeYears ? `${it.lifeYears}y` : "—"}</span>
+            </label>
+          ))}
+        </div>
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+            Add selected items
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
@@ -1322,16 +1429,21 @@ export function PropertyCostBaseTab({ prop, expenses, depreciationItems }: { pro
   );
 }
 
-export function DepreciationTab({ assetId }: { assetId?: string }) {
-  const { state, addDepreciationItem, deleteDepreciationItem } = useStore();
+function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
+  const { addDepreciationItem } = useStore();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [purchaseCost, setPurchaseCost] = useState("");
-  const [effectiveLifeYears, setEffectiveLifeYears] = useState("10");
+  const [effectiveLifeYears, setEffectiveLifeYears] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(todayISO());
+  const [method, setMethod] = useState<NonNullable<DepreciationItem["method"]>>("Diminishing Value");
+  const [division, setDivision] = useState<NonNullable<DepreciationItem["division"]>>("Div 40");
 
-  const items = assetId ? state.depreciationItems.filter((d) => d.assetId === assetId) : [];
-  const totalAnnual = items.reduce((s, d) => s + d.purchaseCost / (d.effectiveLifeYears || 1), 0);
+  const onDescriptionBlur = () => {
+    if (effectiveLifeYears) return;
+    const suggested = suggestEffectiveLife(description);
+    if (suggested) setEffectiveLifeYears(String(suggested));
+  };
 
   const save = () => {
     if (!assetId) return;
@@ -1344,80 +1456,164 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
       purchaseCost: cost,
       effectiveLifeYears: parseFloat(effectiveLifeYears) || 1,
       purchaseDate: purchaseDate || undefined,
+      method,
+      division,
     });
     toast.success("Depreciation item added");
     setOpen(false);
     setDescription("");
     setPurchaseCost("");
+    setEffectiveLifeYears("");
   };
 
   return (
-    <div className="space-y-3 text-sm">
-      <p className="text-xs text-muted-foreground">
-        A simplified prime-cost log (cost ÷ effective life = annual claim) — not a full ATO Div 40/43
-        diminishing-value schedule. Use as a running reference, not tax advice.
-      </p>
-      <div className="flex justify-end">
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" variant="outline" className="gap-1">
-              <Plus className="h-3 w-3" /> Add item
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>New depreciation item</DialogTitle>
-            </DialogHeader>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <Field label="Description">
-                  <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Carpet, hot water system" />
-                </Field>
-              </div>
-              <Field label="Cost">
-                <Input type="number" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} />
-              </Field>
-              <Field label="Effective life (years)">
-                <Input type="number" value={effectiveLifeYears} onChange={(e) => setEffectiveLifeYears(e.target.value)} />
-              </Field>
-              <Field label="Purchase date">
-                <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-              </Field>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="gap-1">
+          <Plus className="h-3 w-3" /> Add one-off item
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New depreciation item</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <Field label="Item name">
+              <Input value={description} onChange={(e) => setDescription(e.target.value)} onBlur={onDescriptionBlur} placeholder="e.g. hot water system, carpet, air conditioner" />
+            </Field>
+          </div>
+          <Field label="Cost">
+            <Input type="number" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} />
+          </Field>
+          <Field label="Effective life (years)">
+            <Input type="number" value={effectiveLifeYears} onChange={(e) => setEffectiveLifeYears(e.target.value)} placeholder="Auto-fills from item name" />
+          </Field>
+          <Field label="Method">
+            <Select value={method} onValueChange={(v) => setMethod(v as typeof method)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Diminishing Value">Diminishing value</SelectItem>
+                <SelectItem value="Prime Cost">Prime cost</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Division">
+            <Select value={division} onValueChange={(v) => setDivision(v as typeof division)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Div 40">Div 40 — Plant &amp; Equipment</SelectItem>
+                <SelectItem value="Div 43">Div 43 — Capital Works</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Purchase date">
+            <Input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+          </Field>
+        </div>
+        <p className="text-xs text-muted-foreground">Removable items like appliances, carpets, blinds are usually Div 40; structural work is usually Div 43.</p>
+        <DialogFooter>
+          <Button onClick={save}>Add item</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function DepreciationTab({ assetId }: { assetId?: string }) {
+  const { state, deleteDepreciationItem } = useStore();
+
+  const items = assetId ? state.depreciationItems.filter((d) => d.assetId === assetId) : [];
+  const schedule = buildDepreciationSchedule(items);
+
+  return (
+    <div className="space-y-4 text-sm">
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-medium">Item Details</div>
+              <div className="text-xs text-muted-foreground">{items.length} individual item{items.length === 1 ? "" : "s"} tracked</div>
             </div>
-            <DialogFooter>
-              <Button onClick={save}>Save</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-      {items.length === 0 && <div className="text-xs text-muted-foreground">No depreciation items logged.</div>}
-      {items.map((d) => (
-        <div key={d.id} className="flex items-center justify-between rounded border p-2 text-xs">
-          <div>
-            <div className="font-medium">{d.description}</div>
-            <div className="text-muted-foreground">
-              {fmtCurrency(d.purchaseCost)} over {d.effectiveLifeYears}y — {fmtCurrency(d.purchaseCost / (d.effectiveLifeYears || 1))}/yr
+            <div className="flex gap-2">
+              <AddDepreciationReportDialog assetId={assetId} />
+              <NewDepreciationItemDialog assetId={assetId} />
             </div>
           </div>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6"
-            onClick={() => {
-              deleteDepreciationItem(d.id);
-              toast.success("Removed");
-            }}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        </div>
-      ))}
-      {items.length > 0 && (
-        <div className="flex justify-between border-t pt-2 text-xs font-medium">
-          <span>Total annual claim</span>
-          <span>{fmtCurrency(totalAnnual)}</span>
-        </div>
-      )}
+          {items.length === 0 ? (
+            <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+              No depreciation yet — add a quantity surveyor report, or smaller items manually, to start tracking deductions.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {items.map((d) => (
+                <div key={d.id} className="flex items-center justify-between rounded border p-2 text-xs">
+                  <div>
+                    <div className="flex items-center gap-1.5 font-medium">
+                      {d.description}
+                      {d.division && <Badge variant="outline" className="text-[10px]">{d.division}</Badge>}
+                      {d.quantitySurveyor && <Badge variant="secondary" className="text-[10px]">{d.quantitySurveyor}</Badge>}
+                    </div>
+                    <div className="text-muted-foreground">
+                      {fmtCurrency(d.purchaseCost)} over {d.effectiveLifeYears}y · {d.method ?? "Diminishing Value"}
+                    </div>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={() => {
+                      deleteDepreciationItem(d.id);
+                      toast.success("Removed");
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-2 p-4">
+          <div>
+            <div className="text-sm font-medium">Annual Deductions</div>
+            <div className="text-xs text-muted-foreground">Division totals by financial year — a simplified projection, not tax advice.</div>
+          </div>
+          {schedule.length === 0 ? (
+            <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">No annual schedule yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-1.5 pr-3 font-medium">Year</th>
+                    <th className="py-1.5 px-3 text-right font-medium">Div 40</th>
+                    <th className="py-1.5 px-3 text-right font-medium">Div 43</th>
+                    <th className="py-1.5 pl-3 text-right font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schedule.map((y) => (
+                    <tr key={y.fy} className="border-b last:border-0">
+                      <td className="py-1.5 pr-3">FY {y.fy}</td>
+                      <td className="py-1.5 px-3 text-right">{fmtCurrency(y.div40)}</td>
+                      <td className="py-1.5 px-3 text-right">{fmtCurrency(y.div43)}</td>
+                      <td className="py-1.5 pl-3 text-right font-medium">{fmtCurrency(y.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

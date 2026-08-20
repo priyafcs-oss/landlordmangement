@@ -22,7 +22,7 @@ export const Route = createFileRoute("/documents")({
 
 interface DocumentEntry {
   id: string;
-  kind: "Bill" | "Lease Agreement" | "Rent Statement" | "Property Document";
+  kind: "Bill" | "Lease Agreement" | "Rent Statement" | "Property Document" | "Depreciation Report";
   date: string;
   propertyId?: string;
   label: string;
@@ -94,13 +94,21 @@ export function DocumentsContent() {
     })),
     ...state.aiProposals.map((p) => {
       const kind: DocumentEntry["kind"] =
-        p.kind === "tenant_lease" ? "Lease Agreement" : p.kind === "property_detail" ? "Property Document" : "Rent Statement";
+        p.kind === "tenant_lease"
+          ? "Lease Agreement"
+          : p.kind === "property_detail"
+            ? "Property Document"
+            : p.kind === "depreciation_report"
+              ? "Depreciation Report"
+              : "Rent Statement";
       const label =
         p.kind === "tenant_lease"
           ? (p.payload as { name?: string }).name ?? "Lease agreement"
           : p.kind === "property_detail"
             ? (p.payload as { documentCategory?: string }).documentCategory ?? "Property document"
-            : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
+            : p.kind === "depreciation_report"
+              ? (p.payload as { quantitySurveyor?: string }).quantitySurveyor ?? "Depreciation report"
+              : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
       return {
         id: p.id,
         kind,

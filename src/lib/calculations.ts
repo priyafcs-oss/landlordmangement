@@ -9,6 +9,7 @@ import type {
   Expense,
   AiIntakeProposal,
   BillType,
+  DepreciationItem,
 } from "./types";
 
 /** Maps a bill's type onto the tenant-invoice charge-type enum, for recharging a bill line item to a tenant. */
@@ -326,6 +327,75 @@ export function ausFinancialYear(dateISO: string): string {
 export function fyRange(fy: string): { start: string; end: string } {
   const [start] = fy.split("-").map((s) => parseInt(s, 10));
   return { start: `${start}-07-01`, end: `${start + 1}-06-30` };
+}
+
+export interface DepreciationScheduleYear {
+  fy: string;
+  div40: number;
+  div43: number;
+  total: number;
+}
+
+/**
+ * Projects each item's annual depreciation claim across financial years — Prime Cost is a flat
+ * cost/life every year for `life` years; Diminishing Value is a standard 200%-declining-balance
+ * projection with the first year pro-rated by days held. Simplified (no low-value pooling, no
+ * part-year private-use apportionment beyond first-year day-counting, no pre-2017 150% DV rate) —
+ * matches the rigor of the rest of this app's finance screens, not a full ATO Div 40/43 engine.
+ */
+export function buildDepreciationSchedule(items: DepreciationItem[]): DepreciationScheduleYear[] {
+  const byFy = new Map<string, { div40: number; div43: number }>();
+  const addToFy = (fy: string, division: "Div 40" | "Div 43", amount: number) => {
+    const entry = byFy.get(fy) ?? { div40: 0, div43: 0 };
+    if (division === "Div 40") entry.div40 += amount;
+    else entry.div43 += amount;
+    byFy.set(fy, entry);
+  };
+
+  for (const item of items) {
+    const cost = item.purchaseCost;
+    const life = item.effectiveLifeYears > 0 ? item.effectiveLifeYears : 1;
+    const division = item.division ?? "Div 40";
+    const method = item.method ?? "Diminishing Value";
+    const start = item.purchaseDate || item.effectiveFrom || todayISO();
+    const startFy = ausFinancialYear(start);
+    const startYear = parseInt(startFy.split("-")[0], 10);
+
+    if (method === "Prime Cost") {
+      const annual = cost / life;
+      for (let i = 0; i < Math.ceil(life); i++) {
+        addToFy(`${startYear + i}-${startYear + i + 1}`, division, annual);
+      }
+    } else {
+      let opening = cost;
+      const rate = 2 / life;
+      let i = 0;
+      while (opening > 1 && i < Math.ceil(life) + 1) {
+        const fy = `${startYear + i}-${startYear + i + 1}`;
+        let claim: number;
+        if (i === 0) {
+          const { end } = fyRange(fy);
+          const daysHeld = Math.max(1, Math.min(365, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1));
+          claim = opening * rate * (daysHeld / 365);
+        } else {
+          claim = opening * rate;
+        }
+        claim = Math.min(claim, opening);
+        addToFy(fy, division, claim);
+        opening -= claim;
+        i++;
+      }
+    }
+  }
+
+  return Array.from(byFy.entries())
+    .map(([fy, v]) => ({
+      fy,
+      div40: Math.round(v.div40 * 100) / 100,
+      div43: Math.round(v.div43 * 100) / 100,
+      total: Math.round((v.div40 + v.div43) * 100) / 100,
+    }))
+    .sort((a, b) => (a.fy < b.fy ? -1 : 1));
 }
 
 /** Add whole months and return ISO date */
