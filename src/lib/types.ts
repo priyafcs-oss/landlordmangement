@@ -20,6 +20,11 @@ export interface Property {
   waterAccountRef?: string;
   stampDuty?: number;
   deposit?: number;
+  /** Set once the property has been sold — mirrors the Asset's "Sold" status. Simplified disposal
+   * record (sale price, date, selling costs) for reference, not a full CGT calculation. */
+  saleDate?: string;
+  salePrice?: number;
+  sellingCosts?: number;
   lotSize?: string;
   physicalAttributes?: string;
   // Optional inline "primary loan" metadata (used by the Housekeeping tab).
@@ -76,6 +81,8 @@ export interface Property {
   insuranceSumInsured?: number;
   smokeAlarmCheckDueDate?: string;
   poolSafetyCertExpiry?: string;
+  electricalSafetyCertExpiry?: string;
+  gasSafetyCertExpiry?: string;
   // Domain API-fillable property attributes (also editable by hand).
   bedrooms?: number;
   bathrooms?: number;
@@ -625,6 +632,12 @@ export interface PropertyDetailProposalPayload {
   strataLevyFrequency?: "Quarterly" | "Annually";
   smokeAlarmCheckDueDate?: string;
   poolSafetyCertExpiry?: string;
+  electricalSafetyCertExpiry?: string;
+  gasSafetyCertExpiry?: string;
+  /** Settlement-adjustment line items from a PEXA record/Statement of Adjustments (council/water
+   * rate adjustments, registration fees) — reviewed as a checklist, each becomes a Capital Works
+   * expense against the property rather than a flat field, since there can be several. */
+  settlementAdjustments?: { description: string; amount: number }[];
   confidence: number;
 }
 
@@ -644,14 +657,66 @@ export interface UnclassifiedProposalPayload {
   confidence: number;
 }
 
+/** Extracted from an initial loan/mortgage document — a new Loan, staged for confirmation. */
+export interface LoanDocumentProposalPayload {
+  lenderName: string;
+  loanAmount?: number;
+  interestRate?: number;
+  monthlyRepayment?: number;
+  startDate?: string;
+  hasOffsetAccount?: boolean;
+  confidence: number;
+}
+
+/** Extracted from an ongoing loan statement — matched against an existing Loan to update, not create. */
+export interface LoanStatementProposalPayload {
+  lenderName: string;
+  periodStart?: string;
+  periodEnd?: string;
+  interestCharged?: number;
+  repaymentsMade?: number;
+  closingBalance?: number;
+  confidence: number;
+}
+
+/** A general bank statement (not an agent rent statement) — every line reviewed individually since
+ * a personal account can mix multiple properties, or entirely unrelated spending. */
+export interface BankStatementProposalPayload {
+  bankName?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  transactions: { date: string; description: string; amount: number; direction: "in" | "out" }[];
+  confidence: number;
+}
+
+/** A Contract of Sale (on disposal) or settlement statement on sale — marks the property Sold. */
+export interface PropertySaleProposalPayload {
+  saleDate?: string;
+  salePrice?: number;
+  sellingCosts?: number;
+  buyerName?: string;
+  confidence: number;
+}
+
 export interface AiIntakeProposal {
   id: string;
   /** Server-set on insert — when this document was received, used for the Documents archive. */
   created_at?: string;
-  kind: "tenant_lease" | "rent_ledger" | "property_detail" | "depreciation_report" | "unclassified";
+  kind:
+    | "tenant_lease"
+    | "rent_ledger"
+    | "property_detail"
+    | "depreciation_report"
+    | "unclassified"
+    | "loan_document"
+    | "loan_statement"
+    | "bank_statement"
+    | "property_sale";
   status: "pending" | "applied" | "dismissed";
   propertyId?: string;
   matchedTenantId?: string;
+  /** loan_statement only — set when exactly one loan on the matched property shares the extracted lender name. */
+  matchedLoanId?: string;
   rawPropertyAddress?: string;
   sourceSubject?: string;
   emailMessageId?: string;
@@ -663,7 +728,11 @@ export interface AiIntakeProposal {
     | RentLedgerProposalPayload
     | PropertyDetailProposalPayload
     | DepreciationReportProposalPayload
-    | UnclassifiedProposalPayload;
+    | UnclassifiedProposalPayload
+    | LoanDocumentProposalPayload
+    | LoanStatementProposalPayload
+    | BankStatementProposalPayload
+    | PropertySaleProposalPayload;
   reviewReason?: string | null;
 }
 

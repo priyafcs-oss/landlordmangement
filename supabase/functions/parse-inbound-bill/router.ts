@@ -6,6 +6,10 @@ import { parseRentStatement } from "./parse-ledger.ts";
 import { parsePropertyDocument } from "./parse-property-document.ts";
 import { parseDepreciationReport } from "./parse-depreciation-report.ts";
 import { stageUnclassifiedDocument } from "./parse-unclassified.ts";
+import { parseLoanDocument } from "./parse-loan-document.ts";
+import { parseLoanStatement } from "./parse-loan-statement.ts";
+import { parseBankStatement } from "./parse-bank-statement.ts";
+import { parsePropertySale } from "./parse-property-sale.ts";
 import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./types.ts";
 
 export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean };
@@ -46,6 +50,14 @@ export async function routeInboundDocument(
       return parsePropertyDocument(supabase, input, emailMessageId);
     case "depreciation_report":
       return parseDepreciationReport(supabase, input, emailMessageId);
+    case "loan_document":
+      return parseLoanDocument(supabase, input, emailMessageId);
+    case "loan_statement":
+      return parseLoanStatement(supabase, input, emailMessageId);
+    case "bank_statement":
+      return parseBankStatement(supabase, input, emailMessageId);
+    case "property_sale":
+      return parsePropertySale(supabase, input, emailMessageId);
     default:
       if (!input.pdfBase64) {
         console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), no attachment, skipping`);

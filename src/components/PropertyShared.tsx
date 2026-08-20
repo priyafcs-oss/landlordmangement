@@ -68,6 +68,10 @@ import type {
   DepreciationItem,
   DepreciationReportProposalPayload,
   UnclassifiedProposalPayload,
+  LoanDocumentProposalPayload,
+  LoanStatementProposalPayload,
+  BankStatementProposalPayload,
+  PropertySaleProposalPayload,
   Loan,
   Expense,
   PropertyUnit,
@@ -166,6 +170,14 @@ export function AiProposalsSection() {
             <DepreciationReportProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : p.kind === "unclassified" ? (
             <UnclassifiedProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "loan_document" ? (
+            <LoanDocumentProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "loan_statement" ? (
+            <LoanStatementProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "bank_statement" ? (
+            <BankStatementProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "property_sale" ? (
+            <PropertySaleProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : (
             <RentLedgerProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ),
@@ -267,6 +279,8 @@ const PROPERTY_DETAIL_FIELDS: { key: keyof PropertyDetailProposalPayload; label:
   { key: "strataLevyFrequency", label: "Strata levy frequency", kind: "text" },
   { key: "smokeAlarmCheckDueDate", label: "Smoke alarm check due", kind: "date" },
   { key: "poolSafetyCertExpiry", label: "Pool safety cert expiry", kind: "date" },
+  { key: "electricalSafetyCertExpiry", label: "Electrical safety cert expiry", kind: "date" },
+  { key: "gasSafetyCertExpiry", label: "Gas safety cert expiry", kind: "date" },
 ];
 
 const ENTITY_TYPES: Entity["type"][] = ["Individual", "Joint", "Trust", "SMSF", "Company"];
@@ -282,7 +296,7 @@ function mapOwnershipType(raw?: string): Entity["type"] {
 }
 
 function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProperty, markProposalApplied, findOrCreateEntity } = useStore();
+  const { state, updateProperty, markProposalApplied, findOrCreateEntity, addExpense } = useStore();
   const payload = proposal.payload as PropertyDetailProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
@@ -291,6 +305,8 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
     Object.fromEntries(presentFields.map((f) => [f.key, true])),
   );
   const [ownerChecked, setOwnerChecked] = useState(!!payload.ownerName);
+  const adjustments = payload.settlementAdjustments ?? [];
+  const [adjustmentsIncluded, setAdjustmentsIncluded] = useState<boolean[]>(() => adjustments.map(() => true));
 
   const formatValue = (f: (typeof PROPERTY_DETAIL_FIELDS)[number]) => {
     const v = payload[f.key];
@@ -307,8 +323,27 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
     if (ownerChecked && payload.ownerName) {
       patch.entityId = findOrCreateEntity(payload.ownerName, mapOwnershipType(payload.ownershipType));
     }
-    if (Object.keys(patch).length === 0) return toast.error("Select at least one field to apply");
-    updateProperty(propertyId, patch);
+    const includedAdjustments = adjustments.filter((_, i) => adjustmentsIncluded[i]);
+    if (Object.keys(patch).length === 0 && includedAdjustments.length === 0) {
+      return toast.error("Select at least one field to apply");
+    }
+    if (Object.keys(patch).length > 0) updateProperty(propertyId, patch);
+    for (const adj of includedAdjustments) {
+      addExpense({
+        itemName: adj.description,
+        cost: adj.amount,
+        date: payload.purchaseDate || todayISO(),
+        propertyId,
+        taxCategory: "Capital Works",
+        hasWarranty: false,
+        rechargeToTenant: false,
+        status: "approved",
+        source: "upload",
+        notes: "Settlement adjustment from a PEXA record / Statement of Adjustments.",
+        invoiceFileName: proposal.sourceFileName,
+        invoiceFileData: proposal.sourceFileData,
+      });
+    }
     markProposalApplied(proposal.id);
     toast.success(ownerChecked && payload.ownerName ? "Property details updated — entity linked" : "Property details updated");
   };
@@ -349,7 +384,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
           </label>
         )}
 
-        {presentFields.length === 0 && !payload.ownerName ? (
+        {presentFields.length === 0 && !payload.ownerName && adjustments.length === 0 ? (
           <div className="text-xs text-muted-foreground">No usable fields found on this document.</div>
         ) : presentFields.length > 0 ? (
           <div className="space-y-1 rounded border p-2">
@@ -367,6 +402,25 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
             ))}
           </div>
         ) : null}
+
+        {adjustments.length > 0 && (
+          <div className="space-y-1 rounded border p-2">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              Settlement adjustments → Capital Works expenses
+            </div>
+            {adjustments.map((adj, i) => (
+              <label key={i} className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={adjustmentsIncluded[i]}
+                  onChange={(e) => setAdjustmentsIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+                />
+                <span className="flex-1 truncate">{adj.description}</span>
+                <span className="font-medium">{fmtCurrency(adj.amount)}</span>
+              </label>
+            ))}
+          </div>
+        )}
 
         <DocumentViewLinks
           fileName={proposal.sourceFileName}
@@ -702,6 +756,385 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" onClick={file}>
             File in Documents
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PropertyPicker({ propertyId, onChange }: { propertyId: string; onChange: (id: string) => void }) {
+  const { state } = useStore();
+  return (
+    <Select value={propertyId} onValueChange={onChange}>
+      <SelectTrigger className="h-7 w-[220px] text-xs">
+        <SelectValue placeholder="Assign property" />
+      </SelectTrigger>
+      <SelectContent>
+        {state.properties.map((p) => (
+          <SelectItem key={p.id} value={p.id}>
+            {p.alias || p.address}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, addLoan, markProposalApplied } = useStore();
+  const payload = proposal.payload as LoanDocumentProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+
+  const confirm = () => {
+    const property = state.properties.find((p) => p.id === propertyId);
+    if (!property) return toast.error("Select a property first");
+    addLoan({
+      propertyId,
+      assetId: property.assetId,
+      bankName: payload.lenderName,
+      totalBalance: payload.loanAmount ?? 0,
+      interestRate: payload.interestRate ?? 0,
+      monthlyEmi: payload.monthlyRepayment ?? 0,
+      status: "Active",
+    });
+    markProposalApplied(proposal.id);
+    toast.success("Loan created");
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">New loan</Badge>
+          <span className="font-medium">{payload.lenderName}</span>
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">
+              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+            </span>
+            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
+          <div>
+            <div className="text-muted-foreground">Loan amount</div>
+            <div className="font-medium">{payload.loanAmount ? fmtCurrency(payload.loanAmount) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Interest rate</div>
+            <div className="font-medium">{payload.interestRate ? `${payload.interestRate}%` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Monthly repayment</div>
+            <div className="font-medium">{payload.monthlyRepayment ? fmtCurrency(payload.monthlyRepayment) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Start date</div>
+            <div className="font-medium">{payload.startDate || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Offset account</div>
+            <div className="font-medium">{payload.hasOffsetAccount === undefined ? "—" : payload.hasOffsetAccount ? "Yes" : "No"}</div>
+          </div>
+        </div>
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+            Create loan
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, updateLoan, addExpense, markProposalApplied } = useStore();
+  const payload = proposal.payload as LoanStatementProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  const [loanId, setLoanId] = useState(proposal.matchedLoanId ?? "");
+  const [logInterest, setLogInterest] = useState(!!payload.interestCharged);
+
+  const loansForProperty = propertyId ? state.loans.filter((l) => l.propertyId === propertyId) : [];
+
+  const confirm = () => {
+    if (!loanId) return toast.error("Select which loan this statement is for");
+    const patch: Record<string, unknown> = {};
+    if (payload.closingBalance !== undefined) patch.totalBalance = payload.closingBalance;
+    if (Object.keys(patch).length > 0) updateLoan(loanId, patch as Partial<Loan>);
+    if (logInterest && payload.interestCharged) {
+      const loan = state.loans.find((l) => l.id === loanId);
+      addExpense({
+        itemName: `${payload.lenderName} — loan interest`,
+        cost: payload.interestCharged,
+        date: payload.periodEnd || todayISO(),
+        propertyId,
+        assetId: loan?.assetId,
+        taxCategory: "Immediate Deduction",
+        hasWarranty: false,
+        rechargeToTenant: false,
+        status: "approved",
+        source: "upload",
+        periodStart: payload.periodStart || undefined,
+        periodEnd: payload.periodEnd || undefined,
+        invoiceFileName: proposal.sourceFileName,
+        invoiceFileData: proposal.sourceFileData,
+      });
+    }
+    markProposalApplied(proposal.id);
+    toast.success("Loan statement applied");
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Loan statement</Badge>
+          <span className="font-medium">{payload.lenderName}</span>
+          <span className="text-xs text-muted-foreground">
+            {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+          </span>
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">No property matched:</span>
+            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
+          </div>
+        )}
+
+        {propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Loan:</span>
+            <Select value={loanId} onValueChange={setLoanId}>
+              <SelectTrigger className="h-7 w-[220px] text-xs">
+                <SelectValue placeholder="Select loan" />
+              </SelectTrigger>
+              <SelectContent>
+                {loansForProperty.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.bankName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
+          <div>
+            <div className="text-muted-foreground">Interest charged</div>
+            <div className="font-medium">{payload.interestCharged ? fmtCurrency(payload.interestCharged) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Repayments made</div>
+            <div className="font-medium">{payload.repaymentsMade ? fmtCurrency(payload.repaymentsMade) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Closing balance</div>
+            <div className="font-medium">{payload.closingBalance ? fmtCurrency(payload.closingBalance) : "—"}</div>
+          </div>
+        </div>
+
+        {!!payload.interestCharged && (
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={logInterest} onChange={(e) => setLogInterest(e.target.checked)} />
+            <span>Log {fmtCurrency(payload.interestCharged)} interest charged as a deductible expense</span>
+          </label>
+        )}
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!loanId} onClick={confirm}>
+            Apply to loan
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, addExpense, markProposalApplied } = useStore();
+  const payload = proposal.payload as BankStatementProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => false));
+
+  const confirm = () => {
+    if (!propertyId) return toast.error("Select a property first");
+    let count = 0;
+    payload.transactions.forEach((tx, i) => {
+      if (!included[i]) return;
+      addExpense({
+        itemName: tx.description,
+        cost: tx.amount,
+        date: tx.date,
+        propertyId,
+        direction: tx.direction === "in" ? "Income" : undefined,
+        taxCategory: "Immediate Deduction",
+        hasWarranty: false,
+        rechargeToTenant: false,
+        status: "approved",
+        source: "upload",
+        invoiceFileName: proposal.sourceFileName,
+        invoiceFileData: proposal.sourceFileData,
+      });
+      count++;
+    });
+    if (count === 0) return toast.error("Select at least one transaction to import");
+    markProposalApplied(proposal.id);
+    toast.success(`Imported ${count} transaction(s)`);
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Bank statement</Badge>
+          {payload.bankName && <span className="font-medium">{payload.bankName}</span>}
+          <span className="text-xs text-muted-foreground">
+            {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Apply selected lines to:</span>
+          <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
+        </div>
+
+        <div className="max-h-64 space-y-1 overflow-y-auto rounded border p-2">
+          <div className="text-[11px] font-medium text-muted-foreground">
+            Transactions — tick the ones relevant to this property
+          </div>
+          {payload.transactions.map((tx, i) => (
+            <label key={i} className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={included[i]}
+                onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+              />
+              <span className="w-24 shrink-0">{tx.date}</span>
+              <span className={"w-20 shrink-0 text-right font-medium " + (tx.direction === "in" ? "text-emerald-600" : "")}>
+                {tx.direction === "in" ? "+" : "−"}
+                {fmtCurrency(tx.amount)}
+              </span>
+              <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
+            </label>
+          ))}
+        </div>
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+            Import selected
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, updateProperty, updateAsset, markProposalApplied } = useStore();
+  const payload = proposal.payload as PropertySaleProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+
+  const confirm = () => {
+    const property = state.properties.find((p) => p.id === propertyId);
+    if (!property) return toast.error("Select a property first");
+    updateProperty(propertyId, {
+      saleDate: payload.saleDate,
+      salePrice: payload.salePrice,
+      sellingCosts: payload.sellingCosts,
+    });
+    if (property.assetId) updateAsset(property.assetId, { status: "Sold" });
+    markProposalApplied(proposal.id);
+    toast.success("Property marked sold");
+  };
+
+  return (
+    <Card className="border-amber-500/30">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="destructive">Property sale</Badge>
+          {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">No property matched:</span>
+            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
+          <div>
+            <div className="text-muted-foreground">Sale date</div>
+            <div className="font-medium">{payload.saleDate || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Sale price</div>
+            <div className="font-medium">{payload.salePrice ? fmtCurrency(payload.salePrice) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Selling costs</div>
+            <div className="font-medium">{payload.sellingCosts ? fmtCurrency(payload.sellingCosts) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Buyer</div>
+            <div className="font-medium">{payload.buyerName || "—"}</div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          This marks the property Sold and records these figures for reference — not a full CGT calculation. Talk to
+          your accountant for the actual capital gain/loss.
+        </p>
+
+        <DocumentViewLinks
+          fileName={proposal.sourceFileName}
+          fileData={proposal.sourceFileData}
+          subject={proposal.sourceSubject}
+          emailBody={proposal.sourceEmailBody}
+        />
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+            Mark property sold
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
@@ -1884,6 +2317,8 @@ export function PropertyComplianceTab({ prop }: { prop: Property }) {
         <div className="mb-2 text-xs font-medium text-muted-foreground">Compliance</div>
         <div className="grid grid-cols-2 gap-3">
           <Stat label="Smoke alarm check due" value={prop.smokeAlarmCheckDueDate || "—"} />
+          <Stat label="Electrical safety cert expiry" value={prop.electricalSafetyCertExpiry || "—"} />
+          <Stat label="Gas safety cert expiry" value={prop.gasSafetyCertExpiry || "—"} />
           {prop.hasSwimmingPool && <Stat label="Pool safety cert expiry" value={prop.poolSafetyCertExpiry || "—"} />}
         </div>
       </div>

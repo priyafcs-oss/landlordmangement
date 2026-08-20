@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, Mail, FolderOpen } from "lucide-react";
 import { fmtCurrency } from "@/lib/calculations";
+import type { AiIntakeProposal } from "@/lib/types";
 
 export const Route = createFileRoute("/documents")({
   head: () => ({
@@ -22,7 +23,17 @@ export const Route = createFileRoute("/documents")({
 
 interface DocumentEntry {
   id: string;
-  kind: "Bill" | "Lease Agreement" | "Rent Statement" | "Property Document" | "Depreciation Report" | "Unrecognised";
+  kind:
+    | "Bill"
+    | "Lease Agreement"
+    | "Rent Statement"
+    | "Property Document"
+    | "Depreciation Report"
+    | "Unrecognised"
+    | "Loan Document"
+    | "Loan Statement"
+    | "Bank Statement"
+    | "Property Sale";
   date: string;
   propertyId?: string;
   label: string;
@@ -32,6 +43,51 @@ interface DocumentEntry {
   fileData?: string;
   subject?: string;
   emailBody?: string;
+}
+
+function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["kind"] {
+  switch (kind) {
+    case "tenant_lease":
+      return "Lease Agreement";
+    case "property_detail":
+      return "Property Document";
+    case "depreciation_report":
+      return "Depreciation Report";
+    case "unclassified":
+      return "Unrecognised";
+    case "loan_document":
+      return "Loan Document";
+    case "loan_statement":
+      return "Loan Statement";
+    case "bank_statement":
+      return "Bank Statement";
+    case "property_sale":
+      return "Property Sale";
+    default:
+      return "Rent Statement";
+  }
+}
+
+function proposalDocumentLabel(p: AiIntakeProposal): string {
+  switch (p.kind) {
+    case "tenant_lease":
+      return (p.payload as { name?: string }).name ?? "Lease agreement";
+    case "property_detail":
+      return (p.payload as { documentCategory?: string }).documentCategory ?? "Property document";
+    case "depreciation_report":
+      return (p.payload as { quantitySurveyor?: string }).quantitySurveyor ?? "Depreciation report";
+    case "unclassified":
+      return (p.payload as { documentCategory?: string }).documentCategory ?? "Unrecognised document";
+    case "loan_document":
+    case "loan_statement":
+      return (p.payload as { lenderName?: string }).lenderName ?? "Loan";
+    case "bank_statement":
+      return (p.payload as { bankName?: string }).bankName ?? "Bank statement";
+    case "property_sale":
+      return "Property sale";
+    default:
+      return (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
+  }
 }
 
 function DocumentsPage() {
@@ -93,26 +149,8 @@ export function DocumentsContent() {
       fileData: b.sourceFileData,
     })),
     ...state.aiProposals.map((p) => {
-      const kind: DocumentEntry["kind"] =
-        p.kind === "tenant_lease"
-          ? "Lease Agreement"
-          : p.kind === "property_detail"
-            ? "Property Document"
-            : p.kind === "depreciation_report"
-              ? "Depreciation Report"
-              : p.kind === "unclassified"
-                ? "Unrecognised"
-                : "Rent Statement";
-      const label =
-        p.kind === "tenant_lease"
-          ? (p.payload as { name?: string }).name ?? "Lease agreement"
-          : p.kind === "property_detail"
-            ? (p.payload as { documentCategory?: string }).documentCategory ?? "Property document"
-            : p.kind === "depreciation_report"
-              ? (p.payload as { quantitySurveyor?: string }).quantitySurveyor ?? "Depreciation report"
-              : p.kind === "unclassified"
-                ? (p.payload as { documentCategory?: string }).documentCategory ?? "Unrecognised document"
-                : (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
+      const kind = proposalDocumentKind(p.kind);
+      const label = proposalDocumentLabel(p);
       return {
         id: p.id,
         kind,
@@ -155,6 +193,10 @@ export function DocumentsContent() {
             <SelectItem value="Rent Statement">Rent statements</SelectItem>
             <SelectItem value="Property Document">Property documents</SelectItem>
             <SelectItem value="Depreciation Report">Depreciation reports</SelectItem>
+            <SelectItem value="Loan Document">Loan documents</SelectItem>
+            <SelectItem value="Loan Statement">Loan statements</SelectItem>
+            <SelectItem value="Bank Statement">Bank statements</SelectItem>
+            <SelectItem value="Property Sale">Property sales</SelectItem>
             <SelectItem value="Unrecognised">Unrecognised</SelectItem>
           </SelectContent>
         </Select>

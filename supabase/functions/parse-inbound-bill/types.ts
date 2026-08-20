@@ -59,6 +59,10 @@ export type DocumentType =
   | "rent_statement"
   | "property_document"
   | "depreciation_report"
+  | "loan_document"
+  | "loan_statement"
+  | "bank_statement"
+  | "property_sale"
   | "other";
 
 export interface ClassificationResult {
@@ -125,6 +129,11 @@ export interface ParsedPropertyDocumentFields {
   strata_levy_frequency: string | null; // "Quarterly" | "Annually"
   smoke_alarm_check_due_date: string | null;
   pool_safety_cert_expiry: string | null;
+  electrical_safety_cert_expiry: string | null;
+  gas_safety_cert_expiry: string | null;
+  /** PEXA settlement record / Statement of Adjustments line items (council/water rate adjustments,
+   * registration fees) — empty array if the document shows no such breakdown. */
+  settlement_adjustments: { description: string; amount: number }[];
   confidence: number;
 }
 
@@ -136,5 +145,49 @@ export interface ParsedDepreciationReportFields {
   report_date: string | null; // YYYY-MM-DD
   effective_from: string | null; // YYYY-MM-DD
   items: { description: string; division: "Div 40" | "Div 43" | null; cost: number; life_years: number | null }[];
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for an initial loan/mortgage document. */
+export interface ParsedLoanDocumentFields {
+  property_address: string;
+  lender_name: string;
+  loan_amount: number | null;
+  interest_rate: number | null;
+  monthly_repayment: number | null;
+  start_date: string | null; // YYYY-MM-DD
+  has_offset_account: boolean | null;
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for an ongoing loan statement. */
+export interface ParsedLoanStatementFields {
+  property_address: string;
+  lender_name: string;
+  period_start: string | null; // YYYY-MM-DD
+  period_end: string | null; // YYYY-MM-DD
+  interest_charged: number | null;
+  repayments_made: number | null;
+  closing_balance: number | null;
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for a general bank statement (not an agent rent statement). */
+export interface ParsedBankStatementFields {
+  property_address: string | null;
+  bank_name: string | null;
+  period_start: string | null; // YYYY-MM-DD
+  period_end: string | null; // YYYY-MM-DD
+  transactions: { date: string; description: string; amount: number; direction: "in" | "out" }[];
+  confidence: number;
+}
+
+/** Strict JSON shape requested from Gemini for a Contract of Sale (disposal) or settlement statement on sale. */
+export interface ParsedPropertySaleFields {
+  property_address: string;
+  sale_date: string | null; // YYYY-MM-DD
+  sale_price: number | null;
+  selling_costs: number | null;
+  buyer_name: string | null;
   confidence: number;
 }
