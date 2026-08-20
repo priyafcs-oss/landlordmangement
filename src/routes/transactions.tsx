@@ -15,13 +15,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Receipt, Search, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
 import type { AssetType } from "@/lib/types";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
+import { ExpenseDialog } from "@/components/ExpenseDialog";
 import jsPDF from "jspdf";
 
 function pdfSafe(s: string): string {
@@ -72,10 +73,14 @@ interface TxRow {
   amount: number; // positive = income, negative = outgoing
   source?: "Manual" | "Email" | "Upload";
   needsAttention?: boolean;
+  /** Set only for expense-backed rows — the only ones editable/deletable from this table.
+   * Rent-payment ledger rows have their own edit/delete flow on the tenant's own ledger, which
+   * also reverses the paid-up-to-date shift correctly; this table doesn't duplicate that. */
+  expenseId?: string;
 }
 
 export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
-  const { state } = useStore();
+  const { state, deleteExpense } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const [fy, setFy] = useState(currentFY);
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
@@ -121,6 +126,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
       amount: e.direction === "Income" ? e.cost : -e.cost,
       source: e.source === "email_auto" ? ("Email" as const) : e.source === "upload" ? ("Upload" as const) : ("Manual" as const),
       needsAttention: e.status === "needs_review",
+      expenseId: e.id,
     })),
   ];
 
@@ -276,6 +282,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                       <th className="px-3 py-2 font-medium">Category</th>
                       <th className="px-3 py-2 font-medium">Source</th>
                       <th className="px-3 py-2 text-right font-medium">Amount</th>
+                      <th className="w-16 px-2 py-2" />
                     </tr>
                   </thead>
                   <tbody>
@@ -283,6 +290,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                       const prop = state.properties.find((p) => p.id === r.propertyId);
                       const asset = state.assets.find((a) => a.id === r.assetId);
                       const label = lockedPropertyId ? undefined : prop?.alias || prop?.address || asset?.name;
+                      const expense = r.expenseId ? state.expenses.find((e) => e.id === r.expenseId) : undefined;
                       return (
                         <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
                           <td className="whitespace-nowrap px-3 py-2 text-xs">{r.date}</td>
@@ -298,6 +306,33 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                           <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
                             {r.amount < 0 ? "−" : "+"}
                             {fmtCurrency(Math.abs(r.amount))}
+                          </td>
+                          <td className="px-2 py-2">
+                            {expense && (
+                              <div className="flex items-center justify-end gap-0.5">
+                                <ExpenseDialog
+                                  expense={expense}
+                                  trigger={
+                                    <Button size="icon" variant="ghost" className="h-6 w-6">
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                  }
+                                />
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6"
+                                  onClick={() => {
+                                    if (confirm(`Delete "${expense.itemName}"?`)) {
+                                      deleteExpense(expense.id);
+                                      toast.success("Transaction removed");
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
