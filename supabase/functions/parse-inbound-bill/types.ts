@@ -36,6 +36,9 @@ export interface ParsedBillFields {
   vendor_website: string | null;
   vendor_abn: string | null;
   vendor_address: string | null;
+  /** The current instalment's total broken into its component charges (e.g. water bill's fixed
+   * access charge + usage charge) — one item covering the whole total if the notice shows no breakdown. */
+  line_items: { description: string; amount: number }[];
   /** Gemini's own 0-1 estimate of extraction certainty, used by the low-confidence guardrail. */
   confidence: number;
 }

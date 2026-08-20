@@ -16,6 +16,13 @@ export function isImageFileName(fileName?: string): boolean {
   return ext in IMAGE_EXT_MIME;
 }
 
+export function base64ToBlob(base64: string, mime: string): Blob {
+  const byteChars = atob(base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  return new Blob([new Uint8Array(byteNumbers)], { type: mime });
+}
+
 /**
  * Base64 -> Blob object URL. Chrome (and most modern browsers) block window.open()/top-level
  * navigation to data: URIs as a phishing mitigation, so a document that opens fine embedded in an
@@ -23,11 +30,7 @@ export function isImageFileName(fileName?: string): boolean {
  * aren't subject to that restriction.
  */
 export function base64ToBlobUrl(base64: string, mime: string): string {
-  const byteChars = atob(base64);
-  const byteNumbers = new Array(byteChars.length);
-  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
-  const blob = new Blob([new Uint8Array(byteNumbers)], { type: mime });
-  return URL.createObjectURL(blob);
+  return URL.createObjectURL(base64ToBlob(base64, mime));
 }
 
 export function openBillDocument(fileName: string | undefined, base64: string | undefined) {

@@ -14,11 +14,13 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CheckCircle2, Trash2, Plus, Pencil } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, Pencil, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, billTypeToChargeType } from "@/lib/calculations";
 import type { BillType, BillLineItem, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
+import { base64ToBlob, mimeForFileName } from "@/lib/files";
+import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -124,6 +126,26 @@ export function BillDetailDialog({
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === selected.propertyId);
+
+  /** No browser email client can attach a file automatically (a security restriction, not
+   * something this app can work around) — same downloadPdfAndEmailViaGmail pattern used
+   * elsewhere: download the source document, then open Gmail compose prefilled so the landlord
+   * just has to attach the file that was downloaded and hit send. */
+  const emailTenantAboutLineItem = (li: LineItemRow) => {
+    const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
+    if (!tenant) return toast.error("No tenant found for this recharge");
+    const amount = parseFloat(li.amount) || 0;
+    const subject = `${selected.billType} — ${li.description || "usage charge"} (${fmtCurrency(amount)})`;
+    const body = `Hi ${tenant.name},\n\nThe ${propertyLabel ?? "property"} ${selected.billType.toLowerCase()} bill has come in. It includes a usage charge of ${fmtCurrency(amount)} for "${li.description}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nThanks`;
+    if (selected.sourceFileData) {
+      const blob = base64ToBlob(selected.sourceFileData, mimeForFileName(selected.sourceFileName));
+      downloadPdfAndEmailViaGmail({ blob, fileName: selected.sourceFileName || "bill.pdf", to: tenant.email, subject, body });
+      toast.success("Bill downloaded — attach it in the Gmail draft that just opened");
+    } else {
+      openGmailCompose(tenant.email, subject, body);
+      toast("No source document on this bill — compose opened without an attachment");
+    }
+  };
 
   const saveDetails = () => {
     if (lineItems.some((li) => li.rechargeToTenant && !li.recharged && !li.tenantId)) {
@@ -403,8 +425,16 @@ export function BillDetailDialog({
                     </Button>
                   </div>
                   {li.recharged ? (
-                    <div className="text-xs text-emerald-700">
+                    <div className="flex items-center gap-2 text-xs text-emerald-700">
                       Recharged to {tenantsForProperty.find((t) => t.id === li.tenantId)?.name ?? "tenant"}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 px-2 text-xs text-primary"
+                        onClick={() => emailTenantAboutLineItem(li)}
+                      >
+                        <Mail className="h-3 w-3" /> Email tenant
+                      </Button>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">

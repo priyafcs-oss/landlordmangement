@@ -132,6 +132,8 @@ export interface LedgerRow {
   balance: number; // positive = tenant owes, negative = in credit
   isDue?: boolean;
   entryId?: string; // if from ledger entry (payment)
+  invoiceId?: string; // if from a tenant invoice (e.g. a recharged bill line item)
+  invoiceStatus?: TenantInvoice["status"];
   canDelete?: boolean;
   source?: LedgerEntry["source"];
 }
@@ -217,6 +219,9 @@ export function buildTenantLedger(
         debit: inv.status === "Unpaid" ? inv.amountDue : 0,
         credit: inv.status === "Paid" ? inv.amountDue : 0,
         balance: 0,
+        invoiceId: inv.id,
+        invoiceStatus: inv.status,
+        canDelete: true,
       });
     });
 

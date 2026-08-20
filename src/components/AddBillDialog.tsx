@@ -70,6 +70,7 @@ interface ExtractResult {
   bpay_reference?: string | null;
   bill_category?: string;
   future_instalments?: { due_date: string; amount: number }[];
+  line_items?: { description: string; amount: number }[];
   confidence?: number;
 }
 
@@ -203,13 +204,12 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         referenceNumber: data.bpay_reference ?? f.referenceNumber,
         hasInstalments: (data.future_instalments?.length ?? 0) > 0,
       }));
-      setLineItems([
-        {
-          ...blankLineItem(mapBillType(data.bill_category)),
-          description: data.vendor ?? "",
-          amount: data.amount ? String(data.amount) : "",
-        },
-      ]);
+      const category = mapBillType(data.bill_category);
+      setLineItems(
+        data.line_items?.length
+          ? data.line_items.map((li) => ({ ...blankLineItem(category), description: li.description, amount: String(li.amount) }))
+          : [{ ...blankLineItem(category), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }],
+      );
       if (data.future_instalments?.length) {
         setInstalments(
           data.future_instalments.map((i, idx) => ({

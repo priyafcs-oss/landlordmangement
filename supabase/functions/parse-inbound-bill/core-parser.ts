@@ -33,7 +33,15 @@ Extract the fields defined in the response schema as strict JSON.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.
 - vendor_email, vendor_phone, vendor_website, vendor_abn, vendor_address: the biller's own contact
   details, if printed anywhere on the notice (often in a "Contact us" or footer section) — null for
-  any that aren't shown. Do not guess or invent these.`;
+  any that aren't shown. Do not guess or invent these.
+- line_items is REQUIRED — always include it, even as an empty array [] when the notice shows only
+  one flat total. Many bills break the current instalment's total into distinct charges — e.g. a
+  water bill printing "Water Access/Service Charge" and "Water Usage Charge" as separate lines, or a
+  council notice splitting "General Rate", "Waste Levy" and "Environmental Levy". Extract EVERY such
+  line as its own item with its own description and amount — do not collapse them into one. The
+  amounts must sum to exactly the top-level "amount" field (the current instalment's total). If the
+  notice genuinely shows only a single undifferentiated total with no breakdown, return one line item
+  whose description is the vendor/bill type and whose amount equals the total.`;
 
 const BILL_SCHEMA = {
   type: "OBJECT",
@@ -62,6 +70,17 @@ const BILL_SCHEMA = {
     vendor_website: { type: "STRING", nullable: true },
     vendor_abn: { type: "STRING", nullable: true },
     vendor_address: { type: "STRING", nullable: true },
+    line_items: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          description: { type: "STRING" },
+          amount: { type: "NUMBER" },
+        },
+        required: ["description", "amount"],
+      },
+    },
     confidence: { type: "NUMBER" },
   },
   required: [
@@ -72,6 +91,7 @@ const BILL_SCHEMA = {
     "ato_category",
     "bill_category",
     "future_instalments",
+    "line_items",
     "confidence",
   ],
 };
@@ -404,6 +424,7 @@ export async function parseInboundBill(
       source: "Email",
       billGroupId,
       label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
+      lineItems: parsed.line_items?.length ? parsed.line_items : [{ description: parsed.vendor, amount: parsed.amount }],
       sourceFileName: source.fileName,
       sourceFileData: source.fileData,
       linkedExpenseId: row.id,

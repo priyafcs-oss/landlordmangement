@@ -493,7 +493,15 @@ function formatMonthLabel(key: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
-function LedgerRowsTable({ rows, onDelete }: { rows: LedgerRow[]; onDelete: (id: string) => void }) {
+function LedgerRowsTable({
+  rows,
+  onDelete,
+  onToggleInvoicePaid,
+}: {
+  rows: LedgerRow[];
+  onDelete: (row: LedgerRow) => void;
+  onToggleInvoicePaid: (row: LedgerRow) => void;
+}) {
   return (
     <div className="overflow-x-auto rounded border">
       <table className="w-full text-sm">
@@ -539,11 +547,18 @@ function LedgerRowsTable({ rows, onDelete }: { rows: LedgerRow[]; onDelete: (id:
                 {fmtCurrency(r.balance)}
               </td>
               <td className="px-3 py-2 text-right">
-                {r.canDelete && r.entryId && (
-                  <Button size="icon" variant="ghost" onClick={() => onDelete(r.entryId!)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
+                <div className="flex justify-end gap-1">
+                  {r.invoiceId && (
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onToggleInvoicePaid(r)}>
+                      Mark {r.invoiceStatus === "Paid" ? "Unpaid" : "Paid"}
+                    </Button>
+                  )}
+                  {r.canDelete && (r.entryId || r.invoiceId) && (
+                    <Button size="icon" variant="ghost" onClick={() => onDelete(r)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
@@ -557,10 +572,12 @@ function LedgerGroupSection({
   label,
   rows,
   onDelete,
+  onToggleInvoicePaid,
 }: {
   label: string;
   rows: LedgerRow[];
-  onDelete: (id: string) => void;
+  onDelete: (row: LedgerRow) => void;
+  onToggleInvoicePaid: (row: LedgerRow) => void;
 }) {
   const [open, setOpen] = useState(false);
   const subtotal = rows.reduce(
@@ -582,7 +599,7 @@ function LedgerGroupSection({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="border-t p-2">
-        <LedgerRowsTable rows={rows} onDelete={onDelete} />
+        <LedgerRowsTable rows={rows} onDelete={onDelete} onToggleInvoicePaid={onToggleInvoicePaid} />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -599,7 +616,7 @@ function LedgerTotalsFooter({ debit, credit }: { debit: number; credit: number }
 }
 
 function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
-  const { state, addLedger, deleteLedger } = useStore();
+  const { state, addLedger, deleteLedger, deleteInvoice, updateInvoice } = useStore();
   const { rows, total, outstandingRent, outstandingInvoices } = buildTenantLedger(
     tenant,
     state.ledger,
@@ -672,9 +689,22 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     toast.success(`Posted ${fmtCurrency(val)} — paid-up date recalculated (${daysCovered} days).`);
   };
 
-  const removePayment = (id: string) => {
-    deleteLedger(id);
-    toast.success("Ledger entry reversed — paid-up date recalculated");
+  const removeRow = (row: LedgerRow) => {
+    if (row.invoiceId) {
+      deleteInvoice(row.invoiceId);
+      toast.success("Invoice removed");
+      return;
+    }
+    if (row.entryId) {
+      deleteLedger(row.entryId);
+      toast.success("Ledger entry reversed — paid-up date recalculated");
+    }
+  };
+
+  const toggleInvoicePaid = (row: LedgerRow) => {
+    if (!row.invoiceId) return;
+    updateInvoice(row.invoiceId, { status: row.invoiceStatus === "Paid" ? "Unpaid" : "Paid" });
+    toast.success(row.invoiceStatus === "Paid" ? "Marked unpaid" : "Marked paid");
   };
 
   return (
@@ -767,7 +797,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
         </div>
 
         {groupBy === "none" || !groups ? (
-          <LedgerRowsTable rows={filteredRows} onDelete={removePayment} />
+          <LedgerRowsTable rows={filteredRows} onDelete={removeRow} onToggleInvoicePaid={toggleInvoicePaid} />
         ) : (
           <div className="space-y-2">
             {groups.length === 0 && (
@@ -780,7 +810,8 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
                 key={key}
                 label={groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
                 rows={groupRows}
-                onDelete={removePayment}
+                onDelete={removeRow}
+                onToggleInvoicePaid={toggleInvoicePaid}
               />
             ))}
           </div>
