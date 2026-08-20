@@ -65,6 +65,7 @@ import type {
   Loan,
   Expense,
   PropertyUnit,
+  Entity,
 } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
@@ -257,8 +258,20 @@ const PROPERTY_DETAIL_FIELDS: { key: keyof PropertyDetailProposalPayload; label:
   { key: "poolSafetyCertExpiry", label: "Pool safety cert expiry", kind: "date" },
 ];
 
+const ENTITY_TYPES: Entity["type"][] = ["Individual", "Joint", "Trust", "SMSF", "Company"];
+function mapOwnershipType(raw?: string): Entity["type"] {
+  const exact = ENTITY_TYPES.find((t) => t.toLowerCase() === (raw ?? "").trim().toLowerCase());
+  if (exact) return exact;
+  const c = (raw ?? "").toLowerCase();
+  if (c.includes("joint")) return "Joint";
+  if (c.includes("smsf") || c.includes("super")) return "SMSF";
+  if (c.includes("trust")) return "Trust";
+  if (c.includes("pty") || c.includes("ltd") || c.includes("company")) return "Company";
+  return "Individual";
+}
+
 function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProperty, markProposalApplied } = useStore();
+  const { state, updateProperty, markProposalApplied, findOrCreateEntity } = useStore();
   const payload = proposal.payload as PropertyDetailProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
@@ -266,6 +279,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
   const [checked, setChecked] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(presentFields.map((f) => [f.key, true])),
   );
+  const [ownerChecked, setOwnerChecked] = useState(!!payload.ownerName);
 
   const formatValue = (f: (typeof PROPERTY_DETAIL_FIELDS)[number]) => {
     const v = payload[f.key];
@@ -279,10 +293,13 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
     presentFields.forEach((f) => {
       if (checked[f.key]) patch[f.key] = payload[f.key];
     });
+    if (ownerChecked && payload.ownerName) {
+      patch.entityId = findOrCreateEntity(payload.ownerName, mapOwnershipType(payload.ownershipType));
+    }
     if (Object.keys(patch).length === 0) return toast.error("Select at least one field to apply");
     updateProperty(propertyId, patch);
     markProposalApplied(proposal.id);
-    toast.success("Property details updated");
+    toast.success(ownerChecked && payload.ownerName ? "Property details updated — entity linked" : "Property details updated");
   };
 
   return (
@@ -311,9 +328,19 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
           </div>
         )}
 
-        {presentFields.length === 0 ? (
+        {payload.ownerName && (
+          <label className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs">
+            <input type="checkbox" checked={ownerChecked} onChange={(e) => setOwnerChecked(e.target.checked)} />
+            <span>
+              Owner: <span className="font-medium">{payload.ownerName}</span> — will find or create a{" "}
+              <span className="font-medium">{mapOwnershipType(payload.ownershipType)}</span> entity and link it to this property
+            </span>
+          </label>
+        )}
+
+        {presentFields.length === 0 && !payload.ownerName ? (
           <div className="text-xs text-muted-foreground">No usable fields found on this document.</div>
-        ) : (
+        ) : presentFields.length > 0 ? (
           <div className="space-y-1 rounded border p-2">
             <div className="text-[11px] font-medium text-muted-foreground">Apply to property</div>
             {presentFields.map((f) => (
@@ -328,7 +355,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
               </label>
             ))}
           </div>
-        )}
+        ) : null}
 
         <DocumentViewLinks
           fileName={proposal.sourceFileName}
@@ -509,7 +536,10 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
 }
 
 export function PropertyDialog({ property, onDone }: { property: Property | null; onDone: () => void }) {
-  const { state, addProperty, updateProperty } = useStore();
+  const { state, addProperty, updateProperty, findOrCreateEntity } = useStore();
+  const [creatingEntity, setCreatingEntity] = useState(false);
+  const [newEntityName, setNewEntityName] = useState("");
+  const [newEntityType, setNewEntityType] = useState<Entity["type"]>("Individual");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     address: property?.address ?? "",
@@ -802,22 +832,47 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Entity (ownership)">
-              <Select
-                value={form.entityId || "__none__"}
-                onValueChange={(v) => setForm({ ...form, entityId: v === "__none__" ? "" : v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Unassigned</SelectItem>
-                  {state.entities.map((e) => (
-                    <SelectItem key={e.id} value={e.id}>
-                      {e.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {creatingEntity ? (
+                <div className="flex items-center gap-1">
+                  <Input value={newEntityName} onChange={(e) => setNewEntityName(e.target.value)} placeholder="New entity name" className="flex-1" />
+                  <Select value={newEntityType} onValueChange={(v) => setNewEntityType(v as Entity["type"])}>
+                    <SelectTrigger className="w-[110px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Individual">Individual</SelectItem>
+                      <SelectItem value="Joint">Joint</SelectItem>
+                      <SelectItem value="Trust">Trust</SelectItem>
+                      <SelectItem value="SMSF">SMSF</SelectItem>
+                      <SelectItem value="Company">Company</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="icon" variant="ghost" onClick={() => { setCreatingEntity(false); setNewEntityName(""); }}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Select
+                  value={form.entityId || "__none__"}
+                  onValueChange={(v) => {
+                    if (v === "__new__") { setCreatingEntity(true); return; }
+                    setForm({ ...form, entityId: v === "__none__" ? "" : v });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Unassigned</SelectItem>
+                    {state.entities.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__new__">+ Create new entity…</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </Field>
             <Field label="Occupancy">
               <Select
@@ -1115,7 +1170,10 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
                 inspectionFrequencyMonths: form.inspectionFrequencyMonths
                   ? parseInt(form.inspectionFrequencyMonths, 10)
                   : undefined,
-                entityId: form.entityId || undefined,
+                entityId:
+                  creatingEntity && newEntityName.trim()
+                    ? findOrCreateEntity(newEntityName, newEntityType)
+                    : form.entityId || undefined,
                 occupancyType: form.occupancyType || undefined,
                 strataLevyAmount: form.strataLevyAmount ? parseFloat(form.strataLevyAmount) : undefined,
                 strataLevyFrequency: (form.strataLevyFrequency || undefined) as Property["strataLevyFrequency"],

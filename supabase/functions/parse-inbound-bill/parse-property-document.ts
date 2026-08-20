@@ -9,6 +9,15 @@ Extract the fields defined in the response schema as strict JSON. Every field ex
 - property_address: the property this document is about.
 - purchase_date, insurance_renewal_date, smoke_alarm_check_due_date, pool_safety_cert_expiry: YYYY-MM-DD.
 - strata_levy_frequency: "Quarterly" or "Annually" if stated, else null.
+- owner_name: the purchaser/transferee/insured/owner named on the document — a settlement
+  statement's "Purchaser(s)" or "Transferee" section, or the named insured on an insurance
+  certificate. If two individuals are named (e.g. spouses), return both joined by " & " (e.g.
+  "John Smith & Jane Smith"). If the owner is a trust or company, return its full legal name
+  exactly as printed (e.g. "Smith Family Trust" or "Smith Investments Pty Ltd ATF Smith Family Trust").
+- ownership_type: your best classification of owner_name as one of "Individual", "Joint", "Trust",
+  "SMSF", or "Company" — "Joint" when two individual names are given, "Individual" for one person,
+  "Trust"/"SMSF"/"Company" when the name itself says so (e.g. contains "Trust", "Super", "Pty Ltd").
+  Null if owner_name is null.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -20,6 +29,8 @@ const SCHEMA = {
     purchase_price: { type: "NUMBER", nullable: true },
     stamp_duty: { type: "NUMBER", nullable: true },
     deposit: { type: "NUMBER", nullable: true },
+    owner_name: { type: "STRING", nullable: true },
+    ownership_type: { type: "STRING", nullable: true },
     insurer_name: { type: "STRING", nullable: true },
     insurance_policy_number: { type: "STRING", nullable: true },
     insurance_premium: { type: "NUMBER", nullable: true },
@@ -89,6 +100,8 @@ export async function parsePropertyDocument(
       purchasePrice: parsed.purchase_price ?? undefined,
       stampDuty: parsed.stamp_duty ?? undefined,
       deposit: parsed.deposit ?? undefined,
+      ownerName: parsed.owner_name ?? undefined,
+      ownershipType: parsed.ownership_type ?? undefined,
       insurerName: parsed.insurer_name ?? undefined,
       insurancePolicyNumber: parsed.insurance_policy_number ?? undefined,
       insurancePremium: parsed.insurance_premium ?? undefined,

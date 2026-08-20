@@ -602,6 +602,8 @@ export interface PropertyDetailProposalPayload {
   purchasePrice?: number;
   stampDuty?: number;
   deposit?: number;
+  ownerName?: string;
+  ownershipType?: string;
   insurerName?: string;
   insurancePolicyNumber?: string;
   insurancePremium?: number;

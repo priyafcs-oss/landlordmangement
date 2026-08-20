@@ -108,6 +108,8 @@ export interface ParsedPropertyDocumentFields {
   purchase_price: number | null;
   stamp_duty: number | null;
   deposit: number | null;
+  owner_name: string | null;
+  ownership_type: string | null;
   insurer_name: string | null;
   insurance_policy_number: string | null;
   insurance_premium: number | null;

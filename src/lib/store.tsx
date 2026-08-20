@@ -147,6 +147,10 @@ interface StoreCtx {
   addEntity: (e: Omit<Entity, "id">) => void;
   updateEntity: (id: string, e: Partial<Entity>) => void;
   deleteEntity: (id: string) => void;
+  /** Case-insensitive name match against existing entities; creates one if none matches. Returns
+   * synchronously (the id is generated locally before the fire-and-forget DB write), so callers
+   * can use the result immediately — e.g. as a new property's entityId in the same save. */
+  findOrCreateEntity: (name: string, type: Entity["type"]) => string;
 
   /** Generic asset CRUD — used for Gold/ETF (and anything added later). Property manages its own
    * mirrored asset row automatically via addProperty/updateProperty/deleteProperty. */
@@ -719,6 +723,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         entities: s.entities.filter((e) => e.id !== id),
         properties: s.properties.map((p) => (p.entityId === id ? { ...p, entityId: undefined } : p)),
       }));
+    },
+    findOrCreateEntity: (name, type) => {
+      const trimmed = name.trim();
+      const existing = state.entities.find((e) => e.name.trim().toLowerCase() === trimmed.toLowerCase());
+      if (existing) return existing.id;
+
+      // A "Joint" owner name is usually two people joined by "&"/"and" — split into even-share owners.
+      const owners =
+        type === "Joint"
+          ? trimmed
+              .split(/\s*(?:&|\band\b)\s*/i)
+              .map((n) => n.trim())
+              .filter(Boolean)
+              .map((n) => ({ name: n, percent: 100 / Math.max(1, trimmed.split(/\s*(?:&|\band\b)\s*/i).filter(Boolean).length) }))
+          : [{ name: trimmed, percent: 100 }];
+
+      const row: Entity = { id: uid("ent"), name: trimmed, type, owners };
+      void upsertRow(TABLES.entities, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, entities: [...s.entities, row] }));
+      return row.id;
     },
 
     addAsset: (a, details) => {
