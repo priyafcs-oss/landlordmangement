@@ -1145,8 +1145,18 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
   );
 }
 
-export function PropertyDialog({ property, onDone }: { property: Property | null; onDone: () => void }) {
-  const { state, addProperty, updateProperty, findOrCreateEntity } = useStore();
+export function PropertyDialog({
+  property,
+  onDone,
+  trigger,
+}: {
+  property: Property | null;
+  onDone: () => void;
+  trigger?: React.ReactNode;
+}) {
+  const { state, addProperty, updateProperty, findOrCreateEntity, updateAsset } = useStore();
+  const asset = property ? state.assets.find((a) => a.id === property.assetId) : undefined;
+  const isArchived = asset?.status === "Archived";
   const [creatingEntity, setCreatingEntity] = useState(false);
   const [newEntityName, setNewEntityName] = useState("");
   const [newEntityType, setNewEntityType] = useState<Entity["type"]>("Individual");
@@ -1315,9 +1325,11 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
       }}
     >
       <DialogTrigger asChild>
-        <Button onClick={() => setOpen(true)} className="gap-2">
-          <Plus className="h-4 w-4" /> Add Property
-        </Button>
+        {trigger ?? (
+          <Button onClick={() => setOpen(true)} className="gap-2">
+            <Plus className="h-4 w-4" /> Add Property
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
@@ -1744,6 +1756,29 @@ export function PropertyDialog({ property, onDone }: { property: Property | null
           </Collapsible>
         </div>
         <DialogFooter>
+          {asset && (
+            <Button
+              type="button"
+              variant="outline"
+              className="mr-auto"
+              onClick={() => {
+                if (
+                  !isArchived &&
+                  !confirm(
+                    `Archive ${property?.alias || property?.address}? It'll be hidden from Assets, but every tenant, bill, transaction and document stays intact — unarchive any time.`,
+                  )
+                ) {
+                  return;
+                }
+                updateAsset(asset.id, { status: isArchived ? "Active" : "Archived" });
+                toast.success(isArchived ? "Property unarchived" : "Property archived");
+                setOpen(false);
+                onDone();
+              }}
+            >
+              {isArchived ? "Unarchive" : "Archive"}
+            </Button>
+          )}
           <Button
             onClick={() => {
               if (!form.address) return toast.error("Address required");

@@ -459,9 +459,11 @@ function AllAssetsContent() {
   const navigate = useNavigate();
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<"__all__" | AssetType>("__all__");
+  const [showArchived, setShowArchived] = useState(false);
 
+  const archivedCount = state.assets.filter((a) => a.status === "Archived").length;
   const filtered = state.assets
-    .filter((a) => a.status !== "Archived")
+    .filter((a) => (showArchived ? a.status === "Archived" : a.status !== "Archived"))
     .filter((a) => typeFilter === "__all__" || a.assetType === typeFilter)
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -490,14 +492,27 @@ function AllAssetsContent() {
             <SelectItem value="ETF">ETF</SelectItem>
           </SelectContent>
         </Select>
-        <div className="text-sm text-muted-foreground">
-          Total value: <span className="font-medium text-foreground">{fmtCurrency(totalValue)}</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {archivedCount > 0 && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline"
+              onClick={() => setShowArchived((v) => !v)}
+            >
+              {showArchived ? "← Back to active" : `Show archived (${archivedCount})`}
+            </button>
+          )}
+          <div className="text-sm text-muted-foreground">
+            Total value: <span className="font-medium text-foreground">{fmtCurrency(totalValue)}</span>
+          </div>
         </div>
       </div>
 
       {filtered.length === 0 && (
         <Card>
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">No assets yet.</CardContent>
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            {showArchived ? "No archived assets." : "No assets yet."}
+          </CardContent>
         </Card>
       )}
 
@@ -518,6 +533,16 @@ function AllAssetsContent() {
                       <Badge variant="outline" className="text-[10px]">
                         {a.assetType}
                       </Badge>
+                      {a.status === "Archived" && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          Archived
+                        </Badge>
+                      )}
+                      {a.status === "Sold" && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          Sold
+                        </Badge>
+                      )}
                     </div>
                     <div className="mt-1 truncate font-medium">{a.name}</div>
                   </div>

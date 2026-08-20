@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { fmtCurrency } from "@/lib/calculations";
 import {
   ArrowLeft,
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   Users2,
   ImageIcon,
+  Pencil,
 } from "lucide-react";
 import {
   PropertyOverviewTab,
@@ -30,6 +32,7 @@ import {
   PropertyComplianceTab,
   PropertyProvidersTab,
   PropertyMediaTab,
+  PropertyDialog,
 } from "@/components/PropertyShared";
 import { LedgerTab } from "@/routes/transactions";
 
@@ -150,9 +153,20 @@ function PropertyAssetPage() {
         <Link to="/assets" className="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3 w-3" /> All assets
         </Link>
-        <div className="mb-3">
-          <div className="font-semibold leading-tight">{prop.alias || prop.address}</div>
-          {prop.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
+        <div className="mb-3 flex items-start justify-between gap-1">
+          <div>
+            <div className="font-semibold leading-tight">{prop.alias || prop.address}</div>
+            {prop.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
+          </div>
+          <PropertyDialog
+            property={prop}
+            onDone={() => {}}
+            trigger={
+              <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0">
+                <Pencil className="h-3 w-3" />
+              </Button>
+            }
+          />
         </div>
         <nav className="space-y-3">
           {groups.map((g, i) => (
