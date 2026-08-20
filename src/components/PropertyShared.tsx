@@ -1318,7 +1318,7 @@ export function PropertyDialog({
 
   return (
     <Dialog
-      open={open || !!property}
+      open={open}
       onOpenChange={(o) => {
         setOpen(o);
         if (!o) onDone();
