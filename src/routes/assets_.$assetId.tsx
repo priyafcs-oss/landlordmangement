@@ -137,11 +137,27 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
 
 function PropertyAssetPage() {
   const { assetId } = Route.useParams();
-  const { state } = useStore();
+  const { state, loading } = useStore();
   const [section, setSection] = useState<Section>("overview");
 
   const asset = state.assets.find((a) => a.id === assetId);
   const prop = asset?.linkedPropertyId ? state.properties.find((p) => p.id === asset.linkedPropertyId) : undefined;
+
+  // On first paint (SSR, or the moment before the client's initial Supabase fetch resolves),
+  // state.assets/state.properties are still empty — without this check every property page
+  // would flash "This page is for property assets only" before its own data ever loaded.
+  if (loading && (!asset || !prop)) {
+    return (
+      <div className="space-y-4 p-4 sm:p-6">
+        <Link to="/assets" className="inline-flex items-center gap-1 text-sm text-primary underline">
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to Assets
+        </Link>
+        <Card>
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">Loading…</CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (!asset || asset.assetType !== "Property" || !prop) {
     return (
