@@ -1559,7 +1559,7 @@ export function LeaseAgreementWizard({
     landlordName2: additionalLandlords[0]?.name || undefined,
     landlordConsentsToElectronicService: leaseForm.landlordConsentsToElectronicService,
 
-    propertyAddress: property.address,
+    propertyAddress: tenant?.unitAddress || property.address,
     hasSwimmingPool: premises.hasSwimmingPool,
     maxOccupants: premises.maxOccupants || undefined,
     premisesInclusions: premises.premisesInclusions || undefined,
@@ -2817,6 +2817,7 @@ export function TenantDialog({
     emergencyContactRelationship: tenant?.emergencyContactRelationship ?? "",
     emergencyContactPhone: tenant?.emergencyContactPhone ?? "",
     permanentAddress: tenant?.permanentAddress ?? "",
+    unitAddress: tenant?.unitAddress ?? "",
     noticePeriod: tenant?.noticePeriod ?? "",
     leaseStart: tenant?.leaseStart ?? initialValues?.leaseStart ?? "",
     leaseExpiry: tenant?.leaseExpiry ?? initialValues?.leaseExpiry ?? "",
@@ -2910,6 +2911,15 @@ export function TenantDialog({
           <Field label="Phone">
             <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </Field>
+          <div className="col-span-2">
+            <Field label="Unit / dwelling address (optional)">
+              <Input
+                value={form.unitAddress}
+                onChange={(e) => setForm({ ...form, unitAddress: e.target.value })}
+                placeholder="Only needed if this tenant's own address differs from the property's — e.g. a granny flat sharing one title"
+              />
+            </Field>
+          </div>
           <Field label="Lease start date">
             <Input type="date" value={form.leaseStart} onChange={(e) => onStart(e.target.value)} />
           </Field>
@@ -3051,6 +3061,7 @@ export function TenantDialog({
                 emergencyContactRelationship: form.emergencyContactRelationship || undefined,
                 emergencyContactPhone: form.emergencyContactPhone || undefined,
                 permanentAddress: form.permanentAddress || undefined,
+                unitAddress: form.unitAddress || undefined,
                 noticePeriod: form.noticePeriod || undefined,
                 propertyId,
                 leaseStart: form.leaseStart || undefined,

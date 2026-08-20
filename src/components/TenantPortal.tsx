@@ -23,7 +23,7 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
             <Home className="h-4 w-4" />
             Your rental
           </div>
-          <div className="mt-1 text-lg font-semibold">{property?.address}</div>
+          <div className="mt-1 text-lg font-semibold">{tenant.unitAddress || property?.address}</div>
         </div>
         <CardContent className="grid grid-cols-2 gap-4 p-5 text-sm">
           <div>

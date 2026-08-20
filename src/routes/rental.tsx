@@ -198,7 +198,7 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
   const [noticeOpen, setNoticeOpen] = useState<null | TemplateKey>(null);
   const [showHist, setShowHist] = useState(false);
   const [showActions, setShowActions] = useState(false);
-  const propertyAddress = property?.address;
+  const propertyAddress = tenant.unitAddress || property?.address;
   const history = state.leaseHistory.filter((h) => h.tenantId === tenant.id);
   const rentChanges = state.rentChanges.filter((r) => r.tenantId === tenant.id);
   const latestRentChange = [...rentChanges].sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
@@ -629,7 +629,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("month");
 
   const nextDue = addDays(tenant.paidUpToDate, 1);
-  const propertyAddress = state.properties.find((p) => p.id === tenant.propertyId)?.address ?? "";
+  const propertyAddress = tenant.unitAddress || state.properties.find((p) => p.id === tenant.propertyId)?.address || "";
   const paidUpTo = paidUpToDetails(tenant, state.ledger, state.rentChanges);
 
   const fyOptions = useMemo(() => {

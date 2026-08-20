@@ -139,6 +139,10 @@ export interface Tenant {
   emergencyContact?: string;
   permanentAddress?: string;
   noticePeriod?: string; // e.g. "14 days"
+  /** Overrides the property's own address on everything this tenant sees (ledger, lease, invoices,
+   * tenant portal) — for a title with multiple dwellings (e.g. a house + granny flat sharing one
+   * Property record for purchase price/loan/cost base) where each tenant needs a distinct address. */
+  unitAddress?: string;
   propertyId: string;
   leaseStart?: string;
   leaseExpiry?: string; // empty string / undefined = Periodic
