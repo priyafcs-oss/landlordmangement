@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Webhook } from "npm:svix@1";
 import { routeInboundDocument } from "./router.ts";
 import type { NormalizedBillInput } from "./types.ts";
@@ -65,6 +66,46 @@ async function fetchAttachmentBase64(emailId: string, attachmentId: string, apiK
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
   return btoa(binary);
+}
+
+/**
+ * Every email this webhook is invoked for gets exactly one row here, regardless of outcome —
+ * unlike ai_intake_proposals, which only ever gets a row when classification/extraction
+ * actually succeeds. Upserts on emailId so a Svix webhook retry overwrites the same row with
+ * the latest outcome instead of duplicating it. Best-effort: a logging failure is reported to
+ * the function log but never fails the request — the email itself has already been processed
+ * (or failed) by the time this runs.
+ */
+async function logEmailInbox(
+  supabase: SupabaseClient,
+  fields: {
+    emailId: string;
+    fromAddress?: string;
+    subject?: string;
+    hasAttachment: boolean;
+    attachmentFileName?: string;
+    status: "processed" | "staged" | "skipped" | "failed";
+    documentType?: string;
+    proposalId?: string;
+    expenseId?: string;
+    errorMessage?: string;
+  },
+): Promise<void> {
+  const row = {
+    id: `eml_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    emailId: fields.emailId,
+    fromAddress: fields.fromAddress ?? null,
+    subject: fields.subject ?? null,
+    hasAttachment: fields.hasAttachment,
+    attachmentFileName: fields.attachmentFileName ?? null,
+    status: fields.status,
+    documentType: fields.documentType ?? null,
+    proposalId: fields.proposalId ?? null,
+    expenseId: fields.expenseId ?? null,
+    errorMessage: fields.errorMessage ?? null,
+  };
+  const { error } = await supabase.from("email_inbox_log").upsert(row, { onConflict: "emailId" });
+  if (error) console.error("[parse-inbound-bill] failed to write email_inbox_log", error);
 }
 
 /** Gemini reads PDFs and common image formats natively as inlineData — anything else (xlsx, docx, csv, ...) is skipped. */
@@ -151,8 +192,16 @@ Deno.serve(async (req) => {
     return new Response("Server misconfigured", { status: 500 });
   }
 
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  // Populated once fetchReceivedEmail succeeds — kept outside the try block so the catch below
+  // can still log a from/subject-bearing row if something later throws.
+  let email: ResendReceivedEmail | undefined;
   try {
-    const email = await fetchReceivedEmail(emailId, apiKey);
+    email = await fetchReceivedEmail(emailId, apiKey);
     const input = await normalize(email, apiKey);
 
     if (!input.pdfBase64 && !input.textBody?.trim()) {
@@ -161,31 +210,60 @@ Deno.serve(async (req) => {
         : "none";
       const error = `No readable content: no PDF/image attachment and no email body text. Attachments received: ${attachmentSummary}`;
       console.error(`[parse-inbound-bill] ${error}`);
+      await logEmailInbox(supabase, {
+        emailId,
+        fromAddress: email.from,
+        subject: email.subject,
+        hasAttachment: (email.attachments?.length ?? 0) > 0,
+        status: "failed",
+        errorMessage: error,
+      });
       return new Response(JSON.stringify({ error }), {
         status: 422,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-
     const result = await routeInboundDocument(supabase, input, emailId);
+    const documentType = "documentType" in result ? result.documentType : undefined;
+    const proposalId = "proposalId" in result ? result.proposalId : undefined;
+    const expenseId = "expenseId" in result ? result.expenseId : undefined;
+
     if (!result.ok) {
       console.error("[parse-inbound-bill] parse failed", result.error);
+      await logEmailInbox(supabase, {
+        emailId,
+        fromAddress: email.from,
+        subject: email.subject,
+        hasAttachment: !!input.pdfBase64,
+        attachmentFileName: input.pdfFileName,
+        status: "failed",
+        documentType,
+        errorMessage: result.error,
+      });
       return new Response(JSON.stringify({ error: result.error }), {
         status: 422,
         headers: { "Content-Type": "application/json" },
       });
     }
 
+    await logEmailInbox(supabase, {
+      emailId,
+      fromAddress: email.from,
+      subject: email.subject,
+      hasAttachment: !!input.pdfBase64,
+      attachmentFileName: input.pdfFileName,
+      status: result.skipped ? "skipped" : proposalId ? "staged" : "processed",
+      documentType,
+      proposalId,
+      expenseId,
+    });
+
     return new Response(
       JSON.stringify({
         skipped: result.skipped,
-        expenseId: "expenseId" in result ? result.expenseId : undefined,
-        proposalId: "proposalId" in result ? result.proposalId : undefined,
+        expenseId,
+        proposalId,
         status: "status" in result ? result.status : undefined,
         reviewReason: "reviewReason" in result ? result.reviewReason : undefined,
         matchedPropertyId: "matchedPropertyId" in result ? result.matchedPropertyId : undefined,
@@ -194,6 +272,15 @@ Deno.serve(async (req) => {
     );
   } catch (e) {
     console.error("[parse-inbound-bill] unhandled error", e);
+    const errorMessage = e instanceof Error ? e.message : "Internal error";
+    await logEmailInbox(supabase, {
+      emailId,
+      fromAddress: email?.from,
+      subject: email?.subject,
+      hasAttachment: (email?.attachments?.length ?? 0) > 0,
+      status: "failed",
+      errorMessage,
+    });
     return new Response("Internal error", { status: 500 });
   }
 });

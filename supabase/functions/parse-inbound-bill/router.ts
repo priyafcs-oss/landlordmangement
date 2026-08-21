@@ -12,7 +12,7 @@ import { parseBankStatement } from "./parse-bank-statement.ts";
 import { parsePropertySale } from "./parse-property-sale.ts";
 import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./types.ts";
 
-export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean };
+export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean; documentType?: string };
 
 /**
  * Classifies the inbound document, then dispatches to the type-specific extractor.
@@ -44,31 +44,37 @@ export async function routeInboundDocument(
     return { ok: false, error: `Classification failed: ${error}` };
   }
 
-  switch (classification.document_type) {
+  const documentType = classification.document_type;
+  const tagged = async (result: Promise<ParseResult | ProposalParseResult>): Promise<RouteResult> => ({
+    ...(await result),
+    documentType,
+  });
+
+  switch (documentType) {
     case "bill":
-      return parseInboundBill(supabase, input, emailMessageId);
+      return tagged(parseInboundBill(supabase, input, emailMessageId));
     case "lease_agreement":
-      return parseLeaseAgreement(supabase, input, emailMessageId);
+      return tagged(parseLeaseAgreement(supabase, input, emailMessageId));
     case "rent_statement":
-      return parseRentStatement(supabase, input, emailMessageId);
+      return tagged(parseRentStatement(supabase, input, emailMessageId));
     case "property_document":
-      return parsePropertyDocument(supabase, input, emailMessageId);
+      return tagged(parsePropertyDocument(supabase, input, emailMessageId));
     case "depreciation_report":
-      return parseDepreciationReport(supabase, input, emailMessageId);
+      return tagged(parseDepreciationReport(supabase, input, emailMessageId));
     case "loan_document":
-      return parseLoanDocument(supabase, input, emailMessageId);
+      return tagged(parseLoanDocument(supabase, input, emailMessageId));
     case "loan_statement":
-      return parseLoanStatement(supabase, input, emailMessageId);
+      return tagged(parseLoanStatement(supabase, input, emailMessageId));
     case "bank_statement":
-      return parseBankStatement(supabase, input, emailMessageId);
+      return tagged(parseBankStatement(supabase, input, emailMessageId));
     case "property_sale":
-      return parsePropertySale(supabase, input, emailMessageId);
+      return tagged(parsePropertySale(supabase, input, emailMessageId));
     default:
       if (!input.pdfBase64) {
         console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), no attachment, skipping`);
-        return { ok: true, skipped: true };
+        return { ok: true, skipped: true, documentType };
       }
       console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), staging as unclassified`);
-      return stageUnclassifiedDocument(supabase, input, emailMessageId, classification.confidence);
+      return tagged(stageUnclassifiedDocument(supabase, input, emailMessageId, classification.confidence));
   }
 }

@@ -786,6 +786,25 @@ export interface ReportHistoryEntry {
   generatedAt: string;
 }
 
+/** A trail of every email the forwarding inbox has ever received, written server-side by
+ * parse-inbound-bill/index.ts regardless of outcome — unlike AiIntakeProposal, which only gets a
+ * row when classification/extraction actually succeeds. Lets a landlord see a bill they forwarded
+ * that silently failed to parse, not just the ones that made it through. */
+export interface EmailInboxLogEntry {
+  id: string;
+  created_at?: string;
+  emailId?: string;
+  fromAddress?: string;
+  subject?: string;
+  hasAttachment: boolean;
+  attachmentFileName?: string;
+  status: "processed" | "staged" | "skipped" | "failed";
+  documentType?: string;
+  proposalId?: string;
+  expenseId?: string;
+  errorMessage?: string;
+}
+
 export interface AppState {
   properties: Property[];
   tenants: Tenant[];
@@ -810,6 +829,7 @@ export interface AppState {
   landlordProfile: LandlordProfile;
   bills: PropertyBill[];
   aiProposals: AiIntakeProposal[];
+  emailInboxLog: EmailInboxLogEntry[];
   leaseTemplate: LeaseTemplateConfig | null;
   /** The official Tenant Information Statement PDF, appended after the filled agreement on generation. */
   tenantInfoStatement: { fileName: string; fileData: string; uploadedAt: string } | null;

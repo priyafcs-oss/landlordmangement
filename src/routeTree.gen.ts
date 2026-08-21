@@ -17,6 +17,7 @@ import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as EntitiesRouteImport } from './routes/entities'
 import { Route as ForecastsRouteImport } from './routes/forecasts'
+import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
 import { Route as RentalRouteImport } from './routes/rental'
@@ -64,6 +65,11 @@ const EntitiesRoute = EntitiesRouteImport.update({
 const ForecastsRoute = ForecastsRouteImport.update({
   id: '/forecasts',
   path: '/forecasts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InspectionsRoute = InspectionsRouteImport.update({
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
   '/forecasts': typeof ForecastsRoute
+  '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/rental': typeof RentalRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
   '/forecasts': typeof ForecastsRoute
+  '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/rental': typeof RentalRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/documents': typeof DocumentsRoute
   '/entities': typeof EntitiesRoute
   '/forecasts': typeof ForecastsRoute
+  '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
   '/rental': typeof RentalRoute
@@ -173,6 +182,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/entities'
     | '/forecasts'
+    | '/inbox'
     | '/inspections'
     | '/maintenance'
     | '/rental'
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/entities'
     | '/forecasts'
+    | '/inbox'
     | '/inspections'
     | '/maintenance'
     | '/rental'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/entities'
     | '/forecasts'
+    | '/inbox'
     | '/inspections'
     | '/maintenance'
     | '/rental'
@@ -228,6 +240,7 @@ export interface RootRouteChildren {
   DocumentsRoute: typeof DocumentsRoute
   EntitiesRoute: typeof EntitiesRoute
   ForecastsRoute: typeof ForecastsRoute
+  InboxRoute: typeof InboxRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
   RentalRoute: typeof RentalRoute
@@ -294,6 +307,13 @@ declare module '@tanstack/react-router' {
       path: '/forecasts'
       fullPath: '/forecasts'
       preLoaderRoute: typeof ForecastsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inspections': {
@@ -364,6 +384,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocumentsRoute: DocumentsRoute,
   EntitiesRoute: EntitiesRoute,
   ForecastsRoute: ForecastsRoute,
+  InboxRoute: InboxRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
   RentalRoute: RentalRoute,

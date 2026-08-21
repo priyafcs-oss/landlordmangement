@@ -14,6 +14,7 @@ export const TABLES = {
   maintenanceRequests: "maintenance_requests",
   bills: "property_bills",
   aiProposals: "ai_intake_proposals",
+  emailInboxLog: "email_inbox_log",
   providers: "providers",
   entities: "entities",
   assets: "assets",

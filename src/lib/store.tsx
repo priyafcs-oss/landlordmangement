@@ -15,6 +15,7 @@ import type {
   LandlordProfile,
   PropertyBill,
   AiIntakeProposal,
+  EmailInboxLogEntry,
   ExpenseProposalPayload,
   LeaseTemplateConfig,
   Provider,
@@ -80,6 +81,7 @@ const empty: AppState = {
   landlordProfile: defaultProfile,
   bills: [],
   aiProposals: [],
+  emailInboxLog: [],
   leaseTemplate: null,
   tenantInfoStatement: null,
   reportHistory: [],
@@ -259,6 +261,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       maintenanceRequests,
       bills,
       aiProposals,
+      emailInboxLog,
       settings,
     ] = await Promise.all([
       selectAll<Property>(TABLES.properties),
@@ -282,6 +285,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectAll<MaintenanceRequest>(TABLES.maintenanceRequests),
       selectAll<PropertyBill>(TABLES.bills),
       selectAll<AiIntakeProposal>(TABLES.aiProposals),
+      selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
       loadSettings(),
     ]);
     setState({
@@ -306,6 +310,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       maintenanceRequests,
       bills,
       aiProposals,
+      emailInboxLog,
       aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
       landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
       leaseTemplate: (settings?.leaseTemplate as LeaseTemplateConfig | undefined) ?? null,

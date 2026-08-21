@@ -34,6 +34,7 @@ import {
   TrendingUp,
   ShieldCheck,
   FolderOpen,
+  Inbox as InboxIcon,
 } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
@@ -46,6 +47,7 @@ import { PortfolioCostBaseTab, PortfolioDepreciationTab, PortfolioPnLTab } from 
 import { ForecastsContent } from "@/routes/forecasts";
 import { BuffersContent } from "@/routes/buffers";
 import { DocumentsContent } from "@/routes/documents";
+import { InboxContent } from "@/routes/inbox";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/assets")({
@@ -570,7 +572,7 @@ function AllAssetsContent() {
   );
 }
 
-type Section = "all" | "bills" | "transactions" | "loans" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents";
+type Section = "all" | "bills" | "transactions" | "loans" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents" | "inbox";
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
   { section: "all", label: "All Assets", icon: LayoutGrid },
@@ -583,6 +585,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "forecasts", label: "Forecasts", icon: TrendingUp },
   { section: "buffers", label: "Buffers", icon: ShieldCheck },
   { section: "documents", label: "Documents", icon: FolderOpen },
+  { section: "inbox", label: "Inbox", icon: InboxIcon },
 ];
 
 function AssetsPage() {
@@ -643,6 +646,7 @@ function AssetsPage() {
         {section === "forecasts" && <ForecastsContent />}
         {section === "buffers" && <BuffersContent />}
         {section === "documents" && <DocumentsContent />}
+        {section === "inbox" && <InboxContent />}
       </div>
     </div>
   );
