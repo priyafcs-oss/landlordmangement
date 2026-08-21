@@ -435,7 +435,11 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
         )}
 
         <div className="flex flex-wrap gap-2 pt-1">
-          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+          <Button
+            size="sm"
+            disabled={!propertyId || (presentFields.length === 0 && !payload.ownerName && adjustments.length === 0)}
+            onClick={confirm}
+          >
             Apply selected fields
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>

@@ -3,11 +3,21 @@ import { matchProperty } from "./property-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedPropertyDocumentFields, ProposalParseResult } from "./types.ts";
 
-const PROMPT = `You are extracting property ownership/policy details from a document forwarded to an Australian landlord — this is NOT a bill to be paid now, it's a settlement statement, insurance certificate/policy schedule, or strata/owners-corporation notice.
+const PROMPT = `You are extracting property ownership/policy details from a document forwarded to an Australian landlord — this is NOT a bill to be paid now. It's one of: a settlement statement, an insurance certificate/policy schedule, a strata/owners-corporation notice, or a purchase Contract of Sale (where the landlord is the buyer — the vendor/purchaser agreement itself, before or after settlement).
 Extract the fields defined in the response schema as strict JSON. Every field except document_category, property_address and confidence is nullable — only fill in what this specific document actually states, leave the rest null. Do not guess or invent values.
-- document_category: your best short label for what kind of document this is, e.g. "Settlement Statement", "Insurance Certificate", "Strata Notice".
+- document_category: your best short label for what kind of document this is, e.g. "Settlement Statement", "Insurance Certificate", "Strata Notice", "Contract of Sale".
 - property_address: the property this document is about.
-- purchase_date, insurance_renewal_date, smoke_alarm_check_due_date, pool_safety_cert_expiry,
+- purchase_price, deposit: on a Contract of Sale these are in the Particulars of Sale / front page (often
+  labelled "Price"/"Purchase Price" and "Deposit"); on a settlement statement they're the settlement
+  figures. Extract whichever is stated even if the document is an unexecuted/unsettled contract.
+- purchase_date: the settlement date. On a settlement statement this is a stated calendar date. On a
+  Contract of Sale it's often expressed only as a formula relative to the contract date (e.g. "42 days
+  after the Contract Date") rather than a fixed date — only fill this in if the document states an actual
+  calendar date; leave it null if it's only a formula you can't resolve from the document alone.
+- stamp_duty: rarely stated on a Contract of Sale itself (it's assessed separately after exchange) —
+  leave it null unless the document actually states a figure; a settlement statement is more likely to
+  include it as a settlement adjustment.
+- insurance_renewal_date, smoke_alarm_check_due_date, pool_safety_cert_expiry,
   electrical_safety_cert_expiry, gas_safety_cert_expiry: YYYY-MM-DD.
 - strata_levy_frequency: "Quarterly" or "Annually" if stated, else null.
 - settlement_adjustments: REQUIRED — always include, even as an empty array [] when there's no such
