@@ -17,6 +17,17 @@ export function billTypeToChargeType(billType: BillType): TenantInvoice["chargeT
   return billType === "Water" ? "Water Usage" : "Other";
 }
 
+/** Which Property annual-running-cost column each bill type feeds, if any — mirrors
+ * ANNUAL_COST_FIELD in supabase/functions/parse-inbound-bill/parse-bill.ts. Duplicated there
+ * rather than shared since edge functions (Deno) and the app (Vite) don't share a module
+ * system; kept as a single source of truth here on the app side. */
+export const ANNUAL_COST_FIELD: Partial<Record<BillType, keyof Property>> = {
+  "Council Rates": "councilRatesAnnual",
+  Water: "waterRatesAnnual",
+  Strata: "strataFeesAnnual",
+  Insurance: "insuranceAnnual",
+};
+
 /** Categories offered on a transaction's line items — broader than BillType since a one-off
  * transaction can be almost anything, not just a recurring utility/rates bill. */
 export const EXPENSE_CATEGORIES = [

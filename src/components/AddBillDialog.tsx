@@ -20,13 +20,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, billTypeToChargeType } from "@/lib/calculations";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { fmtCurrency, todayISO, billTypeToChargeType, ANNUAL_COST_FIELD } from "@/lib/calculations";
+import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
-import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload } from "@/lib/types";
+import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
@@ -110,7 +111,8 @@ export function AddBillDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { state, addBill, addProvider, updateProvider, addInvoice, markProposalApplied, dismissProposal } = useStore();
+  const { state, addBill, addExpense, addProvider, updateProvider, updateProperty, addInvoice, markProposalApplied, dismissProposal } =
+    useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
@@ -325,6 +327,23 @@ export function AddBillDialog({
   const addLineItem = () => setLineItems((rows) => [...rows, blankLineItem(form.billType)]);
   const removeLineItem = (key: string) => setLineItems((rows) => rows.filter((r) => r.key !== key));
 
+  const emailTenantAboutLineItem = (li: LineItemRow) => {
+    const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
+    if (!tenant) return toast.error("Select a tenant for this line item first");
+    const amount = parseFloat(li.amount) || 0;
+    const property = state.properties.find((p) => p.id === propertyId);
+    const subject = `${form.billType} — ${li.description || "usage charge"} (${fmtCurrency(amount)})`;
+    const body = `Hi ${tenant.name},\n\nThe ${property?.alias || property?.address || "property"} ${form.billType.toLowerCase()} bill has come in. It includes a usage charge of ${fmtCurrency(amount)} for "${li.description}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nThanks`;
+    if (form.sourceFileData) {
+      const blob = base64ToBlob(form.sourceFileData, mimeForFileName(form.sourceFileName));
+      downloadPdfAndEmailViaGmail({ blob, fileName: form.sourceFileName || "bill.pdf", to: tenant.email, subject, body });
+      toast.success("Bill downloaded — attach it in the Gmail draft that just opened");
+    } else {
+      openGmailCompose(tenant.email, subject, body);
+      toast("No source document on this bill — compose opened without an attachment");
+    }
+  };
+
   const save = () => {
     if (!propertyId) return toast.error("Property is required");
     if (!form.providerName.trim()) return toast.error("Provider name is required");
@@ -364,6 +383,36 @@ export function AddBillDialog({
         };
       });
 
+    const payload = initialProposal?.payload as BillProposalPayload | undefined;
+
+    // An AI-confirmed bill represents a document that's already arrived -- a real,
+    // already-incurred cost, so it posts to P&L immediately (matching what the
+    // pre-consolidation review card did). A manually typed bill has no such source document,
+    // so it keeps waiting until it's actually paid (markBillPaid creates the linked Expense
+    // then) -- unchanged from how Add Bill has always worked for manual entries.
+    let linkedExpenseId: string | undefined;
+    if (initialProposal && payload) {
+      linkedExpenseId = addExpense({
+        itemName: form.providerName.trim(),
+        cost: netTotal,
+        date: form.dueDate,
+        propertyId,
+        taxCategory: payload.atoCategory,
+        hasWarranty: false,
+        rechargeToTenant: finalLineItems.some((li) => li.rechargeToTenant),
+        status: "approved",
+        source: "email_auto",
+        bpayBillerCode: form.bpayBillerCode || undefined,
+        bpayReference: form.bpayReference || undefined,
+        rawPropertyAddress: initialProposal.rawPropertyAddress,
+        emailMessageId: initialProposal.emailMessageId,
+        invoiceFileName: form.sourceFileName,
+        invoiceFileData: form.sourceFileData,
+        sourceSubject: initialProposal.sourceSubject,
+        sourceEmailBody: initialProposal.sourceEmailBody,
+      });
+    }
+
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;
     const shared = {
       propertyId,
@@ -389,6 +438,7 @@ export function AddBillDialog({
       amount: netTotal,
       dueDate: form.dueDate,
       label: billGroupId ? "Instalment 1" : undefined,
+      linkedExpenseId,
     });
     if (billGroupId) {
       for (const inst of instalments) {
@@ -404,20 +454,54 @@ export function AddBillDialog({
     const existingProvider = providersForProperty.find(
       (p) => p.name.trim().toLowerCase() === form.providerName.trim().toLowerCase(),
     );
-    const providerPatch = {
-      portalUrl: form.portalUrl || undefined,
-      portalUsername: form.portalUsername || undefined,
-      passwordNote: form.passwordNote || undefined,
-    };
     if (existingProvider) {
-      if (form.portalUrl || form.portalUsername || form.passwordNote) {
-        updateProvider(existingProvider.id, providerPatch);
+      const patch: Partial<Provider> = {};
+      if (form.portalUrl) patch.portalUrl = form.portalUrl;
+      if (form.portalUsername) patch.portalUsername = form.portalUsername;
+      if (form.passwordNote) patch.passwordNote = form.passwordNote;
+      // An AI-confirmed bill often carries the vendor's contact details straight off the
+      // notice -- fill in whatever the Provider directory doesn't already have, same as the
+      // pre-consolidation review card did. Never overwrites a value already on file.
+      if (payload) {
+        if (!existingProvider.email && payload.vendorEmail) patch.email = payload.vendorEmail;
+        if (!existingProvider.phone && payload.vendorPhone) patch.phone = payload.vendorPhone;
+        if (!existingProvider.website && payload.vendorWebsite) patch.website = payload.vendorWebsite;
+        if (!existingProvider.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
+        if (!existingProvider.address && payload.vendorAddress) patch.address = payload.vendorAddress;
       }
+      if (Object.keys(patch).length > 0) updateProvider(existingProvider.id, patch);
     } else {
-      addProvider({ propertyId, name: form.providerName.trim(), role: "Other", ...providerPatch });
+      addProvider({
+        propertyId,
+        name: form.providerName.trim(),
+        role: payload && form.billType === "Council Rates" ? "Council" : "Other",
+        portalUrl: form.portalUrl || undefined,
+        portalUsername: form.portalUsername || undefined,
+        passwordNote: form.passwordNote || undefined,
+        email: payload?.vendorEmail,
+        phone: payload?.vendorPhone,
+        website: payload?.vendorWebsite,
+        abn: payload?.vendorAbn,
+        address: payload?.vendorAddress,
+      });
     }
 
-    if (initialProposal) markProposalApplied(initialProposal.id);
+    if (initialProposal && payload) {
+      const annualField = ANNUAL_COST_FIELD[form.billType];
+      if (annualField) {
+        let annual: number | null = null;
+        if (form.billType === "Insurance" && instalments.length === 0) {
+          annual = netTotal;
+        } else if (instalments.length === 3) {
+          annual = netTotal + instalments.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+        }
+        if (annual !== null) {
+          updateProperty(propertyId, { [annualField]: Math.round(annual * 100) / 100 } as Partial<Property>);
+        }
+      }
+      markProposalApplied(initialProposal.id);
+    }
+
     setOpen(false);
     reset();
     toast.success(billGroupId ? "Bill added with scheduled instalments" : "Bill added");
@@ -749,6 +833,11 @@ export function AddBillDialog({
                           ))}
                         </SelectContent>
                       </Select>
+                    )}
+                    {li.rechargeToTenant && li.tenantId && (
+                      <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => emailTenantAboutLineItem(li)}>
+                        <Mail className="h-3 w-3" /> Email tenant
+                      </Button>
                     )}
                   </div>
                 </div>
