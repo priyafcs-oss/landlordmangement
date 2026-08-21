@@ -31,6 +31,12 @@ export async function callGeminiJSON<T>(
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema,
+      // This is factual extraction, not creative generation — the same document should read the
+      // same way every time. Left at Gemini's default (~1.0), two calls on the identical file can
+      // genuinely disagree (e.g. finding a rates notice's future instalments on one pass and
+      // missing them on another) purely from sampling randomness, not any real ambiguity in the
+      // source document.
+      temperature: 0,
     },
   });
 

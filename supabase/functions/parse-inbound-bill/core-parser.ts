@@ -31,9 +31,16 @@ Extract the fields defined in the response schema as strict JSON.
   water bill printing "Water Access/Service Charge" and "Water Usage Charge" as separate lines, or a
   council notice splitting "General Rate", "Waste Levy" and "Environmental Levy". Extract EVERY such
   line as its own item with its own description and amount — do not collapse them into one. The
-  amounts must sum to exactly the top-level "amount" field (the current instalment's total). If the
-  notice genuinely shows only a single undifferentiated total with no breakdown, return one line item
-  whose description is the vendor/bill type and whose amount equals the total.
+  amounts must sum to exactly the top-level "amount" field (the current instalment's total).
+- Many Australian rates notices only itemise the FULL YEAR's charges (e.g. "General Rate $1,200,
+  Waste Levy $432, Stormwater Levy $180" totalling the annual amount), separately from the
+  per-instalment payment schedule. If the only breakdown you can find is for the full year rather
+  than the current instalment, divide each of those annual amounts by the number of instalments
+  for the year (4 for quarterly, 2 for half-yearly, 1 if paid in full) and report those divided
+  figures as the line items — keep the original descriptions, and the divided amounts must still
+  sum to the top-level "amount" field. Only fall back to a single line item (description = the
+  vendor/bill type, amount = the total) if you genuinely cannot find ANY itemised breakdown
+  anywhere on the notice, at either the annual or instalment level.
 - addressed_to: the billing/account name the notice is addressed to (e.g. the name on the account),
   if printed — null if not shown. Do not guess or invent this.`;
 
