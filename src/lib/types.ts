@@ -590,6 +590,10 @@ export interface PropertyBill {
   /** Set for bills created via the email/upload pipeline — lets a retried webhook be recognized
    * as already-processed even though (unlike before) no paired Expense exists to check instead. */
   emailMessageId?: string;
+  /** Set to "pending" when a Water bill auto-approves (no more forced review just to see the
+   * recharge decision) — cleared to "resolved" once the landlord has looked at it via
+   * BillDetailDialog. Absent for every other bill type. */
+  tenantRebillStatus?: "pending" | "resolved";
 }
 
 /** Extracted-but-unconfirmed lease details from an inbound rent/lease agreement. */

@@ -186,6 +186,9 @@ export function BillDetailDialog({
         };
       }),
       amount: netTotal > 0 ? netTotal : selected.amount,
+      // Saving here means the landlord has looked at this bill and made a call on the recharge
+      // decision (whether or not they actually ticked recharge) — clears the Dashboard follow-up.
+      tenantRebillStatus: selected.tenantRebillStatus === "pending" ? ("resolved" as const) : selected.tenantRebillStatus,
     };
     // Shared fields are denormalized onto every row in the group — keep them in sync.
     for (const sib of siblings) {

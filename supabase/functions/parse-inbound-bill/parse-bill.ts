@@ -96,9 +96,9 @@ async function runGuardrails(
     reasons.push("Low Confidence / Unmatched Property");
   }
 
-  if (mapBillType(parsed.bill_category, parsed.vendor) === "Water") {
-    reasons.push("Recharge Review — Water Bill");
-  }
+  // Water bills no longer force review on their own — a clean one auto-approves like any other
+  // bill type. The recharge-to-tenant decision still needs surfacing, but as a non-blocking
+  // Dashboard follow-up (writeApprovedBill's tenantRebillStatus) instead of a review gate.
 
   return {
     clean: reasons.length === 0,
@@ -289,6 +289,9 @@ async function writeApprovedBill(
     sourceFileData: source.fileData,
     taxCategory: mapAtoCategory(parsed.ato_category),
     emailMessageId,
+    // Water auto-approves like any other clean bill now, but the recharge-to-tenant decision
+    // still needs a non-blocking follow-up — surfaced on the Dashboard until resolved.
+    tenantRebillStatus: billType === "Water" ? "pending" : undefined,
   });
   if (error) {
     return { ok: false, error: error.message };

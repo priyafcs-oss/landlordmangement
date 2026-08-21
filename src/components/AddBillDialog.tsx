@@ -27,6 +27,8 @@ import { fmtCurrency, todayISO, billTypeToChargeType, ANNUAL_COST_FIELD } from "
 import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
+import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
+import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
@@ -128,6 +130,8 @@ export function AddBillDialog({
     instalmentCount: number;
   } | null>(null);
   const [extractEmpty, setExtractEmpty] = useState(false);
+  const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
+  const [pendingNotify, setPendingNotify] = useState(false);
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? "",
@@ -347,7 +351,7 @@ export function AddBillDialog({
     }
   };
 
-  const save = () => {
+  const attemptSave = (notify: boolean) => {
     if (!propertyId) return toast.error("Property is required");
     if (!form.providerName.trim()) return toast.error("Provider name is required");
     if (!form.dueDate) return toast.error("Due date is required");
@@ -359,6 +363,26 @@ export function AddBillDialog({
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
+    // Runs every save, regardless of entry route (manual, upload, or a staged proposal) — the
+    // one thing none of those routes checked for before this existed.
+    const match = findDuplicateRecord(state.bills, state.expenses, {
+      propertyId,
+      vendorOrDescription: form.providerName,
+      amount: netTotal,
+      date: form.dueDate,
+      referenceNumber: form.referenceNumber || undefined,
+      bpayReference: form.bpayReference || undefined,
+    });
+    if (match) {
+      setDuplicateMatch(match);
+      setPendingNotify(notify);
+      return;
+    }
+    commitSave(notify);
+  };
+
+  const commitSave = (notify: boolean) => {
+    setDuplicateMatch(null);
     const finalLineItems: BillLineItem[] = lineItems
       .filter((li) => parseFloat(li.amount) > 0)
       .map((li) => {
@@ -481,12 +505,24 @@ export function AddBillDialog({
       markProposalApplied(initialProposal.id);
     }
 
+    // Notify happens after saving and after the dedup check, using the still-live form state —
+    // not before, since the landlord shouldn't be emailing a tenant about a bill that turned out
+    // to be a duplicate or that they cancelled partway through.
+    if (notify) {
+      for (const li of lineItems) {
+        if (li.rechargeToTenant && li.tenantId) emailTenantAboutLineItem(li);
+      }
+    }
+
     setOpen(false);
     reset();
     toast.success(billGroupId ? "Bill added with scheduled instalments" : "Bill added");
   };
 
+  const hasRecharge = lineItems.some((li) => li.rechargeToTenant && li.tenantId);
+
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(o) => {
@@ -878,11 +914,22 @@ export function AddBillDialog({
               </Button>
             </>
           )}
-          <Button onClick={save} disabled={busy}>
+          <Button variant={hasRecharge ? "outline" : "default"} onClick={() => attemptSave(false)} disabled={busy}>
             Save
           </Button>
+          {hasRecharge && (
+            <Button onClick={() => attemptSave(true)} disabled={busy} className="gap-1">
+              <Mail className="h-3.5 w-3.5" /> Save &amp; Notify Tenant
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <DuplicateWarningDialog
+      match={duplicateMatch}
+      onCancel={() => setDuplicateMatch(null)}
+      onSaveAnyway={() => commitSave(pendingNotify)}
+    />
+    </>
   );
 }

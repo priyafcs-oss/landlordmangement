@@ -26,52 +26,35 @@ import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, EXPENSE_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
+import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
+import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, ExpenseProposalPayload } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
-const DUPLICATE_WINDOW_DAYS = 14;
 const PRICE_SPIKE_MULTIPLIER = 1.4;
-const DAY_MS = 86_400_000;
 
-/** Same duplicate/price-spike shape as the email-bill guardrails (parse-inbound-bill), checked
- * client-side against state.expenses since manual entry has no server round-trip. A flagged line
- * item stages as an "expense" proposal instead of posting straight to Transactions.
+/** Price-spike check only — same shape as the email-bill guardrail's, checked client-side against
+ * state.expenses since manual entry has no server round-trip. A flagged line item stages as an
+ * "expense" proposal instead of posting straight to Transactions.
  *
- * Also checks unpaid bills — bills no longer get a paired Expense at intake, only at payment, so
- * a manually-entered transaction that's actually paying an existing Unpaid bill has to be caught
- * here too, or it'd create a second, disconnected record instead of just marking that bill paid. */
+ * Duplicate detection used to live here too, but that's now the pre-save DuplicateWarningDialog
+ * (findDuplicateRecord) shared with AddBillDialog — a blocking, human-confirmed check run once
+ * before save, rather than a silent per-line stage-for-review. */
 function checkExpenseGuardrails(
   expenses: { itemName: string; cost: number; date: string }[],
-  unpaidBills: { providerName?: string; billType: string; dueDate: string }[],
   itemName: string,
   amount: number,
-  date: string,
 ): string | null {
-  const reasons: string[] = [];
-  const t = new Date(date).getTime();
   const name = itemName.trim().toLowerCase();
-  const isDuplicate = expenses.some(
-    (e) => e.itemName.trim().toLowerCase() === name && Math.abs(new Date(e.date).getTime() - t) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
-  );
-  if (isDuplicate) reasons.push("Possible Duplicate");
-
-  const matchesUnpaidBill = unpaidBills.some(
-    (b) =>
-      (b.providerName || b.billType).trim().toLowerCase() === name &&
-      Math.abs(new Date(b.dueDate).getTime() - t) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
-  );
-  if (matchesUnpaidBill) reasons.push("Possibly Paying an Existing Bill");
-
   const history = expenses.filter((e) => e.itemName.trim().toLowerCase() === name);
   if (history.length > 0) {
     const avg = history.reduce((s, e) => s + Number(e.cost), 0) / history.length;
-    if (avg > 0 && amount > avg * PRICE_SPIKE_MULTIPLIER) reasons.push("Price Spike Detected");
+    if (avg > 0 && amount > avg * PRICE_SPIKE_MULTIPLIER) return "Price Spike Detected";
   }
-
-  return reasons.length > 0 ? reasons.join("; ") : null;
+  return null;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -140,6 +123,7 @@ export function AddTransactionDialog({
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
+  const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -291,7 +275,7 @@ export function AddTransactionDialog({
     if (f) void extract(f);
   };
 
-  const save = () => {
+  const attemptSave = () => {
     const properties = [form.propertyId, splitting ? form.secondPropertyId : ""].filter(Boolean);
     if (properties.length === 0) return toast.error("Property is required");
     if (!form.payee.trim()) return toast.error("Payee / vendor is required");
@@ -300,6 +284,23 @@ export function AddTransactionDialog({
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
+    const match = findDuplicateRecord(state.bills, state.expenses, {
+      propertyId: form.propertyId,
+      vendorOrDescription: form.payee,
+      amount: netTotal,
+      date: form.date,
+      referenceNumber: form.referenceNumber || undefined,
+    });
+    if (match) {
+      setDuplicateMatch(match);
+      return;
+    }
+    commitSave();
+  };
+
+  const commitSave = () => {
+    setDuplicateMatch(null);
+    const properties = [form.propertyId, splitting ? form.secondPropertyId : ""].filter(Boolean);
     const validItems = lineItems.filter((li) => parseFloat(li.amount) > 0);
     const perPropertyDivisor = properties.length;
     let flaggedCount = 0;
@@ -314,13 +315,7 @@ export function AddTransactionDialog({
         // expense case the email-bill guardrails already cover, not a general fraud check.
         const reviewReason =
           perPropertyDivisor === 1 && li.direction === "Expense"
-            ? checkExpenseGuardrails(
-                state.expenses,
-                state.bills.filter((b) => b.status === "Unpaid" && b.propertyId === propertyId),
-                itemName,
-                amount,
-                form.date,
-              )
+            ? checkExpenseGuardrails(state.expenses, itemName, amount)
             : null;
 
         if (reviewReason) {
@@ -388,6 +383,7 @@ export function AddTransactionDialog({
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(o) => {
@@ -656,11 +652,13 @@ export function AddTransactionDialog({
               </Button>
             </>
           )}
-          <Button onClick={save} disabled={busy}>
+          <Button onClick={attemptSave} disabled={busy}>
             Save
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <DuplicateWarningDialog match={duplicateMatch} onCancel={() => setDuplicateMatch(null)} onSaveAnyway={commitSave} />
+    </>
   );
 }

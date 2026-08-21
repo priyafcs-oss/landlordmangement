@@ -1,4 +1,4 @@
-import type { PropertyBill } from "./types";
+import type { Expense, PropertyBill } from "./types";
 
 export interface BillMatchCandidate {
   propertyId?: string;
@@ -62,4 +62,94 @@ export function findMatchingUnpaidBill(bills: PropertyBill[], candidate: BillMat
     // Tie-break on closer amount.
     return Math.abs(b.amount - candidate.amount) < Math.abs(best.amount - candidate.amount) ? b : best;
   });
+}
+
+export interface DuplicateMatch {
+  kind: "bill" | "expense";
+  id: string;
+  label: string;
+  amount: number;
+  date: string;
+  status?: string;
+  sourceFileName?: string;
+  sourceFileData?: string;
+}
+
+export interface DuplicateCandidate {
+  propertyId?: string;
+  vendorOrDescription: string;
+  amount: number;
+  date: string;
+  referenceNumber?: string;
+  bpayReference?: string;
+}
+
+const DUPLICATE_WINDOW_DAYS = 14;
+
+function symmetricDateWithinWindow(a: string, b: string, days: number): boolean {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= days * DAY_MS;
+}
+
+function referenceMatches(a?: string, b?: string): boolean {
+  return !!a && !!b && a.trim() === b.trim();
+}
+
+/**
+ * Checks whether a bill/transaction about to be manually saved (Add Bill or Add Transaction —
+ * the two paths with no server-side guardrail of any kind) already exists as a Bill or an
+ * Expense — same idea as the email/upload pipeline's runGuardrails duplicate check, just running
+ * client-side at the point of saving instead of server-side at intake. A match is either a close
+ * vendor+amount+date fit, or an exact reference/BPAY match regardless of date. Always a
+ * confirmable warning, never a hard block — "Save Anyway" is always available.
+ */
+export function findDuplicateRecord(
+  bills: PropertyBill[],
+  expenses: Expense[],
+  candidate: DuplicateCandidate,
+): DuplicateMatch | null {
+  const billMatch = bills.find(
+    (b) =>
+      (!candidate.propertyId || b.propertyId === candidate.propertyId) &&
+      ((vendorMatches(b.providerName, candidate.vendorOrDescription) &&
+        amountMatches(b.amount, candidate.amount) &&
+        symmetricDateWithinWindow(b.dueDate, candidate.date, DUPLICATE_WINDOW_DAYS)) ||
+        referenceMatches(candidate.referenceNumber, b.referenceNumber) ||
+        referenceMatches(candidate.bpayReference, b.bpayReference)),
+  );
+  if (billMatch) {
+    return {
+      kind: "bill",
+      id: billMatch.id,
+      label: billMatch.providerName || billMatch.billType,
+      amount: billMatch.amount,
+      date: billMatch.dueDate,
+      status: billMatch.status,
+      sourceFileName: billMatch.sourceFileName,
+      sourceFileData: billMatch.sourceFileData,
+    };
+  }
+
+  const expenseMatch = expenses.find(
+    (e) =>
+      (!candidate.propertyId || e.propertyId === candidate.propertyId) &&
+      ((vendorMatches(e.itemName, candidate.vendorOrDescription) &&
+        amountMatches(e.cost, candidate.amount) &&
+        symmetricDateWithinWindow(e.date, candidate.date, DUPLICATE_WINDOW_DAYS)) ||
+        referenceMatches(candidate.referenceNumber, e.referenceNumber) ||
+        referenceMatches(candidate.bpayReference, e.bpayReference)),
+  );
+  if (expenseMatch) {
+    return {
+      kind: "expense",
+      id: expenseMatch.id,
+      label: expenseMatch.itemName,
+      amount: expenseMatch.cost,
+      date: expenseMatch.date,
+      status: expenseMatch.status,
+      sourceFileName: expenseMatch.invoiceFileName,
+      sourceFileData: expenseMatch.invoiceFileData,
+    };
+  }
+
+  return null;
 }

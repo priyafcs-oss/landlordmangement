@@ -55,6 +55,7 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { AiProposalsSection } from "@/components/PropertyShared";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
+import { WaterRebillBanner } from "@/components/WaterRebillBanner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -135,7 +136,8 @@ function DashboardPage() {
   const attentionCount = leaseAlerts.length + warrantyAlerts.length + complianceAlerts.length + dueSoonCount + bufferAlert;
   const pendingApprovals =
     state.aiProposals.filter((p) => p.status === "pending").length +
-    state.expenses.filter((e) => e.status === "needs_review").length;
+    state.expenses.filter((e) => e.status === "needs_review").length +
+    state.bills.filter((b) => b.tenantRebillStatus === "pending").length;
 
   // Chart data: real income vs expenses per month, from the ledger/expenses actually on file.
   const months: { name: string; income: number; expenses: number; cashflow: number }[] = [];
@@ -221,6 +223,7 @@ function DashboardPage() {
           <div className="text-sm font-medium">Needs your approval ({pendingApprovals})</div>
           <AiProposalsSection />
           <NeedsReviewBanner />
+          <WaterRebillBanner />
         </div>
       )}
 
