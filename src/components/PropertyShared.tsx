@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -127,33 +127,85 @@ export function AiProposalsSection() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {pending.map((p) =>
-          p.kind === "bill" ? (
-            <BillProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "expense" ? (
-            <ExpenseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "tenant_lease" ? (
-            <TenantLeaseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "property_detail" ? (
-            <PropertyDetailProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "depreciation_report" ? (
-            <DepreciationReportProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "unclassified" ? (
-            <UnclassifiedProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "loan_document" ? (
-            <LoanDocumentProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "loan_statement" ? (
-            <LoanStatementProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "bank_statement" ? (
-            <BankStatementProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : p.kind === "property_sale" ? (
-            <PropertySaleProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ) : (
-            <RentLedgerProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
-          ),
-        )}
+        {pending.map((p) => (
+          <ProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+        ))}
       </CardContent>
     </Card>
+  );
+}
+
+/** Picks the right kind-specific review card for a single proposal. Shared by `AiProposalsSection`
+ * (the Assets-page pending list) and `ProposalReviewDialog` (the immediately-after-upload popup). */
+export function ProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  switch (proposal.kind) {
+    case "bill":
+      return <BillProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "expense":
+      return <ExpenseProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "tenant_lease":
+      return <TenantLeaseProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "property_detail":
+      return <PropertyDetailProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "depreciation_report":
+      return <DepreciationReportProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "unclassified":
+      return <UnclassifiedProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "loan_document":
+      return <LoanDocumentProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "loan_statement":
+      return <LoanStatementProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "bank_statement":
+      return <BankStatementProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "property_sale":
+      return <PropertySaleProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    default:
+      return <RentLedgerProposalCard proposal={proposal} onDismiss={onDismiss} />;
+  }
+}
+
+/** Pops a single pending proposal open for review right away — used right after Upload Document
+ * stages one, so the landlord isn't left hunting for it in Assets/Documents. Looks the proposal up
+ * live from the store (rather than taking it as a prop) so it auto-closes the instant Approve or
+ * Dismiss flips its status away from "pending"; closing any other way (the X, outside-click, or the
+ * explicit "Review later" button) leaves it untouched and pending in Assets/Documents. */
+export function ProposalReviewDialog({
+  proposalId,
+  onOpenChange,
+}: {
+  proposalId: string | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { state, dismissProposal } = useStore();
+  const proposal = proposalId ? state.aiProposals.find((p) => p.id === proposalId) : undefined;
+  const isPending = proposal?.status === "pending";
+
+  useEffect(() => {
+    if (proposalId && !isPending) onOpenChange(false);
+  }, [proposalId, isPending, onOpenChange]);
+
+  if (!proposal || !isPending) return null;
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Review document</DialogTitle>
+        </DialogHeader>
+        <ProposalCard
+          proposal={proposal}
+          onDismiss={() => {
+            dismissProposal(proposal.id);
+            onOpenChange(false);
+          }}
+        />
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Review later
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

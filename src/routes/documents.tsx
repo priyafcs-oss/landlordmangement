@@ -47,6 +47,9 @@ interface DocumentEntry {
 
 function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["kind"] {
   switch (kind) {
+    case "bill":
+    case "expense":
+      return "Bill";
     case "tenant_lease":
       return "Lease Agreement";
     case "property_detail":
@@ -70,6 +73,10 @@ function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["ki
 
 function proposalDocumentLabel(p: AiIntakeProposal): string {
   switch (p.kind) {
+    case "bill":
+      return p.providerName || "Bill";
+    case "expense":
+      return (p.payload as { itemName?: string }).itemName ?? "Transaction";
     case "tenant_lease":
       return (p.payload as { name?: string }).name ?? "Lease agreement";
     case "property_detail":
