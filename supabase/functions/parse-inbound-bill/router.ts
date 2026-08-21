@@ -26,9 +26,14 @@ export async function routeInboundDocument(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<RouteResult> {
+  // Best-effort — classification is still useful without it, so a lookup failure shouldn't
+  // block the whole pipeline the way a genuine classification failure does below.
+  const { data: entities } = await supabase.from("entities").select("name");
+  const knownEntityNames = (entities ?? []).map((e) => e.name).filter(Boolean);
+
   let classification;
   try {
-    classification = await classifyDocument(input);
+    classification = await classifyDocument(input, knownEntityNames);
   } catch (e) {
     // Unlike every downstream extractor, classification previously had no guard here — a
     // Gemini failure (bad/oversized attachment, quota, transient outage) propagated all the way

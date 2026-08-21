@@ -317,24 +317,30 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
   const [checked, setChecked] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(presentFields.map((f) => [f.key, true])),
   );
+  // Editable copies of the extracted values — the AI's read is a starting point, not gospel;
+  // the landlord can correct a wrong date/amount/name here rather than dismiss-and-reupload.
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      presentFields.map((f) => [f.key, payload[f.key] === undefined || payload[f.key] === null ? "" : String(payload[f.key])]),
+    ),
+  );
   const [ownerChecked, setOwnerChecked] = useState(!!payload.ownerName);
+  const [ownerName, setOwnerName] = useState(payload.ownerName ?? "");
+  const [ownershipType, setOwnershipType] = useState<Entity["type"]>(mapOwnershipType(payload.ownershipType));
   const adjustments = payload.settlementAdjustments ?? [];
   const [adjustmentsIncluded, setAdjustmentsIncluded] = useState<boolean[]>(() => adjustments.map(() => true));
-
-  const formatValue = (f: (typeof PROPERTY_DETAIL_FIELDS)[number]) => {
-    const v = payload[f.key];
-    if (f.kind === "currency") return fmtCurrency(v as number);
-    return String(v);
-  };
 
   const confirm = () => {
     if (!propertyId) return toast.error("Select a property first");
     const patch: Record<string, unknown> = {};
     presentFields.forEach((f) => {
-      if (checked[f.key]) patch[f.key] = payload[f.key];
+      if (!checked[f.key]) return;
+      const raw = values[f.key] ?? "";
+      if (raw === "") return;
+      patch[f.key] = f.kind === "currency" ? parseFloat(raw) || 0 : raw;
     });
-    if (ownerChecked && payload.ownerName) {
-      patch.entityId = findOrCreateEntity(payload.ownerName, mapOwnershipType(payload.ownershipType));
+    if (ownerChecked && ownerName.trim()) {
+      patch.entityId = findOrCreateEntity(ownerName.trim(), ownershipType);
     }
     const includedAdjustments = adjustments.filter((_, i) => adjustmentsIncluded[i]);
     if (Object.keys(patch).length === 0 && includedAdjustments.length === 0) {
@@ -358,7 +364,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
       });
     }
     markProposalApplied(proposal.id);
-    toast.success(ownerChecked && payload.ownerName ? "Property details updated — entity linked" : "Property details updated");
+    toast.success(ownerChecked && ownerName.trim() ? "Property details updated — entity linked" : "Property details updated");
   };
 
   return (
@@ -387,13 +393,32 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
         )}
 
         {payload.ownerName && (
-          <label className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs">
-            <input type="checkbox" checked={ownerChecked} onChange={(e) => setOwnerChecked(e.target.checked)} />
-            <span>
-              Owner: <span className="font-medium">{payload.ownerName}</span> — will find or create a{" "}
-              <span className="font-medium">{mapOwnershipType(payload.ownershipType)}</span> entity and link it to this property
-            </span>
-          </label>
+          <div className="space-y-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={ownerChecked} onChange={(e) => setOwnerChecked(e.target.checked)} />
+              <span>Owner — will find or create this entity and link it to this property</span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2 pl-6">
+              <Input
+                className="h-7 w-56 text-xs"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+                placeholder="Owner name"
+              />
+              <Select value={ownershipType} onValueChange={(v) => setOwnershipType(v as Entity["type"])}>
+                <SelectTrigger className="h-7 w-[140px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENTITY_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         )}
 
         {presentFields.length === 0 && !payload.ownerName && adjustments.length === 0 ? (
@@ -409,7 +434,12 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
                   onChange={(e) => setChecked((c) => ({ ...c, [f.key]: e.target.checked }))}
                 />
                 <span className="w-40 shrink-0 text-muted-foreground">{f.label}</span>
-                <span className="font-medium">{formatValue(f)}</span>
+                <Input
+                  className="h-7 flex-1 text-xs"
+                  type={f.kind === "date" ? "date" : f.kind === "currency" ? "number" : "text"}
+                  value={values[f.key] ?? ""}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                />
               </label>
             ))}
           </div>
@@ -1024,7 +1054,7 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
 }
 
 function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProperty, updateAsset, markProposalApplied } = useStore();
+  const { state, updateProperty, updateAsset, updateProposal, markProposalApplied } = useStore();
   const payload = proposal.payload as PropertySaleProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
@@ -1039,6 +1069,21 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
     if (property.assetId) updateAsset(property.assetId, { status: "Sold" });
     markProposalApplied(proposal.id);
     toast.success("Property marked sold");
+  };
+
+  // The AI reads "Vendor"/"Purchaser" off the contract but has no way to know which side is
+  // actually this landlord — it can get this backwards on a purchase. Re-files this proposal as
+  // a property_detail one instead of making the landlord dismiss and re-upload; the buyer name
+  // carries over as the owner to link/create as an entity on the (now-correct) review card.
+  const reclassifyAsPurchase = () => {
+    const detailPayload: PropertyDetailProposalPayload = {
+      documentCategory: "Contract of Sale",
+      purchaseDate: payload.saleDate,
+      purchasePrice: payload.salePrice,
+      ownerName: payload.buyerName,
+      confidence: payload.confidence,
+    };
+    updateProposal(proposal.id, { kind: "property_detail", payload: detailPayload });
   };
 
   return (
@@ -1077,10 +1122,17 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           This marks the property Sold and records these figures for reference — not a full CGT calculation. Talk to
           your accountant for the actual capital gain/loss.
         </p>
+        <p className="text-xs text-amber-700">
+          Not right — you're the <span className="font-medium">buyer</span>, not the seller? The AI can get this
+          backwards since a contract reads the same either way. Click below to re-file it as a purchase instead.
+        </p>
 
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Mark property sold
+          </Button>
+          <Button size="sm" variant="outline" onClick={reclassifyAsPurchase}>
+            Actually, I'm the buyer
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
