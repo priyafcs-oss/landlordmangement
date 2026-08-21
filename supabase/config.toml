@@ -4,3 +4,25 @@ project_id = "jnlcjotkhfyttewdegac"
 # Called by Resend's webhook, not by an authenticated app user — Svix signature
 # verification inside the function is the real auth boundary, not a Supabase JWT.
 verify_jwt = false
+
+# Called from the browser via supabase.functions.invoke with no user session (this app has no
+# login — see 20260818100000_drop_auth_requirement.sql) and, since the migration to Supabase's
+# new opaque API key format, src/integrations/supabase/client.ts deliberately strips the
+# Authorization header on these calls (an sb_publishable_/sb_secret_ key isn't a JWT and would
+# fail verification anyway). Leaving verify_jwt at its default (true) here means the platform
+# gateway rejects every call before the function body ever runs, surfacing to the app only as a
+# generic "Edge Function returned a non-2xx status code" with no real detail.
+[functions.upload-document]
+verify_jwt = false
+
+[functions.extract-bill]
+verify_jwt = false
+
+[functions.extract-bank-statement]
+verify_jwt = false
+
+[functions.extract-depreciation-report]
+verify_jwt = false
+
+[functions.domain-lookup]
+verify_jwt = false
