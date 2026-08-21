@@ -31,6 +31,35 @@ import type { ExpenseCategory } from "@/lib/calculations";
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
+const DUPLICATE_WINDOW_DAYS = 14;
+const PRICE_SPIKE_MULTIPLIER = 1.4;
+const DAY_MS = 86_400_000;
+
+/** Same duplicate/price-spike shape as the email-bill guardrails (parse-inbound-bill), checked
+ * client-side against state.expenses since manual entry has no server round-trip. A flagged line
+ * item stages as an "expense" proposal instead of posting straight to Transactions. */
+function checkExpenseGuardrails(
+  expenses: { itemName: string; cost: number; date: string }[],
+  itemName: string,
+  amount: number,
+  date: string,
+): string | null {
+  const reasons: string[] = [];
+  const t = new Date(date).getTime();
+  const isDuplicate = expenses.some(
+    (e) => e.itemName.trim().toLowerCase() === itemName.trim().toLowerCase() && Math.abs(new Date(e.date).getTime() - t) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
+  );
+  if (isDuplicate) reasons.push("Possible Duplicate");
+
+  const history = expenses.filter((e) => e.itemName.trim().toLowerCase() === itemName.trim().toLowerCase());
+  if (history.length > 0) {
+    const avg = history.reduce((s, e) => s + Number(e.cost), 0) / history.length;
+    if (avg > 0 && amount > avg * PRICE_SPIKE_MULTIPLIER) reasons.push("Price Spike Detected");
+  }
+
+  return reasons.length > 0 ? reasons.join("; ") : null;
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
@@ -80,7 +109,7 @@ interface ExtractResult {
  * row on save, since P&L/Cost Base/Tax Reports read state.expenses as flat single-category rows.
  */
 export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
-  const { state, addExpense, addInvoice } = useStore();
+  const { state, addExpense, addInvoice, addExpenseProposal } = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -198,11 +227,41 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
 
     const validItems = lineItems.filter((li) => parseFloat(li.amount) > 0);
     const perPropertyDivisor = properties.length;
+    let flaggedCount = 0;
 
     for (const propertyId of properties) {
       for (const li of validItems) {
         const fullAmount = parseFloat(li.amount) || 0;
         const amount = fullAmount / perPropertyDivisor;
+        const itemName = li.description || form.payee;
+
+        // Splits and income lines skip the guardrail check — it's scoped to the single-property
+        // expense case the email-bill guardrails already cover, not a general fraud check.
+        const reviewReason =
+          perPropertyDivisor === 1 && li.direction === "Expense"
+            ? checkExpenseGuardrails(state.expenses, itemName, amount, form.date)
+            : null;
+
+        if (reviewReason) {
+          flaggedCount++;
+          addExpenseProposal({
+            propertyId,
+            reviewReason,
+            payload: {
+              itemName,
+              cost: amount,
+              date: form.date,
+              taxCategory: expenseCategoryToTaxCategory(li.category),
+              hasWarranty: false,
+              rechargeToTenant: li.rechargeToTenant || undefined,
+              tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+            },
+            sourceFileName: form.sourceFileName,
+            sourceFileData: form.sourceFileData,
+          });
+          continue;
+        }
+
         if (li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1) {
           addInvoice({
             tenantId: li.tenantId,
@@ -211,11 +270,11 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
             dateIssued: todayISO(),
             dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
             status: "Unpaid",
-            description: li.description || form.payee,
+            description: itemName,
           });
         }
         addExpense({
-          itemName: li.description || form.payee,
+          itemName,
           cost: amount,
           date: form.date,
           propertyId,
@@ -239,7 +298,11 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
 
     setOpen(false);
     reset();
-    toast.success("Transaction added");
+    if (flaggedCount > 0) {
+      toast.success(`Transaction added — ${flaggedCount} line item(s) sent for review (possible duplicate or price spike)`);
+    } else {
+      toast.success("Transaction added");
+    }
   };
 
   return (

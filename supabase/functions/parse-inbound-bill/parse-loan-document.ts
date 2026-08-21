@@ -10,6 +10,8 @@ Extract the fields defined in the response schema as strict JSON.
 - loan_amount, interest_rate (as a percentage, e.g. 6.25 not 0.0625), monthly_repayment: null if not stated.
 - start_date: YYYY-MM-DD, null if not stated.
 - has_offset_account: true/false if the document mentions an offset account attached to this loan, else null.
+- document_date: the document's own date, distinct from start_date (loan commencement can post-date the document) — null if not stated.
+- addressed_to: the borrower's name as printed — null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -22,6 +24,8 @@ const SCHEMA = {
     monthly_repayment: { type: "NUMBER", nullable: true },
     start_date: { type: "STRING", nullable: true },
     has_offset_account: { type: "BOOLEAN", nullable: true },
+    document_date: { type: "STRING", nullable: true },
+    addressed_to: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["property_address", "lender_name", "confidence"],
@@ -71,6 +75,9 @@ export async function parseLoanDocument(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.document_date ?? undefined,
+    providerName: parsed.lender_name,
+    addressedTo: parsed.addressed_to ?? undefined,
     payload: {
       lenderName: parsed.lender_name,
       loanAmount: parsed.loan_amount ?? undefined,

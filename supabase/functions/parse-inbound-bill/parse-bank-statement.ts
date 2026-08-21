@@ -9,6 +9,7 @@ Extract the fields defined in the response schema as strict JSON.
 - bank_name: the bank's name, if shown.
 - period_start, period_end: YYYY-MM-DD, the statement's covering period, null if not stated.
 - transactions is REQUIRED — always include it, even as an empty array [] if none can be read. Extract EVERY line item: date (YYYY-MM-DD), description (the payee/narration as printed), amount (a positive number), and direction — "in" for money received (credits/deposits) or "out" for money paid (debits/withdrawals). This is a general account, so transactions may include rent income, bills paid, transfers, or entirely unrelated personal spending — extract everything as printed, the landlord will pick which lines are relevant to this property in the review step.
+- addressed_to: the account holder name printed on the statement, if shown — null if not stated. Do not guess.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -18,6 +19,7 @@ const SCHEMA = {
     bank_name: { type: "STRING", nullable: true },
     period_start: { type: "STRING", nullable: true },
     period_end: { type: "STRING", nullable: true },
+    addressed_to: { type: "STRING", nullable: true },
     transactions: {
       type: "ARRAY",
       items: {
@@ -81,6 +83,8 @@ export async function parseBankStatement(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    providerName: parsed.bank_name ?? undefined,
+    addressedTo: parsed.addressed_to ?? undefined,
     payload: {
       bankName: parsed.bank_name ?? undefined,
       periodStart: parsed.period_start ?? undefined,

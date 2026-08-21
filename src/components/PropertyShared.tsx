@@ -46,7 +46,7 @@ import {
   Calculator,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import type {
   Property,
@@ -55,11 +55,14 @@ import type {
   LeaseDuration,
   RepaymentFrequency,
   BillType,
+  BillLineItem,
   PropertyBill,
   AiIntakeProposal,
   TenantLeaseProposalPayload,
   RentLedgerProposalPayload,
   PropertyDetailProposalPayload,
+  BillProposalPayload,
+  ExpenseProposalPayload,
   RentChange,
   LeaseHistory,
   ContactPerson,
@@ -82,8 +85,11 @@ import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
+import { DocumentReviewCard } from "@/components/DocumentReviewCard";
+import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
-import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
+import { downloadBlob, downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
+import { base64ToBlob, mimeForFileName } from "@/lib/files";
 import { supabase } from "@/integrations/supabase/client";
 import { FileSignature } from "lucide-react";
 
@@ -105,46 +111,6 @@ interface DomainDetailsResult {
 }
 
 
-/** "View PDF" / "View email" affordances for anything with source-document provenance columns. */
-function DocumentViewLinks({
-  fileName,
-  fileData,
-  subject,
-  emailBody,
-}: {
-  fileName?: string;
-  fileData?: string;
-  subject?: string;
-  emailBody?: string;
-}) {
-  const [showEmail, setShowEmail] = useState(false);
-  if (!fileData && !emailBody) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-3 text-xs">
-      {fileData && (
-        <a href={fileData} download={fileName || "document.pdf"} className="inline-flex items-center gap-1 text-primary underline">
-          <FileText className="h-3 w-3" /> View PDF
-        </a>
-      )}
-      {emailBody && (
-        <>
-          <button type="button" onClick={() => setShowEmail(true)} className="inline-flex items-center gap-1 text-primary underline">
-            <Mail className="h-3 w-3" /> View email
-          </button>
-          <Dialog open={showEmail} onOpenChange={setShowEmail}>
-            <DialogContent className="max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>{subject || "Original email"}</DialogTitle>
-              </DialogHeader>
-              <div className="whitespace-pre-wrap text-sm">{emailBody}</div>
-            </DialogContent>
-          </Dialog>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** Pending AI-extracted proposals (new tenant leases, property-detail updates, rent statements)
  * awaiting review — surfaced on the Assets page since that's the entry point for properties now. */
 export function AiProposalsSection() {
@@ -162,7 +128,11 @@ export function AiProposalsSection() {
       </CardHeader>
       <CardContent className="space-y-3">
         {pending.map((p) =>
-          p.kind === "tenant_lease" ? (
+          p.kind === "bill" ? (
+            <BillProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "expense" ? (
+            <ExpenseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
+          ) : p.kind === "tenant_lease" ? (
             <TenantLeaseProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
           ) : p.kind === "property_detail" ? (
             <PropertyDetailProposalCard key={p.id} proposal={p} onDismiss={() => dismissProposal(p.id)} />
@@ -193,8 +163,7 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Lease agreement</Badge>
           <span className="font-medium">{payload.name}</span>
@@ -227,13 +196,6 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
           </div>
         )}
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <TenantDialog
             propertyId={propertyId}
@@ -260,8 +222,7 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -349,8 +310,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">{payload.documentCategory}</Badge>
           {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
@@ -422,13 +382,6 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
           </div>
         )}
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Apply selected fields
@@ -437,8 +390,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -498,8 +450,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Rent statement</Badge>
           {payload.tenantName && <span className="font-medium">{payload.tenantName}</span>}
@@ -580,13 +531,6 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           )}
         </div>
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" onClick={confirm}>
             Confirm &amp; Add Payments
@@ -595,8 +539,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -637,8 +580,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Depreciation report</Badge>
           {payload.quantitySurveyor && <span className="font-medium">{payload.quantitySurveyor}</span>}
@@ -682,13 +624,6 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
           ))}
         </div>
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Add selected items
@@ -697,8 +632,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -719,8 +653,7 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Unrecognised document</Badge>
           <span className="font-medium">{payload.documentCategory}</span>
@@ -746,13 +679,6 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           </Select>
         </div>
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" onClick={file}>
             File in Documents
@@ -761,8 +687,7 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -806,8 +731,7 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">New loan</Badge>
           <span className="font-medium">{payload.lenderName}</span>
@@ -845,13 +769,6 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           </div>
         </div>
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Create loan
@@ -860,8 +777,7 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -903,8 +819,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Loan statement</Badge>
           <span className="font-medium">{payload.lenderName}</span>
@@ -960,13 +875,6 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
           </label>
         )}
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!loanId} onClick={confirm}>
             Apply to loan
@@ -975,8 +883,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -1013,8 +920,7 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Bank statement</Badge>
           {payload.bankName && <span className="font-medium">{payload.bankName}</span>}
@@ -1049,13 +955,6 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
           ))}
         </div>
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Import selected
@@ -1064,8 +963,7 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
   );
 }
 
@@ -1088,8 +986,7 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
   };
 
   return (
-    <Card className="border-amber-500/30">
-      <CardContent className="space-y-2 p-4">
+    <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="destructive">Property sale</Badge>
           {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
@@ -1125,13 +1022,6 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           your accountant for the actual capital gain/loss.
         </p>
 
-        <DocumentViewLinks
-          fileName={proposal.sourceFileName}
-          fileData={proposal.sourceFileData}
-          subject={proposal.sourceSubject}
-          emailBody={proposal.sourceEmailBody}
-        />
-
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
             Mark property sold
@@ -1140,8 +1030,348 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
             Dismiss
           </Button>
         </div>
-      </CardContent>
-    </Card>
+    </DocumentReviewCard>
+  );
+}
+
+interface BillProposalLineItemRow {
+  key: string;
+  description: string;
+  amount: string;
+  rechargeToTenant: boolean;
+  tenantId: string;
+}
+
+const toBillProposalRows = (items: BillLineItem[]): BillProposalLineItemRow[] =>
+  items.map((li) => ({
+    key: uid("li"),
+    description: li.description,
+    amount: String(li.amount),
+    rechargeToTenant: li.rechargeToTenant ?? false,
+    tenantId: li.tenantId ?? "",
+  }));
+
+/** Which Property annual-running-cost column each bill type feeds — mirrors
+ * ANNUAL_COST_FIELD in supabase/functions/parse-inbound-bill/parse-bill.ts. Duplicated rather
+ * than shared since edge functions (Deno) and the app (Vite) don't share a module system. */
+const ANNUAL_COST_FIELD: Partial<Record<BillType, keyof Property>> = {
+  "Council Rates": "councilRatesAnnual",
+  Water: "waterRatesAnnual",
+  Strata: "strataFeesAnnual",
+  Insurance: "insuranceAnnual",
+};
+
+/** A bill flagged for review (duplicate/price-spike/low-confidence/unmatched property, or any
+ * Water bill) — shows the same line-items/recharge-to-tenant/email-tenant UI as Add Bill so the
+ * landlord can make recharge decisions before it becomes a real Expense/PropertyBill. */
+function BillProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, addExpense, addBill, addProvider, updateProvider, updateProperty, addInvoice, markProposalApplied } =
+    useStore();
+  const payload = proposal.payload as BillProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  const [rows, setRows] = useState<BillProposalLineItemRow[]>(() => toBillProposalRows(payload.lineItems));
+
+  const tenantsForProperty = state.tenants.filter((t) => t.propertyId === propertyId);
+  const netTotal = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+
+  const emailTenantAboutLineItem = (row: BillProposalLineItemRow) => {
+    const tenant = tenantsForProperty.find((t) => t.id === row.tenantId);
+    if (!tenant) return toast.error("Select a tenant for this line item first");
+    const amount = parseFloat(row.amount) || 0;
+    const property = state.properties.find((p) => p.id === propertyId);
+    const subject = `${payload.billCategory} — ${row.description || "usage charge"} (${fmtCurrency(amount)})`;
+    const body = `Hi ${tenant.name},\n\nThe ${property?.alias || property?.address || "property"} ${payload.billCategory.toLowerCase()} bill has come in. It includes a usage charge of ${fmtCurrency(amount)} for "${row.description}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nThanks`;
+    if (proposal.sourceFileData) {
+      const blob = base64ToBlob(proposal.sourceFileData, mimeForFileName(proposal.sourceFileName));
+      downloadPdfAndEmailViaGmail({ blob, fileName: proposal.sourceFileName || "bill.pdf", to: tenant.email, subject, body });
+      toast.success("Bill downloaded — attach it in the Gmail draft that just opened");
+    } else {
+      openGmailCompose(tenant.email, subject, body);
+      toast("No source document on this bill — compose opened without an attachment");
+    }
+  };
+
+  const approve = () => {
+    if (!propertyId) return toast.error("Select a property first");
+    if (rows.some((r) => r.rechargeToTenant && !r.tenantId)) {
+      return toast.error("Select a tenant for every line item flagged to recharge");
+    }
+
+    const finalLineItems: BillLineItem[] = rows
+      .filter((r) => parseFloat(r.amount) > 0)
+      .map((r) => ({
+        description: r.description,
+        amount: parseFloat(r.amount) || 0,
+        rechargeToTenant: r.rechargeToTenant,
+        tenantId: r.tenantId || undefined,
+        recharged: r.rechargeToTenant && !!r.tenantId,
+      }));
+
+    const expenseId = addExpense({
+      itemName: proposal.providerName || "Bill",
+      cost: payload.amount,
+      date: payload.dueDate,
+      propertyId,
+      taxCategory: payload.atoCategory,
+      hasWarranty: false,
+      rechargeToTenant: finalLineItems.some((li) => li.rechargeToTenant),
+      status: "approved",
+      source: "email_auto",
+      bpayBillerCode: payload.bpayBillerCode,
+      bpayReference: payload.bpayReference,
+      rawPropertyAddress: proposal.rawPropertyAddress,
+      emailMessageId: proposal.emailMessageId,
+      invoiceFileName: proposal.sourceFileName,
+      invoiceFileData: proposal.sourceFileData,
+      sourceSubject: proposal.sourceSubject,
+      sourceEmailBody: proposal.sourceEmailBody,
+    });
+
+    const billGroupId = uid("bg");
+    addBill({
+      propertyId,
+      billType: payload.billCategory,
+      amount: payload.amount,
+      dueDate: payload.dueDate,
+      status: "Unpaid",
+      providerName: proposal.providerName,
+      bpayBillerCode: payload.bpayBillerCode,
+      bpayReference: payload.bpayReference,
+      source: "Email",
+      billGroupId,
+      label: payload.futureInstalments?.length ? "Instalment 1" : undefined,
+      lineItems: finalLineItems,
+      sourceFileName: proposal.sourceFileName,
+      sourceFileData: proposal.sourceFileData,
+      linkedExpenseId: expenseId,
+    });
+
+    const existingDatesForType = state.bills
+      .filter((b) => b.propertyId === propertyId && b.billType === payload.billCategory)
+      .map((b) => new Date(b.dueDate).getTime());
+    const DAY_MS = 86_400_000;
+    (payload.futureInstalments ?? []).forEach((inst, idx) => {
+      const t = new Date(inst.dueDate).getTime();
+      if (existingDatesForType.some((d) => Math.abs(d - t) <= 3 * DAY_MS)) return;
+      addBill({
+        propertyId,
+        billType: payload.billCategory,
+        amount: inst.amount,
+        dueDate: inst.dueDate,
+        status: "Unpaid",
+        notes: "Auto-scheduled from a future instalment on an emailed bill notice.",
+        billGroupId,
+        label: `Instalment ${idx + 2}`,
+        providerName: proposal.providerName,
+        source: "Email",
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
+      });
+    });
+
+    if (payload.vendorEmail || payload.vendorPhone || payload.vendorWebsite || payload.vendorAbn) {
+      const existing = state.providers.find(
+        (p) => p.propertyId === propertyId && p.name.trim().toLowerCase() === (proposal.providerName ?? "").trim().toLowerCase(),
+      );
+      if (existing) {
+        const patch: Partial<Provider> = {};
+        if (!existing.email && payload.vendorEmail) patch.email = payload.vendorEmail;
+        if (!existing.phone && payload.vendorPhone) patch.phone = payload.vendorPhone;
+        if (!existing.website && payload.vendorWebsite) patch.website = payload.vendorWebsite;
+        if (!existing.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
+        if (!existing.address && payload.vendorAddress) patch.address = payload.vendorAddress;
+        if (Object.keys(patch).length > 0) updateProvider(existing.id, patch);
+      } else if (proposal.providerName) {
+        addProvider({
+          propertyId,
+          name: proposal.providerName,
+          role: payload.billCategory === "Council Rates" ? "Council" : "Trade",
+          email: payload.vendorEmail,
+          phone: payload.vendorPhone,
+          website: payload.vendorWebsite,
+          abn: payload.vendorAbn,
+          address: payload.vendorAddress,
+          notes: "Auto-saved from an emailed bill.",
+        });
+      }
+    }
+
+    const annualField = ANNUAL_COST_FIELD[payload.billCategory];
+    if (annualField) {
+      const futureInstalments = payload.futureInstalments ?? [];
+      let annual: number | null = null;
+      if (payload.billCategory === "Insurance" && futureInstalments.length === 0) {
+        annual = payload.amount;
+      } else if (futureInstalments.length === 3) {
+        annual = payload.amount + futureInstalments.reduce((s, i) => s + i.amount, 0);
+      }
+      if (annual !== null) {
+        updateProperty(propertyId, { [annualField]: Math.round(annual * 100) / 100 } as Partial<Property>);
+      }
+    }
+
+    finalLineItems.forEach((li) => {
+      if (li.rechargeToTenant && li.tenantId) {
+        addInvoice({
+          tenantId: li.tenantId,
+          chargeType: billTypeToChargeType(payload.billCategory),
+          amountDue: li.amount,
+          dateIssued: todayISO(),
+          dueDate: payload.dueDate,
+          status: "Unpaid",
+          description: li.description,
+        });
+      }
+    });
+
+    markProposalApplied(proposal.id);
+    toast.success("Bill approved");
+  };
+
+  return (
+    <DocumentReviewCard proposal={proposal}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">Bill</Badge>
+        <span className="font-medium">{proposal.providerName || "Unknown vendor"}</span>
+        {(proposal.reviewReason ?? "")
+          .split("; ")
+          .filter(Boolean)
+          .map((r) => (
+            <Badge key={r} variant="destructive">
+              {r}
+            </Badge>
+          ))}
+      </div>
+      <div className="text-xs text-muted-foreground">
+        Due {payload.dueDate} • {fmtCurrency(payload.amount)}
+      </div>
+
+      {!proposal.propertyId && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-destructive">
+            No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+          </span>
+          <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
+        </div>
+      )}
+
+      {(payload.bpayBillerCode || payload.bpayReference) && (
+        <div className="text-xs font-mono text-muted-foreground">
+          BPAY {payload.bpayBillerCode ?? "-"} / {payload.bpayReference ?? "-"}
+        </div>
+      )}
+
+      <div className="space-y-1 rounded border p-2">
+        <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+          <span>Line items</span>
+          <span>{fmtCurrency(netTotal)}</span>
+        </div>
+        {rows.map((row, i) => (
+          <div key={row.key} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="flex-1 truncate">{row.description}</span>
+              <span className="w-20 shrink-0 text-right font-medium">{fmtCurrency(parseFloat(row.amount) || 0)}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Checkbox
+                checked={row.rechargeToTenant}
+                onCheckedChange={(v) =>
+                  setRows((rs) => rs.map((r, j) => (j === i ? { ...r, rechargeToTenant: !!v } : r)))
+                }
+              />
+              <span className="text-muted-foreground">Recharge to tenant</span>
+              {row.rechargeToTenant && (
+                <Select
+                  value={row.tenantId}
+                  onValueChange={(v) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, tenantId: v } : r)))}
+                >
+                  <SelectTrigger className="h-7 w-[180px] text-xs">
+                    <SelectValue placeholder="Select tenant" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tenantsForProperty.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {row.rechargeToTenant && row.tenantId && (
+                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => emailTenantAboutLineItem(row)}>
+                  <Mail className="h-3 w-3" /> Email tenant
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button size="sm" disabled={!propertyId} onClick={approve}>
+          Approve
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </div>
+    </DocumentReviewCard>
+  );
+}
+
+/** A manually-entered one-off transaction flagged by the same duplicate/price-spike checks bills
+ * use (checked client-side against state.expenses at save time — see ExpenseDialog). Shows the
+ * same fields Add Transaction already collects, inline instead of behind a click. */
+function ExpenseProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { addExpense, markProposalApplied } = useStore();
+  const payload = proposal.payload as ExpenseProposalPayload;
+
+  const approve = () => {
+    addExpense({
+      itemName: payload.itemName,
+      cost: payload.cost,
+      date: payload.date,
+      propertyId: proposal.propertyId,
+      taxCategory: payload.taxCategory,
+      hasWarranty: payload.hasWarranty ?? false,
+      warrantyExpiry: payload.warrantyExpiry,
+      rechargeToTenant: payload.rechargeToTenant ?? false,
+      tenantId: payload.tenantId,
+      status: "approved",
+      source: "manual",
+      invoiceFileName: proposal.sourceFileName,
+      invoiceFileData: proposal.sourceFileData,
+    });
+    markProposalApplied(proposal.id);
+    toast.success("Transaction approved");
+  };
+
+  return (
+    <DocumentReviewCard proposal={proposal}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">Transaction</Badge>
+        <span className="font-medium">{payload.itemName}</span>
+        {(proposal.reviewReason ?? "")
+          .split("; ")
+          .filter(Boolean)
+          .map((r) => (
+            <Badge key={r} variant="destructive">
+              {r}
+            </Badge>
+          ))}
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {payload.date} • {fmtCurrency(payload.cost)} • {payload.taxCategory}
+      </div>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button size="sm" onClick={approve}>
+          Approve
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </div>
+    </DocumentReviewCard>
   );
 }
 

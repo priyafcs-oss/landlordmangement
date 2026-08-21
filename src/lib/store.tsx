@@ -15,6 +15,7 @@ import type {
   LandlordProfile,
   PropertyBill,
   AiIntakeProposal,
+  ExpenseProposalPayload,
   LeaseTemplateConfig,
   Provider,
   Entity,
@@ -125,7 +126,9 @@ interface StoreCtx {
   updateLoan: (id: string, l: Partial<Loan>) => void;
   deleteLoan: (id: string) => void;
 
-  addExpense: (e: Omit<Expense, "id">) => void;
+  /** Returns the generated id synchronously (same pattern as findOrCreateEntity), so callers that
+   * need to link a related row (e.g. a PropertyBill's linkedExpenseId) can use it immediately. */
+  addExpense: (e: Omit<Expense, "id">) => string;
   updateExpense: (id: string, e: Partial<Expense>) => void;
   deleteExpense: (id: string) => void;
 
@@ -190,6 +193,16 @@ interface StoreCtx {
   dismissProposal: (id: string) => void;
   markProposalApplied: (id: string) => void;
   updateProposal: (id: string, patch: Partial<AiIntakeProposal>) => void;
+  /** Stages a manually-entered transaction flagged by a client-side duplicate/price-spike check
+   * (see AddTransactionDialog) — the only proposal kind created client-side rather than by an
+   * edge function, since it's a plain data-entry check, not AI extraction. */
+  addExpenseProposal: (p: {
+    propertyId?: string;
+    reviewReason: string;
+    payload: ExpenseProposalPayload;
+    sourceFileName?: string;
+    sourceFileData?: string;
+  }) => void;
 
   setAiEnabled: (v: boolean) => void;
   consumeAiBudget: () => { ok: boolean; reason?: string };
@@ -628,6 +641,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: Expense = { ...e, id: uid("ex") };
       void upsertRow(TABLES.expenses, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, expenses: [...s.expenses, row] }));
+      return row.id;
     },
     updateExpense: (id, e) => {
       void updateRow(TABLES.expenses, id, e as Record<string, unknown>);
@@ -966,6 +980,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...s,
         aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, ...patch } : x)),
       }));
+    },
+    addExpenseProposal: (p) => {
+      const row: AiIntakeProposal = {
+        id: uid("prop"),
+        kind: "expense",
+        status: "pending",
+        propertyId: p.propertyId,
+        reviewReason: p.reviewReason,
+        payload: p.payload,
+        sourceFileName: p.sourceFileName,
+        sourceFileData: p.sourceFileData,
+      };
+      void upsertRow(TABLES.aiProposals, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, aiProposals: [...s.aiProposals, row] }));
     },
 
     setAiEnabled: (v) =>

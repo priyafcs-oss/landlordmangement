@@ -39,6 +39,8 @@ export interface ParsedBillFields {
   /** The current instalment's total broken into its component charges (e.g. water bill's fixed
    * access charge + usage charge) — one item covering the whole total if the notice shows no breakdown. */
   line_items: { description: string; amount: number }[];
+  /** The billing/account name the notice is addressed to, if printed. Null if not shown. */
+  addressed_to: string | null;
   /** Gemini's own 0-1 estimate of extraction certainty, used by the low-confidence guardrail. */
   confidence: number;
 }
@@ -82,6 +84,10 @@ export interface ParsedLeaseFields {
   leaseDuration: "6 Months" | "12 Months" | "Periodic" | null;
   bondAmount: number | null;
   property_address: string;
+  /** The date the agreement was signed/prepared — distinct from leaseStart. Null if not stated. */
+  document_date: string | null;
+  /** The managing agency preparing/sending the lease, if any — null for a self-managed landlord. */
+  managing_agent_name: string | null;
   confidence: number;
 }
 
@@ -96,6 +102,10 @@ export interface ParsedLedgerFields {
   /** The statement's own stated net-to-owner figure, if shown, for a reconciliation sanity check. Null if not stated. */
   netToOwner: number | null;
   property_address: string;
+  /** The statement's own issue/print date — distinct from periodStart/periodEnd. Null if not stated. */
+  document_date: string | null;
+  /** The managing agency issuing the statement, if any. Null if not stated. */
+  managing_agent_name: string | null;
   confidence: number;
 }
 
@@ -134,6 +144,13 @@ export interface ParsedPropertyDocumentFields {
   /** PEXA settlement record / Statement of Adjustments line items (council/water rate adjustments,
    * registration fees) — empty array if the document shows no such breakdown. */
   settlement_adjustments: { description: string; amount: number }[];
+  /** Generic issuer — insurer for a policy, body corporate manager for a strata notice, conveyancer
+   * for a settlement statement. Distinct from owner_name (who owns the property). Null if not stated. */
+  provider_name: string | null;
+  /** Generic document issue date — distinct from purchase_date/insurance_renewal_date/etc. Null if not stated. */
+  document_date: string | null;
+  /** The named insured/addressee on a policy, or the addressee on a strata notice. Null if not stated. */
+  addressed_to: string | null;
   confidence: number;
 }
 
@@ -145,6 +162,8 @@ export interface ParsedDepreciationReportFields {
   report_date: string | null; // YYYY-MM-DD
   effective_from: string | null; // YYYY-MM-DD
   items: { description: string; division: "Div 40" | "Div 43" | null; cost: number; life_years: number | null }[];
+  /** "Prepared for" name on the report cover page, if present — often the owner name. Null if not stated. */
+  addressed_to: string | null;
   confidence: number;
 }
 
@@ -157,6 +176,10 @@ export interface ParsedLoanDocumentFields {
   monthly_repayment: number | null;
   start_date: string | null; // YYYY-MM-DD
   has_offset_account: boolean | null;
+  /** The document's own date — distinct from start_date (loan commencement can post-date it). Null if not stated. */
+  document_date: string | null;
+  /** The borrower's name as printed. Null if not stated. */
+  addressed_to: string | null;
   confidence: number;
 }
 
@@ -169,6 +192,10 @@ export interface ParsedLoanStatementFields {
   interest_charged: number | null;
   repayments_made: number | null;
   closing_balance: number | null;
+  /** The statement's own print date — distinct from period_end. Null if not stated. */
+  document_date: string | null;
+  /** The account holder name printed on the statement. Null if not stated. */
+  addressed_to: string | null;
   confidence: number;
 }
 
@@ -179,6 +206,8 @@ export interface ParsedBankStatementFields {
   period_start: string | null; // YYYY-MM-DD
   period_end: string | null; // YYYY-MM-DD
   transactions: { date: string; description: string; amount: number; direction: "in" | "out" }[];
+  /** The account holder name printed on the statement — helps disambiguate a personal account mixing properties. Null if not stated. */
+  addressed_to: string | null;
   confidence: number;
 }
 
@@ -188,6 +217,10 @@ export interface ParsedPropertySaleFields {
   sale_date: string | null; // YYYY-MM-DD
   sale_price: number | null;
   selling_costs: number | null;
+  /** The Contract of Sale's own date — distinct from sale_date (settlement). Null if not stated. */
+  document_date: string | null;
+  /** The conveyancer/selling agent's name, if stated. Null if not stated. */
+  provider_name: string | null;
   buyer_name: string | null;
   confidence: number;
 }

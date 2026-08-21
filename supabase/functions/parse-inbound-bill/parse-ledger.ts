@@ -13,6 +13,8 @@ Extract the fields defined in the response schema as strict JSON.
 - netToOwner is the statement's own stated net amount paid/remitted to the owner, if shown (often labelled "Net to owner", "Amount paid to you", or similar) — null if not stated. This should equal rent income minus expenseLines; it's used only as a sanity check, not written anywhere directly.
 - periodStart, periodEnd should be the statement's covering period in YYYY-MM-DD, or null if not stated.
 - tenantName should be the tenant's name if stated, else null.
+- document_date: the statement's own issue/print date, distinct from periodStart/periodEnd — null if not stated.
+- managing_agent_name: the agency issuing the statement, if any — null if this looks self-managed.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;
 
 const LEDGER_SCHEMA = {
@@ -49,6 +51,8 @@ const LEDGER_SCHEMA = {
     },
     netToOwner: { type: "NUMBER", nullable: true },
     property_address: { type: "STRING" },
+    document_date: { type: "STRING", nullable: true },
+    managing_agent_name: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["transactions", "expenseLines", "property_address", "confidence"],
@@ -137,6 +141,8 @@ export async function parseRentStatement(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.document_date ?? undefined,
+    providerName: parsed.managing_agent_name ?? undefined,
     payload: {
       tenantName: parsed.tenantName ?? undefined,
       periodStart: parsed.periodStart ?? undefined,

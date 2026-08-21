@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { classifyDocument } from "./classify.ts";
-import { parseInboundBill } from "./core-parser.ts";
+import { parseInboundBill } from "./parse-bill.ts";
 import { parseLeaseAgreement } from "./parse-lease.ts";
 import { parseRentStatement } from "./parse-ledger.ts";
 import { parsePropertyDocument } from "./parse-property-document.ts";

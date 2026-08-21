@@ -25,6 +25,9 @@ Extract the fields defined in the response schema as strict JSON. Every field ex
   "SMSF", or "Company" — "Joint" when two individual names are given, "Individual" for one person,
   "Trust"/"SMSF"/"Company" when the name itself says so (e.g. contains "Trust", "Super", "Pty Ltd").
   Null if owner_name is null.
+- provider_name: the generic issuer of this document — the insurer for a policy, the body corporate/strata manager for a strata notice, the conveyancer for a settlement statement. Distinct from owner_name (who owns the property, not who issued the document). Null if not stated.
+- document_date: the document's own issue date — null if not stated.
+- addressed_to: the named insured on a policy, or the addressee on a strata/council notice — distinct from owner_name. Null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -60,6 +63,9 @@ const SCHEMA = {
         required: ["description", "amount"],
       },
     },
+    provider_name: { type: "STRING", nullable: true },
+    document_date: { type: "STRING", nullable: true },
+    addressed_to: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["document_category", "property_address", "settlement_adjustments", "confidence"],
@@ -114,6 +120,9 @@ export async function parsePropertyDocument(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.document_date ?? undefined,
+    providerName: parsed.provider_name ?? parsed.insurer_name ?? undefined,
+    addressedTo: parsed.addressed_to ?? undefined,
     payload: {
       documentCategory: parsed.document_category,
       purchaseDate: parsed.purchase_date ?? undefined,

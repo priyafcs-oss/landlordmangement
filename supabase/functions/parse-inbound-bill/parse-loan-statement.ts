@@ -10,6 +10,8 @@ Extract the fields defined in the response schema as strict JSON.
 - period_start, period_end: YYYY-MM-DD, the statement's covering period, null if not stated.
 - interest_charged, repayments_made: the total amounts over this statement period, null if not stated.
 - closing_balance: the loan's outstanding balance at the end of this statement, null if not stated.
+- document_date: the statement's own print date, distinct from period_end — null if not stated.
+- addressed_to: the account holder name printed on the statement — null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -22,6 +24,8 @@ const SCHEMA = {
     interest_charged: { type: "NUMBER", nullable: true },
     repayments_made: { type: "NUMBER", nullable: true },
     closing_balance: { type: "NUMBER", nullable: true },
+    document_date: { type: "STRING", nullable: true },
+    addressed_to: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["property_address", "lender_name", "confidence"],
@@ -94,6 +98,9 @@ export async function parseLoanStatement(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.document_date ?? undefined,
+    providerName: parsed.lender_name,
+    addressedTo: parsed.addressed_to ?? undefined,
     payload: {
       lenderName: parsed.lender_name,
       periodStart: parsed.period_start ?? undefined,

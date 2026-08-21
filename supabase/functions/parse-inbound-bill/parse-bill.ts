@@ -1,0 +1,409 @@
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { matchProperty } from "./property-match.ts";
+import {
+  BILL_TYPES,
+  type BillType,
+  extractBillFields,
+  mapAtoCategory,
+  mapBillType,
+  validateParsedBill,
+} from "./core-parser.ts";
+import type { NormalizedBillInput, ParsedBillFields, ParseResult, ProposalParseResult } from "./types.ts";
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+const DUPLICATE_WINDOW_DAYS = 14;
+const PRICE_SPIKE_MULTIPLIER = 1.4;
+const LOW_CONFIDENCE_THRESHOLD = 0.85;
+
+/**
+ * Decides whether this bill can post straight to expenses (clean, confident, matched, no
+ * duplicate/price-spike) or needs a human decision first. Water bills always need review
+ * regardless of how clean everything else looks, since they almost always carry a
+ * tenant-rechargeable usage component the landlord should see the line items for before it's
+ * counted anywhere.
+ */
+async function runGuardrails(
+  supabase: SupabaseClient,
+  parsed: ParsedBillFields,
+  matchedPropertyId: string | null,
+): Promise<{ clean: boolean; reviewReason: string | null }> {
+  const reasons: string[] = [];
+
+  const dueDate = new Date(parsed.due_date);
+  const from = new Date(dueDate.getTime() - DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
+  const to = new Date(dueDate.getTime() + DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
+
+  const { data: dupeByVendor } = await supabase
+    .from("expenses")
+    .select("id")
+    .ilike("itemName", parsed.vendor)
+    .gte("date", from)
+    .lte("date", to)
+    .limit(1);
+
+  let isDuplicate = (dupeByVendor?.length ?? 0) > 0;
+
+  if (!isDuplicate && parsed.bpay_reference) {
+    const { data: dupeByRef } = await supabase
+      .from("expenses")
+      .select("id")
+      .eq("bpayReference", parsed.bpay_reference)
+      .limit(1);
+    isDuplicate = (dupeByRef?.length ?? 0) > 0;
+  }
+
+  if (isDuplicate) reasons.push("Possible Duplicate");
+
+  const { data: history } = await supabase
+    .from("expenses")
+    .select("cost")
+    .ilike("itemName", parsed.vendor);
+
+  if (history && history.length > 0) {
+    const avg = history.reduce((s: number, r: { cost: number }) => s + Number(r.cost), 0) / history.length;
+    if (avg > 0 && parsed.amount > avg * PRICE_SPIKE_MULTIPLIER) {
+      reasons.push("Price Spike Detected");
+    }
+  }
+
+  if (parsed.confidence < LOW_CONFIDENCE_THRESHOLD || !matchedPropertyId) {
+    reasons.push("Low Confidence / Unmatched Property");
+  }
+
+  if (mapBillType(parsed.bill_category, parsed.vendor) === "Water") {
+    reasons.push("Recharge Review — Water Bill");
+  }
+
+  return {
+    clean: reasons.length === 0,
+    reviewReason: reasons.length > 0 ? reasons.join("; ") : null,
+  };
+}
+
+/**
+ * Schedules the notice's future instalments (e.g. quarters 2-4 of a council rates notice) as
+ * PropertyBill reminders — distinct from the Expense record, which only represents the instalment
+ * that's due now. Dedupes against existing bills for the same property/type/due-date (±3 days) so
+ * re-processing the same notice, or a later quarter's notice repeating the same schedule, doesn't
+ * double-book.
+ */
+async function scheduleFutureInstalments(
+  supabase: SupabaseClient,
+  propertyId: string,
+  billType: BillType,
+  instalments: { due_date: string; amount: number }[],
+  billGroupId: string,
+  providerName: string,
+  source: { fileName?: string; fileData?: string },
+): Promise<number> {
+  if (instalments.length === 0) return 0;
+
+  const { data: existing } = await supabase
+    .from("property_bills")
+    .select("dueDate")
+    .eq("propertyId", propertyId)
+    .eq("billType", billType);
+  const existingDates = (existing ?? []).map((r: { dueDate: string }) => new Date(r.dueDate).getTime());
+
+  const rows = instalments
+    .filter((i) => DATE_RE.test(i.due_date) && typeof i.amount === "number" && i.amount > 0)
+    .filter((i) => {
+      const t = new Date(i.due_date).getTime();
+      return !existingDates.some((d) => Math.abs(d - t) <= 3 * DAY_MS);
+    })
+    .map((i, idx) => ({
+      id: `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      propertyId,
+      billType,
+      amount: i.amount,
+      dueDate: i.due_date,
+      status: "Unpaid" as const,
+      notes: "Auto-scheduled from a future instalment on an emailed bill notice.",
+      billGroupId,
+      label: `Instalment ${idx + 2}`,
+      providerName,
+      source: "Email",
+      sourceFileName: source.fileName,
+      sourceFileData: source.fileData,
+    }));
+
+  if (rows.length === 0) return 0;
+  const { error } = await supabase.from("property_bills").insert(rows);
+  return error ? 0 : rows.length;
+}
+
+/** Council Rates bills come from the council itself; everything else defaults to a generic Trade/vendor contact. */
+function mapProviderRole(billType: BillType): "Council" | "Trade" {
+  return billType === "Council Rates" ? "Council" : "Trade";
+}
+
+/**
+ * Saves (or updates) a provider/contact record from whatever contact details the notice printed,
+ * so the landlord builds up a directory of councils/trades/insurers without typing them in by
+ * hand. Deduped by property + name (case-insensitive) — a later bill from the same vendor fills in
+ * any details this one didn't have, rather than creating a duplicate row each time.
+ */
+async function upsertProviderFromBill(
+  supabase: SupabaseClient,
+  propertyId: string,
+  billType: BillType,
+  parsed: ParsedBillFields,
+): Promise<void> {
+  const hasAnyContactInfo = parsed.vendor_email || parsed.vendor_phone || parsed.vendor_website || parsed.vendor_abn;
+  if (!hasAnyContactInfo) return;
+
+  const { data: existing } = await supabase
+    .from("providers")
+    .select("id, email, phone, website, abn, address")
+    .eq("propertyId", propertyId)
+    .ilike("name", parsed.vendor)
+    .maybeSingle();
+
+  if (existing) {
+    const patch: Record<string, unknown> = {};
+    if (!existing.email && parsed.vendor_email) patch.email = parsed.vendor_email;
+    if (!existing.phone && parsed.vendor_phone) patch.phone = parsed.vendor_phone;
+    if (!existing.website && parsed.vendor_website) patch.website = parsed.vendor_website;
+    if (!existing.abn && parsed.vendor_abn) patch.abn = parsed.vendor_abn;
+    if (!existing.address && parsed.vendor_address) patch.address = parsed.vendor_address;
+    if (Object.keys(patch).length > 0) {
+      await supabase.from("providers").update(patch).eq("id", existing.id);
+    }
+    return;
+  }
+
+  await supabase.from("providers").insert({
+    id: `prov_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    propertyId,
+    name: parsed.vendor,
+    role: mapProviderRole(billType),
+    email: parsed.vendor_email,
+    phone: parsed.vendor_phone,
+    website: parsed.vendor_website,
+    abn: parsed.vendor_abn,
+    address: parsed.vendor_address,
+    notes: "Auto-saved from an emailed bill.",
+  });
+}
+
+/** Which Property annual-running-cost column each bill type feeds, if any. */
+const ANNUAL_COST_FIELD: Partial<Record<BillType, string>> = {
+  "Council Rates": "councilRatesAnnual",
+  Water: "waterRatesAnnual",
+  Strata: "strataFeesAnnual",
+  Insurance: "insuranceAnnual",
+};
+
+/**
+ * Keeps the property's annual running-cost figures (used across P&L/forecast displays) current
+ * automatically, instead of requiring manual entry every time a bill comes in. Deliberately
+ * conservative about when it's confident enough to know the TRUE annual figure:
+ *   - Insurance is normally billed as a single annual premium, so the bill's own amount IS the
+ *     annual figure.
+ *   - Council/Water/Strata are typically quarterly — only update when this notice's current
+ *     instalment plus its 3 future instalments account for a full 4-quarter cycle. A single
+ *     quarter alone isn't the annual total, and guessing would silently write a wrong number
+ *     into the landlord's own figures.
+ */
+async function updateAnnualRunningCost(
+  supabase: SupabaseClient,
+  propertyId: string,
+  billType: BillType,
+  currentAmount: number,
+  futureInstalments: { amount: number }[],
+): Promise<void> {
+  const field = ANNUAL_COST_FIELD[billType];
+  if (!field) return;
+
+  let annual: number | null = null;
+  if (billType === "Insurance" && futureInstalments.length === 0) {
+    annual = currentAmount;
+  } else if (futureInstalments.length === 3) {
+    annual = currentAmount + futureInstalments.reduce((s, i) => s + i.amount, 0);
+  }
+  if (annual === null) return;
+
+  await supabase
+    .from("properties")
+    .update({ [field]: Math.round(annual * 100) / 100 })
+    .eq("id", propertyId);
+}
+
+/** Clean-bill path — posts straight to expenses (+ property_bills, provider, annual cost, future
+ * instalments) exactly as this pipeline always has for anything guardrails didn't flag. */
+async function writeApprovedBill(
+  supabase: SupabaseClient,
+  parsed: ParsedBillFields,
+  matchedPropertyId: string | null,
+  input: NormalizedBillInput,
+  emailMessageId: string | null,
+): Promise<ParseResult> {
+  const row = {
+    id: `ex_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    itemName: parsed.vendor,
+    cost: parsed.amount,
+    date: parsed.due_date,
+    propertyId: matchedPropertyId,
+    taxCategory: mapAtoCategory(parsed.ato_category),
+    hasWarranty: false,
+    rechargeToTenant: false,
+    status: "approved" as const,
+    source: "email_auto",
+    bpayBillerCode: parsed.bpay_biller_code,
+    bpayReference: parsed.bpay_reference,
+    rawPropertyAddress: parsed.property_address,
+    emailMessageId,
+    reviewReason: null,
+    invoiceFileName: input.pdfFileName,
+    invoiceFileData: input.pdfBase64,
+    sourceSubject: input.subject,
+    sourceEmailBody: input.textBody,
+  };
+
+  const { error } = await supabase.from("expenses").insert(row);
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  let scheduledBillsCreated = 0;
+  if (matchedPropertyId) {
+    const billType = mapBillType(parsed.bill_category, parsed.vendor);
+    const billGroupId = `bg_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    const source = { fileName: input.pdfFileName, fileData: input.pdfBase64 };
+
+    // Bills tab lives on property_bills, not expenses — without this row, the currently-due
+    // instalment would only ever show up in Expenses/Documents, never in the Bills tab itself.
+    await supabase.from("property_bills").insert({
+      id: `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      propertyId: matchedPropertyId,
+      billType,
+      amount: parsed.amount,
+      dueDate: parsed.due_date,
+      status: "Unpaid",
+      providerName: parsed.vendor,
+      bpayBillerCode: parsed.bpay_biller_code ?? undefined,
+      bpayReference: parsed.bpay_reference ?? undefined,
+      source: "Email",
+      billGroupId,
+      label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
+      lineItems: parsed.line_items?.length ? parsed.line_items : [{ description: parsed.vendor, amount: parsed.amount }],
+      sourceFileName: source.fileName,
+      sourceFileData: source.fileData,
+      linkedExpenseId: row.id,
+    });
+
+    if (parsed.future_instalments?.length) {
+      scheduledBillsCreated = await scheduleFutureInstalments(
+        supabase,
+        matchedPropertyId,
+        billType,
+        parsed.future_instalments,
+        billGroupId,
+        parsed.vendor,
+        source,
+      );
+    }
+    await upsertProviderFromBill(supabase, matchedPropertyId, billType, parsed);
+    await updateAnnualRunningCost(
+      supabase,
+      matchedPropertyId,
+      billType,
+      parsed.amount,
+      parsed.future_instalments ?? [],
+    );
+  }
+
+  return { ok: true, expenseId: row.id, status: "approved", reviewReason: null, matchedPropertyId, scheduledBillsCreated };
+}
+
+/** Flagged-bill path — stages a proposal for review instead of writing anything real yet. The
+ * landlord's Approve action (client-side) does what writeApprovedBill does here, once they've
+ * seen the line items and made any recharge-to-tenant decisions. */
+async function stageBillProposal(
+  supabase: SupabaseClient,
+  parsed: ParsedBillFields,
+  matchedPropertyId: string | null,
+  reviewReason: string | null,
+  input: NormalizedBillInput,
+  emailMessageId: string | null,
+): Promise<ProposalParseResult> {
+  const row = {
+    id: `prop_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    kind: "bill",
+    status: "pending",
+    propertyId: matchedPropertyId,
+    rawPropertyAddress: parsed.property_address,
+    sourceSubject: input.subject,
+    emailMessageId,
+    sourceFileName: input.pdfFileName,
+    sourceFileData: input.pdfBase64,
+    sourceEmailBody: input.textBody,
+    documentDate: undefined,
+    providerName: parsed.vendor,
+    addressedTo: parsed.addressed_to ?? undefined,
+    reviewReason,
+    payload: {
+      amount: parsed.amount,
+      dueDate: parsed.due_date,
+      bpayBillerCode: parsed.bpay_biller_code ?? undefined,
+      bpayReference: parsed.bpay_reference ?? undefined,
+      atoCategory: mapAtoCategory(parsed.ato_category),
+      billCategory: mapBillType(parsed.bill_category, parsed.vendor),
+      futureInstalments: parsed.future_instalments?.map((i) => ({ dueDate: i.due_date, amount: i.amount })),
+      lineItems: parsed.line_items?.length ? parsed.line_items : [{ description: parsed.vendor, amount: parsed.amount }],
+      vendorEmail: parsed.vendor_email ?? undefined,
+      vendorPhone: parsed.vendor_phone ?? undefined,
+      vendorWebsite: parsed.vendor_website ?? undefined,
+      vendorAbn: parsed.vendor_abn ?? undefined,
+      vendorAddress: parsed.vendor_address ?? undefined,
+      confidence: parsed.confidence,
+    },
+  };
+
+  const { error } = await supabase.from("ai_intake_proposals").insert(row);
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true, proposalId: row.id };
+}
+
+export async function parseInboundBill(
+  supabase: SupabaseClient,
+  input: NormalizedBillInput,
+  emailMessageId: string | null,
+): Promise<ParseResult | ProposalParseResult> {
+  if (emailMessageId) {
+    const { data: existingExpense } = await supabase
+      .from("expenses")
+      .select("id")
+      .eq("emailMessageId", emailMessageId)
+      .maybeSingle();
+    if (existingExpense) return { ok: true, expenseId: existingExpense.id };
+
+    const { data: existingProposal } = await supabase
+      .from("ai_intake_proposals")
+      .select("id")
+      .eq("emailMessageId", emailMessageId)
+      .maybeSingle();
+    if (existingProposal) return { ok: true, proposalId: existingProposal.id };
+  }
+
+  let parsed: ParsedBillFields;
+  try {
+    parsed = await extractBillFields(input);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Gemini extraction failed" };
+  }
+
+  const validationError = validateParsedBill(parsed);
+  if (validationError) {
+    return { ok: false, error: validationError };
+  }
+
+  const matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "", parsed.bpay_reference);
+  const { clean, reviewReason } = await runGuardrails(supabase, parsed, matchedPropertyId);
+
+  return clean
+    ? writeApprovedBill(supabase, parsed, matchedPropertyId, input, emailMessageId)
+    : stageBillProposal(supabase, parsed, matchedPropertyId, reviewReason, input, emailMessageId);
+}

@@ -698,11 +698,47 @@ export interface PropertySaleProposalPayload {
   confidence: number;
 }
 
+/** A bill flagged by guardrails (duplicate/price-spike/low-confidence/unmatched property, or any
+ * Water bill — see reviewReason) instead of posting straight to expenses. Mirrors ParsedBillFields
+ * minus vendor/property_address, which live on the shared envelope (providerName/rawPropertyAddress). */
+export interface BillProposalPayload {
+  amount: number;
+  dueDate: string;
+  bpayBillerCode?: string;
+  bpayReference?: string;
+  atoCategory: "Immediate Deduction" | "Capital Works";
+  billCategory: BillType;
+  futureInstalments?: { dueDate: string; amount: number }[];
+  lineItems: BillLineItem[];
+  vendorEmail?: string;
+  vendorPhone?: string;
+  vendorWebsite?: string;
+  vendorAbn?: string;
+  vendorAddress?: string;
+  confidence: number;
+}
+
+/** A manually-entered one-off transaction flagged by the same duplicate/price-spike guardrails
+ * bills use, checked client-side against state.expenses at save time. Mirrors the fields
+ * ExpenseDialog already collects. */
+export interface ExpenseProposalPayload {
+  itemName: string;
+  cost: number;
+  date: string;
+  taxCategory: "Immediate Deduction" | "Capital Works";
+  hasWarranty?: boolean;
+  warrantyExpiry?: string;
+  rechargeToTenant?: boolean;
+  tenantId?: string;
+}
+
 export interface AiIntakeProposal {
   id: string;
   /** Server-set on insert — when this document was received, used for the Documents archive. */
   created_at?: string;
   kind:
+    | "bill"
+    | "expense"
     | "tenant_lease"
     | "rent_ledger"
     | "property_detail"
@@ -723,7 +759,14 @@ export interface AiIntakeProposal {
   sourceFileName?: string;
   sourceFileData?: string;
   sourceEmailBody?: string;
+  /** Common header fields shown across every kind — populated where realistically extractable/known;
+   * "—" in the UI when absent. See DocumentReviewCard. */
+  documentDate?: string;
+  providerName?: string;
+  addressedTo?: string;
   payload:
+    | BillProposalPayload
+    | ExpenseProposalPayload
     | TenantLeaseProposalPayload
     | RentLedgerProposalPayload
     | PropertyDetailProposalPayload

@@ -15,6 +15,7 @@ Extract the fields defined in the response schema as strict JSON.
   - cost: the item's depreciable cost/value as shown in the schedule.
   - life_years: the effective life in years, if stated, else null.
 Do not invent items or values — only extract what the document actually lists.
+- addressed_to: the "prepared for" name on the report cover page, if present — often the property owner. Null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -38,6 +39,7 @@ const SCHEMA = {
         required: ["description", "cost"],
       },
     },
+    addressed_to: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["property_address", "items", "confidence"],
@@ -91,6 +93,9 @@ export async function parseDepreciationReport(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.report_date ?? undefined,
+    providerName: parsed.quantity_surveyor ?? undefined,
+    addressedTo: parsed.addressed_to ?? undefined,
     payload: {
       quantitySurveyor: parsed.quantity_surveyor ?? undefined,
       reportReference: parsed.report_reference ?? undefined,

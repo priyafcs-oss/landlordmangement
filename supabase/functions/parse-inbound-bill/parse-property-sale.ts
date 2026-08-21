@@ -10,6 +10,8 @@ Extract the fields defined in the response schema as strict JSON.
 - sale_price: the total sale price, null if not stated.
 - selling_costs: total selling costs if this specific document shows them (agent commission, marketing, legal fees on sale) — null if not stated. If this document IS itself just an agent commission invoice, that invoice's amount is the selling_costs figure.
 - buyer_name: the purchaser's name, if stated, else null.
+- document_date: the Contract of Sale's own date, distinct from sale_date (which is settlement) — null if not stated.
+- provider_name: the conveyancer or selling agent's name, if stated — null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
 
 const SCHEMA = {
@@ -20,6 +22,8 @@ const SCHEMA = {
     sale_price: { type: "NUMBER", nullable: true },
     selling_costs: { type: "NUMBER", nullable: true },
     buyer_name: { type: "STRING", nullable: true },
+    document_date: { type: "STRING", nullable: true },
+    provider_name: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["property_address", "confidence"],
@@ -70,6 +74,8 @@ export async function parsePropertySale(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.document_date ?? undefined,
+    providerName: parsed.provider_name ?? undefined,
     payload: {
       saleDate: parsed.sale_date ?? undefined,
       salePrice: parsed.sale_price ?? undefined,

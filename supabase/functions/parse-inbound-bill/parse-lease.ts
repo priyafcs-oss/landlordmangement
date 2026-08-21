@@ -8,6 +8,8 @@ Extract the fields defined in the response schema as strict JSON.
 - leaseStart, leaseExpiry must be formatted YYYY-MM-DD, or null if not stated.
 - leaseDuration should be "6 Months", "12 Months", or "Periodic" if it can be inferred from the dates/wording, else null.
 - email, phone, bondAmount should be null if not stated.
+- document_date: the date the agreement was signed/prepared, distinct from leaseStart — null if not stated.
+- managing_agent_name: the real estate agency that prepared/sent the lease, if any — null for a self-managed landlord (do not guess or invent one).
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;
 
 const LEASE_SCHEMA = {
@@ -23,6 +25,8 @@ const LEASE_SCHEMA = {
     leaseDuration: { type: "STRING", enum: ["6 Months", "12 Months", "Periodic"], nullable: true },
     bondAmount: { type: "NUMBER", nullable: true },
     property_address: { type: "STRING" },
+    document_date: { type: "STRING", nullable: true },
+    managing_agent_name: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
   },
   required: ["name", "rentAmount", "rentFrequency", "property_address", "confidence"],
@@ -78,6 +82,8 @@ export async function parseLeaseAgreement(
     sourceFileName: input.pdfFileName,
     sourceFileData: input.pdfBase64,
     sourceEmailBody: input.textBody,
+    documentDate: parsed.document_date ?? undefined,
+    providerName: parsed.managing_agent_name ?? undefined,
     payload: {
       name: parsed.name,
       email: parsed.email ?? undefined,
