@@ -1,5 +1,6 @@
 import { buildDocumentParts, callGeminiJSON } from "../parse-inbound-bill/gemini.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { isOversizedUpload, MAX_AI_UPLOAD_BASE64_CHARS } from "../_shared/limits.ts";
 
 interface ExtractRequest {
   fileBase64?: string;
@@ -87,6 +88,14 @@ Deno.serve(async (req) => {
       status: 422,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+  if (isOversizedUpload(body.fileBase64)) {
+    return new Response(
+      JSON.stringify({
+        error: `This file is too large for the AI reader (limit ~${Math.round((MAX_AI_UPLOAD_BASE64_CHARS * 0.75) / (1024 * 1024))}MB). Try a lower-resolution scan, or split it into smaller files.`,
+      }),
+      { status: 413, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   const apiKey = Deno.env.get("GEMINI_API_KEY");

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Webhook } from "npm:svix@1";
 import { routeInboundDocument } from "./router.ts";
 import type { NormalizedBillInput } from "./types.ts";
+import { isOversizedUpload, MAX_AI_UPLOAD_BASE64_CHARS } from "../_shared/limits.ts";
 
 interface ResendAttachmentMeta {
   id: string;
@@ -220,6 +221,24 @@ Deno.serve(async (req) => {
       });
       return new Response(JSON.stringify({ error }), {
         status: 422,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (input.pdfBase64 && isOversizedUpload(input.pdfBase64)) {
+      const error = `Attachment too large for the AI reader (limit ~${Math.round((MAX_AI_UPLOAD_BASE64_CHARS * 0.75) / (1024 * 1024))}MB) — a scanned multi-page document likely needs to be compressed or split before forwarding.`;
+      console.error(`[parse-inbound-bill] ${error}`);
+      await logEmailInbox(supabase, {
+        emailId,
+        fromAddress: email.from,
+        subject: email.subject,
+        hasAttachment: true,
+        attachmentFileName: input.pdfFileName,
+        status: "failed",
+        errorMessage: error,
+      });
+      return new Response(JSON.stringify({ error }), {
+        status: 413,
         headers: { "Content-Type": "application/json" },
       });
     }

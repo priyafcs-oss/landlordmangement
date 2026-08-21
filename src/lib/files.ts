@@ -1,3 +1,19 @@
+/**
+ * Every AI-extraction edge function embeds the file inline (base64) in a single Gemini
+ * `generateContent` request, which Google caps at ~20MB total for the whole request body —
+ * base64 inflates a file by ~33%, so this is a conservative ceiling on the RAW file size to stay
+ * safely under that after encoding, with room left for the prompt text alongside it. A scanned
+ * multi-page PDF (e.g. building plans) can easily blow past this; there's no larger-file path
+ * today (that would require switching to Gemini's separate Files API, which uploads first and
+ * references the file by URI instead of inlining it).
+ */
+export const MAX_AI_UPLOAD_BYTES = 12 * 1024 * 1024;
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const IMAGE_EXT_MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",

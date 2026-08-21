@@ -24,7 +24,7 @@ import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, Ch
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, EXPENSE_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
-import { openBillDocument } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { ExpenseCategory } from "@/lib/calculations";
 
@@ -151,6 +151,11 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === form.propertyId);
 
   const extract = async (file: File) => {
+    if (file.size > MAX_AI_UPLOAD_BYTES) {
+      return toast.error(
+        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+      );
+    }
     setBusy(true);
     setExtractSummary(null);
     setExtractEmpty(false);

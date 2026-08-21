@@ -13,6 +13,7 @@ import { FileUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useStore } from "@/lib/store";
 import { ProposalReviewDialog } from "@/components/PropertyShared";
+import { MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { toast } from "sonner";
 
 interface UploadResult {
@@ -39,6 +40,11 @@ export function UploadDocumentDialog() {
 
   const upload = async () => {
     if (!file) return toast.error("Choose a file first");
+    if (file.size > MAX_AI_UPLOAD_BYTES) {
+      return toast.error(
+        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+      );
+    }
     setBusy(true);
     try {
       const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -104,6 +110,10 @@ export function UploadDocumentDialog() {
               staged for your review the same way an emailed document would be.
             </p>
             <Input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            <p className="text-xs text-muted-foreground">
+              Max {formatFileSize(MAX_AI_UPLOAD_BYTES)} — a large scanned document (e.g. building plans) may need to be
+              compressed or split first.
+            </p>
           </div>
           <DialogFooter>
             <Button onClick={upload} disabled={!file || busy}>

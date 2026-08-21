@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
-import { openBillDocument } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { DepreciationItem } from "@/lib/types";
 
@@ -101,6 +101,11 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
   };
 
   const extract = async (file: File) => {
+    if (file.size > MAX_AI_UPLOAD_BYTES) {
+      return toast.error(
+        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+      );
+    }
     setBusy(true);
     setExtractOk(false);
     setExtractEmpty(false);

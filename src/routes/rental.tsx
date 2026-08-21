@@ -63,6 +63,7 @@ import {
 import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
+import { MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
@@ -1164,6 +1165,11 @@ function BankFeedDialog() {
   };
 
   const extractFromDocument = async (f: File) => {
+    if (f.size > MAX_AI_UPLOAD_BYTES) {
+      return toast.error(
+        `This file is ${formatFileSize(f.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+      );
+    }
     setExtracting(true);
     try {
       const dataUrl = await new Promise<string>((resolve, reject) => {
