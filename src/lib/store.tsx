@@ -190,7 +190,9 @@ interface StoreCtx {
   addBill: (b: Omit<PropertyBill, "id">) => void;
   updateBill: (id: string, b: Partial<PropertyBill>) => void;
   deleteBill: (id: string) => void;
-  markBillPaid: (id: string) => void;
+  /** paidDate defaults to today — Phase 2 accrual-matching passes the payment evidence's own
+   * date (a statement/bank-transaction date) so P&L lands in the right period. */
+  markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
 
   dismissProposal: (id: string) => void;
   markProposalApplied: (id: string) => void;
@@ -913,15 +915,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteRow(TABLES.bills, id);
       set((s) => ({ ...s, bills: s.bills.filter((x) => x.id !== id) }));
     },
-    markBillPaid: (id) =>
+    markBillPaid: (id, opts) =>
       set((s) => {
         const bill = s.bills.find((b) => b.id === id);
         if (!bill) return s;
-        const today = new Date().toISOString().slice(0, 10);
+        const paidDate = opts?.paidDate ?? new Date().toISOString().slice(0, 10);
 
-        // Paying a bill posts it to Transactions/P&L too — every bill except ones the email
-        // pipeline already paired with an Expense at intake gets one created here, the first
-        // time it's actually paid.
+        // Paying a bill posts it to Transactions/P&L too — this is the ONLY place a bill's
+        // Expense ever gets created, for every bill regardless of source (bills never post at
+        // intake anymore, even AI-confirmed ones — see 20260821150000).
         let linkedExpenseId = bill.linkedExpenseId;
         let newExpense: Expense | null = null;
         if (!linkedExpenseId) {
@@ -929,10 +931,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             id: uid("ex"),
             itemName: bill.providerName || bill.billType,
             cost: bill.amount,
-            date: today,
+            date: paidDate,
             propertyId: bill.propertyId,
             assetId: bill.assetId,
-            taxCategory: "Immediate Deduction",
+            // Falls back for bills saved before taxCategory existed on property_bills.
+            taxCategory: bill.taxCategory ?? "Immediate Deduction",
             hasWarranty: false,
             rechargeToTenant: false,
             status: "approved",
@@ -944,9 +947,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void upsertRow(TABLES.expenses, newExpense as unknown as Record<string, unknown>);
         }
 
-        void updateRow(TABLES.bills, id, { status: "Paid", paidDate: today, linkedExpenseId });
+        void updateRow(TABLES.bills, id, { status: "Paid", paidDate, linkedExpenseId });
         const updated = s.bills.map((b) =>
-          b.id === id ? { ...b, status: "Paid" as const, paidDate: today, linkedExpenseId } : b,
+          b.id === id ? { ...b, status: "Paid" as const, paidDate, linkedExpenseId } : b,
         );
         // Auto-create next cycle
         if (bill.recurrenceMonths && bill.recurrenceMonths > 0) {

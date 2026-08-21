@@ -47,6 +47,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
+import { findMatchingUnpaidBill } from "@/lib/billMatch";
 import type {
   Property,
   Tenant,
@@ -563,12 +564,19 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
 }
 
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addLedger, addExpense, markProposalApplied } = useStore();
+  const { state, addLedger, addExpense, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [tenantId, setTenantId] = useState(proposal.matchedTenantId ?? "");
   const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => true));
   const expenseLines = payload.expenseLines ?? [];
   const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() => expenseLines.map(() => true));
+  // An agent statement's deduction is often just reporting that a bill already sitting in
+  // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
+  // creating a second, disconnected Expense for the same real-world payment.
+  const billMatches = expenseLines.map((e) =>
+    findMatchingUnpaidBill(state.bills, { propertyId: proposal.propertyId, vendorOrDescription: e.vendor, amount: e.amount, date: e.date }),
+  );
+  const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
 
   const tenantsAtProperty = proposal.propertyId
     ? state.tenants.filter((t) => t.propertyId === proposal.propertyId)
@@ -594,6 +602,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     });
     expenseLines.forEach((e, i) => {
       if (!expensesIncluded[i]) return;
+      const match = billMatches[i];
+      if (match && matchAsBill[i]) {
+        markBillPaid(match.id, { paidDate: e.date });
+        return;
+      }
       addExpense({
         itemName: e.vendor,
         cost: e.amount,
@@ -668,17 +681,34 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               Deductions on this statement → expenses
             </div>
             {expenseLines.map((e, i) => (
-              <label key={i} className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={expensesIncluded[i]}
-                  onChange={(ev) => setExpensesIncluded((inc) => inc.map((v, j) => (j === i ? ev.target.checked : v)))}
-                />
-                <span className="w-24 shrink-0">{e.date}</span>
-                <span className="w-20 shrink-0 font-medium">{fmtCurrency(e.amount)}</span>
-                <span className="w-28 shrink-0 truncate">{e.vendor}</span>
-                <span className="truncate text-muted-foreground">{e.description}</span>
-              </label>
+              <div key={i} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={expensesIncluded[i]}
+                    onChange={(ev) => setExpensesIncluded((inc) => inc.map((v, j) => (j === i ? ev.target.checked : v)))}
+                  />
+                  <span className="w-24 shrink-0">{e.date}</span>
+                  <span className="w-20 shrink-0 font-medium">{fmtCurrency(e.amount)}</span>
+                  <span className="w-28 shrink-0 truncate">{e.vendor}</span>
+                  <span className="truncate text-muted-foreground">{e.description}</span>
+                </label>
+                {billMatches[i] && (
+                  <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                    <input
+                      type="checkbox"
+                      checked={matchAsBill[i]}
+                      onChange={(ev) => setMatchAsBill((m) => m.map((v, j) => (j === i ? ev.target.checked : v)))}
+                    />
+                    <span>
+                      Looks like your existing {fmtCurrency(billMatches[i]!.amount)} {billMatches[i]!.billType} bill due{" "}
+                      {billMatches[i]!.dueDate} — mark it paid instead of adding a new expense?
+                      {Math.abs(billMatches[i]!.amount - e.amount) > 0.01 &&
+                        ` (bill is ${fmtCurrency(billMatches[i]!.amount)}, statement says ${fmtCurrency(e.amount)})`}
+                    </span>
+                  </label>
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -1056,16 +1086,35 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
 }
 
 function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addExpense, markProposalApplied } = useStore();
+  const { state, addExpense, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as BankStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => false));
+  // Only an "out" (debit) line can be paying an existing bill — "in" is income. Suggests
+  // marking that bill paid instead of importing the line as a second, disconnected Expense.
+  const billMatches = payload.transactions.map((tx) =>
+    tx.direction === "out"
+      ? findMatchingUnpaidBill(state.bills, {
+          propertyId: propertyId || undefined,
+          vendorOrDescription: tx.description,
+          amount: tx.amount,
+          date: tx.date,
+        })
+      : null,
+  );
+  const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
 
   const confirm = () => {
     if (!propertyId) return toast.error("Select a property first");
     let count = 0;
     payload.transactions.forEach((tx, i) => {
       if (!included[i]) return;
+      const match = billMatches[i];
+      if (match && matchAsBill[i]) {
+        markBillPaid(match.id, { paidDate: tx.date });
+        count++;
+        return;
+      }
       addExpense({
         itemName: tx.description,
         cost: tx.amount,
@@ -1107,19 +1156,36 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
             Transactions — tick the ones relevant to this property
           </div>
           {payload.transactions.map((tx, i) => (
-            <label key={i} className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={included[i]}
-                onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
-              />
-              <span className="w-24 shrink-0">{tx.date}</span>
-              <span className={"w-20 shrink-0 text-right font-medium " + (tx.direction === "in" ? "text-emerald-600" : "")}>
-                {tx.direction === "in" ? "+" : "−"}
-                {fmtCurrency(tx.amount)}
-              </span>
-              <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
-            </label>
+            <div key={i} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={included[i]}
+                  onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+                />
+                <span className="w-24 shrink-0">{tx.date}</span>
+                <span className={"w-20 shrink-0 text-right font-medium " + (tx.direction === "in" ? "text-emerald-600" : "")}>
+                  {tx.direction === "in" ? "+" : "−"}
+                  {fmtCurrency(tx.amount)}
+                </span>
+                <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
+              </label>
+              {billMatches[i] && (
+                <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  <input
+                    type="checkbox"
+                    checked={matchAsBill[i]}
+                    onChange={(e) => setMatchAsBill((m) => m.map((v, j) => (j === i ? e.target.checked : v)))}
+                  />
+                  <span>
+                    Looks like your existing {fmtCurrency(billMatches[i]!.amount)} {billMatches[i]!.billType} bill due{" "}
+                    {billMatches[i]!.dueDate} — mark it paid instead of importing as a new expense?
+                    {Math.abs(billMatches[i]!.amount - tx.amount) > 0.01 &&
+                      ` (bill is ${fmtCurrency(billMatches[i]!.amount)}, statement says ${fmtCurrency(tx.amount)})`}
+                  </span>
+                </label>
+              )}
+            </div>
           ))}
         </div>
 

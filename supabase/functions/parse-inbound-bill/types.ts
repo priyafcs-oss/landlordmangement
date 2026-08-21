@@ -47,7 +47,9 @@ export interface ParsedBillFields {
 
 export interface ParseResult {
   ok: boolean;
-  expenseId?: string;
+  /** The created property_bills row's id — bills no longer get a paired Expense at intake, only
+   * once actually marked Paid, so this never points at an expenses row. */
+  billId?: string;
   status?: "approved" | "needs_review";
   reviewReason?: string | null;
   matchedPropertyId?: string | null;

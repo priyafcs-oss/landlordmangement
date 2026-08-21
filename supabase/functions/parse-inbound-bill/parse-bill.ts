@@ -53,6 +53,31 @@ async function runGuardrails(
     isDuplicate = (dupeByRef?.length ?? 0) > 0;
   }
 
+  // Bills no longer get a paired Expense at intake, only at payment — so an already-staged or
+  // already-scheduled Unpaid bill for the same vendor/window has to be checked here too, or a
+  // second forward of the same notice would silently stop being caught as a duplicate.
+  if (!isDuplicate) {
+    const { data: dupeByVendorBill } = await supabase
+      .from("property_bills")
+      .select("id")
+      .eq("status", "Unpaid")
+      .ilike("providerName", parsed.vendor)
+      .gte("dueDate", from)
+      .lte("dueDate", to)
+      .limit(1);
+    isDuplicate = (dupeByVendorBill?.length ?? 0) > 0;
+  }
+
+  if (!isDuplicate && parsed.bpay_reference) {
+    const { data: dupeByRefBill } = await supabase
+      .from("property_bills")
+      .select("id")
+      .eq("status", "Unpaid")
+      .eq("bpayReference", parsed.bpay_reference)
+      .limit(1);
+    isDuplicate = (dupeByRefBill?.length ?? 0) > 0;
+  }
+
   if (isDuplicate) reasons.push("Possible Duplicate");
 
   const { data: history } = await supabase
@@ -230,8 +255,10 @@ async function updateAnnualRunningCost(
     .eq("id", propertyId);
 }
 
-/** Clean-bill path — posts straight to expenses (+ property_bills, provider, annual cost, future
- * instalments) exactly as this pipeline always has for anything guardrails didn't flag. */
+/** Clean-bill path — posts straight to property_bills (+ provider, annual cost, future
+ * instalments) exactly as this pipeline always has for anything guardrails didn't flag. Unlike
+ * before, this NEVER creates an Expense — bills only post to P&L once actually marked Paid
+ * (markBillPaid, src/lib/store.tsx), regardless of how confidently they were read. */
 async function writeApprovedBill(
   supabase: SupabaseClient,
   parsed: ParsedBillFields,
@@ -239,60 +266,36 @@ async function writeApprovedBill(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<ParseResult> {
-  const row = {
-    id: `ex_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
-    itemName: parsed.vendor,
-    cost: parsed.amount,
-    date: parsed.due_date,
-    propertyId: matchedPropertyId,
-    taxCategory: mapAtoCategory(parsed.ato_category),
-    hasWarranty: false,
-    rechargeToTenant: false,
-    status: "approved" as const,
-    source: "email_auto",
-    bpayBillerCode: parsed.bpay_biller_code,
-    bpayReference: parsed.bpay_reference,
-    rawPropertyAddress: parsed.property_address,
-    emailMessageId,
-    reviewReason: null,
-    invoiceFileName: input.pdfFileName,
-    invoiceFileData: input.pdfBase64,
-    sourceSubject: input.subject,
-    sourceEmailBody: input.textBody,
-  };
+  const billId = `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const billType = mapBillType(parsed.bill_category, parsed.vendor);
+  const billGroupId = `bg_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const source = { fileName: input.pdfFileName, fileData: input.pdfBase64 };
 
-  const { error } = await supabase.from("expenses").insert(row);
+  const { error } = await supabase.from("property_bills").insert({
+    id: billId,
+    propertyId: matchedPropertyId,
+    billType,
+    amount: parsed.amount,
+    dueDate: parsed.due_date,
+    status: "Unpaid",
+    providerName: parsed.vendor,
+    bpayBillerCode: parsed.bpay_biller_code ?? undefined,
+    bpayReference: parsed.bpay_reference ?? undefined,
+    source: "Email",
+    billGroupId,
+    label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
+    lineItems: parsed.line_items?.length ? parsed.line_items : [{ description: parsed.vendor, amount: parsed.amount }],
+    sourceFileName: source.fileName,
+    sourceFileData: source.fileData,
+    taxCategory: mapAtoCategory(parsed.ato_category),
+    emailMessageId,
+  });
   if (error) {
     return { ok: false, error: error.message };
   }
 
   let scheduledBillsCreated = 0;
   if (matchedPropertyId) {
-    const billType = mapBillType(parsed.bill_category, parsed.vendor);
-    const billGroupId = `bg_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-    const source = { fileName: input.pdfFileName, fileData: input.pdfBase64 };
-
-    // Bills tab lives on property_bills, not expenses — without this row, the currently-due
-    // instalment would only ever show up in Expenses/Documents, never in the Bills tab itself.
-    await supabase.from("property_bills").insert({
-      id: `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
-      propertyId: matchedPropertyId,
-      billType,
-      amount: parsed.amount,
-      dueDate: parsed.due_date,
-      status: "Unpaid",
-      providerName: parsed.vendor,
-      bpayBillerCode: parsed.bpay_biller_code ?? undefined,
-      bpayReference: parsed.bpay_reference ?? undefined,
-      source: "Email",
-      billGroupId,
-      label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
-      lineItems: parsed.line_items?.length ? parsed.line_items : [{ description: parsed.vendor, amount: parsed.amount }],
-      sourceFileName: source.fileName,
-      sourceFileData: source.fileData,
-      linkedExpenseId: row.id,
-    });
-
     if (parsed.future_instalments?.length) {
       scheduledBillsCreated = await scheduleFutureInstalments(
         supabase,
@@ -314,7 +317,7 @@ async function writeApprovedBill(
     );
   }
 
-  return { ok: true, expenseId: row.id, status: "approved", reviewReason: null, matchedPropertyId, scheduledBillsCreated };
+  return { ok: true, billId, status: "approved", reviewReason: null, matchedPropertyId, scheduledBillsCreated };
 }
 
 /** Flagged-bill path — stages a proposal for review instead of writing anything real yet. The
@@ -373,12 +376,12 @@ export async function parseInboundBill(
   emailMessageId: string | null,
 ): Promise<ParseResult | ProposalParseResult> {
   if (emailMessageId) {
-    const { data: existingExpense } = await supabase
-      .from("expenses")
+    const { data: existingBill } = await supabase
+      .from("property_bills")
       .select("id")
       .eq("emailMessageId", emailMessageId)
       .maybeSingle();
-    if (existingExpense) return { ok: true, expenseId: existingExpense.id };
+    if (existingBill) return { ok: true, billId: existingBill.id };
 
     const { data: existingProposal } = await supabase
       .from("ai_intake_proposals")

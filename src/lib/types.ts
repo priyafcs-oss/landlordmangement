@@ -576,11 +576,20 @@ export interface PropertyBill {
   lineItems?: BillLineItem[];
   sourceFileName?: string;
   sourceFileData?: string;
-  /** Set only on the bill row the email-ingestion pipeline creates alongside its paired Expense. */
+  /** Set once this bill is marked Paid and its linked Expense is created — bills no longer get
+   * a paired Expense at intake, only at payment time (markBillPaid), regardless of source. */
   linkedExpenseId?: string;
   /** How this bill entered the system — shown as a small badge so a landlord can tell an
    * AI-read bill apart from one they typed in by hand. */
   source?: "Manual" | "Upload" | "Email";
+  /** Carried forward from intake (AI-classified atoCategory, or picked in the manual form) so
+   * markBillPaid can post the linked Expense with the correct tax treatment instead of guessing.
+   * Absent on bills created before this field existed — markBillPaid falls back to "Immediate
+   * Deduction" for those. */
+  taxCategory?: "Immediate Deduction" | "Capital Works";
+  /** Set for bills created via the email/upload pipeline — lets a retried webhook be recognized
+   * as already-processed even though (unlike before) no paired Expense exists to check instead. */
+  emailMessageId?: string;
 }
 
 /** Extracted-but-unconfirmed lease details from an inbound rent/lease agreement. */

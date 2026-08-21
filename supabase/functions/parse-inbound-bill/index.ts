@@ -88,7 +88,7 @@ async function logEmailInbox(
     status: "processed" | "staged" | "skipped" | "failed";
     documentType?: string;
     proposalId?: string;
-    expenseId?: string;
+    billId?: string;
     errorMessage?: string;
   },
 ): Promise<void> {
@@ -102,7 +102,7 @@ async function logEmailInbox(
     status: fields.status,
     documentType: fields.documentType ?? null,
     proposalId: fields.proposalId ?? null,
-    expenseId: fields.expenseId ?? null,
+    billId: fields.billId ?? null,
     errorMessage: fields.errorMessage ?? null,
   };
   const { error } = await supabase.from("email_inbox_log").upsert(row, { onConflict: "emailId" });
@@ -246,7 +246,7 @@ Deno.serve(async (req) => {
     const result = await routeInboundDocument(supabase, input, emailId);
     const documentType = "documentType" in result ? result.documentType : undefined;
     const proposalId = "proposalId" in result ? result.proposalId : undefined;
-    const expenseId = "expenseId" in result ? result.expenseId : undefined;
+    const billId = "billId" in result ? result.billId : undefined;
 
     if (!result.ok) {
       console.error("[parse-inbound-bill] parse failed", result.error);
@@ -275,13 +275,13 @@ Deno.serve(async (req) => {
       status: result.skipped ? "skipped" : proposalId ? "staged" : "processed",
       documentType,
       proposalId,
-      expenseId,
+      billId,
     });
 
     return new Response(
       JSON.stringify({
         skipped: result.skipped,
-        expenseId,
+        billId,
         proposalId,
         status: "status" in result ? result.status : undefined,
         reviewReason: "reviewReason" in result ? result.reviewReason : undefined,

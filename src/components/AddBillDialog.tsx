@@ -111,7 +111,7 @@ export function AddBillDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { state, addBill, addExpense, addProvider, updateProvider, updateProperty, addInvoice, markProposalApplied, dismissProposal } =
+  const { state, addBill, addProvider, updateProvider, updateProperty, addInvoice, markProposalApplied, dismissProposal } =
     useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -132,6 +132,7 @@ export function AddBillDialog({
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? "",
     billType: "Water" as BillType,
+    taxCategory: "Immediate Deduction" as "Immediate Deduction" | "Capital Works",
     providerName: "",
     portalUrl: "",
     portalUsername: "",
@@ -261,9 +262,11 @@ export function AddBillDialog({
       initialProposal.sourceFileName,
       initialProposal.sourceFileData,
     );
-    if (initialProposal.propertyId) {
-      setForm((f) => ({ ...f, propertyId: initialProposal.propertyId! }));
-    }
+    setForm((f) => ({
+      ...f,
+      propertyId: initialProposal.propertyId ?? f.propertyId,
+      taxCategory: payload.atoCategory,
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProposal?.id]);
 
@@ -383,40 +386,17 @@ export function AddBillDialog({
         };
       });
 
+    // Bills never create an Expense at intake, from any source -- P&L only ever gets a record
+    // once a bill is actually marked Paid (markBillPaid), which posts it using the taxCategory
+    // captured below. This applies uniformly whether the bill came from an AI-confirmed
+    // proposal or was typed in by hand.
     const payload = initialProposal?.payload as BillProposalPayload | undefined;
-
-    // An AI-confirmed bill represents a document that's already arrived -- a real,
-    // already-incurred cost, so it posts to P&L immediately (matching what the
-    // pre-consolidation review card did). A manually typed bill has no such source document,
-    // so it keeps waiting until it's actually paid (markBillPaid creates the linked Expense
-    // then) -- unchanged from how Add Bill has always worked for manual entries.
-    let linkedExpenseId: string | undefined;
-    if (initialProposal && payload) {
-      linkedExpenseId = addExpense({
-        itemName: form.providerName.trim(),
-        cost: netTotal,
-        date: form.dueDate,
-        propertyId,
-        taxCategory: payload.atoCategory,
-        hasWarranty: false,
-        rechargeToTenant: finalLineItems.some((li) => li.rechargeToTenant),
-        status: "approved",
-        source: "email_auto",
-        bpayBillerCode: form.bpayBillerCode || undefined,
-        bpayReference: form.bpayReference || undefined,
-        rawPropertyAddress: initialProposal.rawPropertyAddress,
-        emailMessageId: initialProposal.emailMessageId,
-        invoiceFileName: form.sourceFileName,
-        invoiceFileData: form.sourceFileData,
-        sourceSubject: initialProposal.sourceSubject,
-        sourceEmailBody: initialProposal.sourceEmailBody,
-      });
-    }
 
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;
     const shared = {
       propertyId,
       billType: form.billType,
+      taxCategory: form.taxCategory,
       status: "Unpaid" as const,
       providerName: form.providerName.trim(),
       referenceNumber: form.referenceNumber || undefined,
@@ -438,7 +418,6 @@ export function AddBillDialog({
       amount: netTotal,
       dueDate: form.dueDate,
       label: billGroupId ? "Instalment 1" : undefined,
-      linkedExpenseId,
     });
     if (billGroupId) {
       for (const inst of instalments) {
@@ -691,6 +670,20 @@ export function AddBillDialog({
                         {t}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Tax category">
+                <Select
+                  value={form.taxCategory}
+                  onValueChange={(v) => setForm((f) => ({ ...f, taxCategory: v as typeof f.taxCategory }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Immediate Deduction">Immediate Deduction</SelectItem>
+                    <SelectItem value="Capital Works">Capital Works</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>

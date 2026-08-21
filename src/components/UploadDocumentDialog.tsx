@@ -19,7 +19,7 @@ import { toast } from "sonner";
 interface UploadResult {
   ok: boolean;
   skipped?: boolean;
-  expenseId?: string;
+  billId?: string;
   proposalId?: string;
   status?: string;
   error?: string;
@@ -65,19 +65,15 @@ export function UploadDocumentDialog() {
       if (data.skipped) {
         toast.info("Uploaded, but it didn't look like a bill, lease, rent statement or property document — nothing recorded.");
       } else {
-        if (data.expenseId) {
-          toast.success(
-            data.status === "needs_review"
-              ? "Bill uploaded — flagged for review in Expenses"
-              : "Bill uploaded and added to Expenses",
-          );
+        if (data.billId) {
+          toast.success("Bill uploaded — it'll post to P&L once marked paid");
         } else if (data.proposalId) {
           toast.success("Uploaded — review it now, or leave it for later on the Dashboard / Assets → All Assets");
         } else {
           toast.success("Document processed");
         }
         // The edge function writes the row server-side, so the client store's cached
-        // state doesn't know about it yet — without this, the new proposal/expense
+        // state doesn't know about it yet — without this, the new proposal/bill
         // stays invisible on the Dashboard/Assets until the next full page load.
         await refresh();
         if (data.proposalId) setReviewProposalId(data.proposalId);

@@ -38,21 +38,34 @@ const DAY_MS = 86_400_000;
 
 /** Same duplicate/price-spike shape as the email-bill guardrails (parse-inbound-bill), checked
  * client-side against state.expenses since manual entry has no server round-trip. A flagged line
- * item stages as an "expense" proposal instead of posting straight to Transactions. */
+ * item stages as an "expense" proposal instead of posting straight to Transactions.
+ *
+ * Also checks unpaid bills — bills no longer get a paired Expense at intake, only at payment, so
+ * a manually-entered transaction that's actually paying an existing Unpaid bill has to be caught
+ * here too, or it'd create a second, disconnected record instead of just marking that bill paid. */
 function checkExpenseGuardrails(
   expenses: { itemName: string; cost: number; date: string }[],
+  unpaidBills: { providerName?: string; billType: string; dueDate: string }[],
   itemName: string,
   amount: number,
   date: string,
 ): string | null {
   const reasons: string[] = [];
   const t = new Date(date).getTime();
+  const name = itemName.trim().toLowerCase();
   const isDuplicate = expenses.some(
-    (e) => e.itemName.trim().toLowerCase() === itemName.trim().toLowerCase() && Math.abs(new Date(e.date).getTime() - t) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
+    (e) => e.itemName.trim().toLowerCase() === name && Math.abs(new Date(e.date).getTime() - t) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
   );
   if (isDuplicate) reasons.push("Possible Duplicate");
 
-  const history = expenses.filter((e) => e.itemName.trim().toLowerCase() === itemName.trim().toLowerCase());
+  const matchesUnpaidBill = unpaidBills.some(
+    (b) =>
+      (b.providerName || b.billType).trim().toLowerCase() === name &&
+      Math.abs(new Date(b.dueDate).getTime() - t) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
+  );
+  if (matchesUnpaidBill) reasons.push("Possibly Paying an Existing Bill");
+
+  const history = expenses.filter((e) => e.itemName.trim().toLowerCase() === name);
   if (history.length > 0) {
     const avg = history.reduce((s, e) => s + Number(e.cost), 0) / history.length;
     if (avg > 0 && amount > avg * PRICE_SPIKE_MULTIPLIER) reasons.push("Price Spike Detected");
@@ -301,7 +314,13 @@ export function AddTransactionDialog({
         // expense case the email-bill guardrails already cover, not a general fraud check.
         const reviewReason =
           perPropertyDivisor === 1 && li.direction === "Expense"
-            ? checkExpenseGuardrails(state.expenses, itemName, amount, form.date)
+            ? checkExpenseGuardrails(
+                state.expenses,
+                state.bills.filter((b) => b.status === "Unpaid" && b.propertyId === propertyId),
+                itemName,
+                amount,
+                form.date,
+              )
             : null;
 
         if (reviewReason) {
