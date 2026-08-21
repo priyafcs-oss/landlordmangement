@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, billTypeToChargeType } from "@/lib/calculations";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
-import type { BillType, BillLineItem } from "@/lib/types";
+import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
@@ -96,9 +96,24 @@ function mapBillType(category?: string): BillType {
  * src/components rather than portfolio.tsx because rental.tsx and bills.tsx both need it and must
  * never import from portfolio.tsx.
  */
-export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: string }) {
-  const { state, addBill, addProvider, updateProvider, addInvoice } = useStore();
-  const [open, setOpen] = useState(false);
+export function AddBillDialog({
+  propertyId: lockedPropertyId,
+  initialProposal,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
+}: {
+  propertyId?: string;
+  /** Pre-fills the form from an already-staged "bill" proposal (Universal Upload's post-upload
+   * review) instead of running extract-bill again — the extraction already happened once when
+   * the document was classified, no need to pay for a second Gemini call. */
+  initialProposal?: AiIntakeProposal;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const { state, addBill, addProvider, updateProvider, addInvoice, markProposalApplied, dismissProposal } = useStore();
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp ?? internalOpen;
+  const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
   const [busy, setBusy] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -161,6 +176,95 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
   const providersForProperty = state.providers.filter((p) => p.propertyId === propertyId);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === propertyId);
 
+  /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
+   * pre-filling from an already-staged proposal below, so the two never drift apart. */
+  const applyExtracted = (
+    data: Pick<
+      ExtractResult,
+      "vendor" | "amount" | "due_date" | "property_address" | "bpay_biller_code" | "bpay_reference" | "bill_category" | "future_instalments" | "line_items" | "confidence"
+    >,
+    sourceFileName?: string,
+    sourceFileData?: string,
+  ) => {
+    const matchedProperty = data.property_address
+      ? state.properties.find(
+          (p) =>
+            p.address.toLowerCase().includes(data.property_address!.toLowerCase()) ||
+            data.property_address!.toLowerCase().includes(p.address.toLowerCase()),
+        )
+      : undefined;
+
+    setForm((f) => ({
+      ...f,
+      sourceFileName: sourceFileName ?? f.sourceFileName,
+      sourceFileData: sourceFileData ?? f.sourceFileData,
+      propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
+      billType: mapBillType(data.bill_category),
+      providerName: data.vendor ?? f.providerName,
+      dueDate: data.due_date ?? f.dueDate,
+      bpayBillerCode: data.bpay_biller_code ?? f.bpayBillerCode,
+      bpayReference: data.bpay_reference ?? f.bpayReference,
+      referenceNumber: data.bpay_reference ?? f.referenceNumber,
+      hasInstalments: (data.future_instalments?.length ?? 0) > 0,
+    }));
+    const category = mapBillType(data.bill_category);
+    setLineItems(
+      data.line_items?.length
+        ? data.line_items.map((li) => ({ ...blankLineItem(category), description: li.description, amount: String(li.amount) }))
+        : [{ ...blankLineItem(category), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }],
+    );
+    if (data.future_instalments?.length) {
+      setInstalments(
+        data.future_instalments.map((i, idx) => ({
+          key: uid("inst"),
+          label: `Instalment ${idx + 2}`,
+          dueDate: i.due_date,
+          amount: String(i.amount),
+        })),
+      );
+    }
+    setConfidence(data.confidence ?? null);
+
+    if (!data.vendor && !data.amount) {
+      setExtractEmpty(true);
+    } else {
+      setExtractSummary({
+        vendor: data.vendor ?? "",
+        amount: data.amount ?? 0,
+        dueDate: data.due_date ?? "",
+        propertyMatched: !!matchedProperty,
+        instalmentCount: data.future_instalments?.length ?? 0,
+      });
+    }
+  };
+
+  // Universal Upload already classified+extracted this document once — reuse that result
+  // instead of running Gemini again on the same file.
+  useEffect(() => {
+    if (!initialProposal) return;
+    const payload = initialProposal.payload as BillProposalPayload;
+    applyExtracted(
+      {
+        vendor: initialProposal.providerName,
+        amount: payload.amount,
+        due_date: payload.dueDate,
+        property_address: initialProposal.rawPropertyAddress,
+        bpay_biller_code: payload.bpayBillerCode,
+        bpay_reference: payload.bpayReference,
+        bill_category: payload.billCategory,
+        future_instalments: payload.futureInstalments?.map((i) => ({ due_date: i.dueDate, amount: i.amount })),
+        line_items: payload.lineItems,
+        confidence: payload.confidence,
+      },
+      initialProposal.sourceFileName,
+      initialProposal.sourceFileData,
+    );
+    if (initialProposal.propertyId) {
+      setForm((f) => ({ ...f, propertyId: initialProposal.propertyId! }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProposal?.id]);
+
   const extract = async (file: File) => {
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return toast.error(
@@ -190,54 +294,11 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         return;
       }
 
-      const matchedProperty = data.property_address
-        ? state.properties.find(
-            (p) =>
-              p.address.toLowerCase().includes(data.property_address!.toLowerCase()) ||
-              data.property_address!.toLowerCase().includes(p.address.toLowerCase()),
-          )
-        : undefined;
-
-      setForm((f) => ({
-        ...f,
-        propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
-        billType: mapBillType(data.bill_category),
-        providerName: data.vendor ?? f.providerName,
-        dueDate: data.due_date ?? f.dueDate,
-        bpayBillerCode: data.bpay_biller_code ?? f.bpayBillerCode,
-        bpayReference: data.bpay_reference ?? f.bpayReference,
-        referenceNumber: data.bpay_reference ?? f.referenceNumber,
-        hasInstalments: (data.future_instalments?.length ?? 0) > 0,
-      }));
-      const category = mapBillType(data.bill_category);
-      setLineItems(
-        data.line_items?.length
-          ? data.line_items.map((li) => ({ ...blankLineItem(category), description: li.description, amount: String(li.amount) }))
-          : [{ ...blankLineItem(category), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }],
-      );
-      if (data.future_instalments?.length) {
-        setInstalments(
-          data.future_instalments.map((i, idx) => ({
-            key: uid("inst"),
-            label: `Instalment ${idx + 2}`,
-            dueDate: i.due_date,
-            amount: String(i.amount),
-          })),
-        );
-      }
-      setConfidence(data.confidence ?? null);
+      applyExtracted(data, file.name, base64);
 
       if (!data.vendor && !data.amount) {
-        setExtractEmpty(true);
         toast.warning("Couldn't find bill details in this file — the fields below are ready for manual entry");
       } else {
-        setExtractSummary({
-          vendor: data.vendor ?? "",
-          amount: data.amount ?? 0,
-          dueDate: data.due_date ?? "",
-          propertyMatched: !!matchedProperty,
-          instalmentCount: data.future_instalments?.length ?? 0,
-        });
         toast.success("Extracted — review the fields before saving");
       }
     } catch (e) {
@@ -356,6 +417,7 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
       addProvider({ propertyId, name: form.providerName.trim(), role: "Other", ...providerPatch });
     }
 
+    if (initialProposal) markProposalApplied(initialProposal.id);
     setOpen(false);
     reset();
     toast.success(billGroupId ? "Bill added with scheduled instalments" : "Bill added");
@@ -369,15 +431,21 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1">
-          <Plus className="h-3 w-3" /> Add Bill
-        </Button>
-      </DialogTrigger>
+      {!initialProposal && (
+        <DialogTrigger asChild>
+          <Button size="sm" className="gap-1">
+            <Plus className="h-3 w-3" /> Add Bill
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New bill</DialogTitle>
-          <div className="text-xs text-muted-foreground">Upload a bill for AI extraction, or enter the details manually.</div>
+          <DialogTitle>{initialProposal ? "Review bill" : "New bill"}</DialogTitle>
+          <div className="text-xs text-muted-foreground">
+            {initialProposal
+              ? "Extracted from your upload — review and edit before saving."
+              : "Upload a bill for AI extraction, or enter the details manually."}
+          </div>
         </DialogHeader>
 
         <div className="grid gap-4 text-sm md:grid-cols-[340px_1fr]">
@@ -712,6 +780,22 @@ export function AddBillDialog({ propertyId: lockedPropertyId }: { propertyId?: s
         </div>
 
         <DialogFooter>
+          {initialProposal && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  dismissProposal(initialProposal.id);
+                  setOpen(false);
+                }}
+              >
+                Dismiss
+              </Button>
+              <Button variant="ghost" onClick={() => setOpen(false)}>
+                Review later
+              </Button>
+            </>
+          )}
           <Button onClick={save} disabled={busy}>
             Save
           </Button>

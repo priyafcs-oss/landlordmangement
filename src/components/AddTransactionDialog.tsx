@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import { fmtCurrency, todayISO, EXPENSE_CATEGORIES, expenseCategoryToTaxCategory
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { ExpenseCategory } from "@/lib/calculations";
+import type { AiIntakeProposal, ExpenseProposalPayload } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -108,9 +109,24 @@ interface ExtractResult {
  * bill-flavoured). Line items can split across up to two properties; each becomes its own Expense
  * row on save, since P&L/Cost Base/Tax Reports read state.expenses as flat single-category rows.
  */
-export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
-  const { state, addExpense, addInvoice, addExpenseProposal } = useStore();
-  const [open, setOpen] = useState(false);
+export function AddTransactionDialog({
+  propertyId: lockedPropertyId,
+  initialProposal,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
+}: {
+  propertyId?: string;
+  /** Pre-fills the form from an already-staged "expense" proposal (a manually-entered
+   * transaction the duplicate/price-spike guardrail flagged) instead of losing the original
+   * entry — reviewing it here reuses the exact same save path as a fresh entry. */
+  initialProposal?: AiIntakeProposal;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+} = {}) {
+  const { state, addExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal } = useStore();
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp ?? internalOpen;
+  const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -150,6 +166,69 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
   const netTotal = lineItems.reduce((s, li) => s + (li.direction === "Income" ? 1 : -1) * (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === form.propertyId);
 
+  /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
+   * pre-filling from an already-staged proposal below, so the two never drift apart. */
+  const applyExtracted = (
+    data: Pick<ExtractResult, "vendor" | "amount" | "due_date" | "property_address" | "confidence">,
+    sourceFileName?: string,
+    sourceFileData?: string,
+  ) => {
+    const matchedProperty = data.property_address
+      ? state.properties.find(
+          (p) =>
+            p.address.toLowerCase().includes(data.property_address!.toLowerCase()) ||
+            data.property_address!.toLowerCase().includes(p.address.toLowerCase()),
+        )
+      : undefined;
+
+    setForm((f) => ({
+      ...f,
+      sourceFileName: sourceFileName ?? f.sourceFileName,
+      sourceFileData: sourceFileData ?? f.sourceFileData,
+      propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
+      payee: data.vendor ?? f.payee,
+      date: data.due_date ?? f.date,
+    }));
+    setLineItems([{ ...blankLineItem(), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }]);
+    setConfidence(data.confidence ?? null);
+
+    if (!data.vendor && !data.amount) {
+      setExtractEmpty(true);
+    } else {
+      setExtractSummary({
+        vendor: data.vendor ?? "",
+        amount: data.amount ?? 0,
+        date: data.due_date ?? "",
+        propertyMatched: !!matchedProperty,
+      });
+    }
+  };
+
+  // Universal Upload's client-side guardrail already flagged this exact entry once — reuse it
+  // instead of asking the landlord to re-type or re-upload.
+  useEffect(() => {
+    if (!initialProposal) return;
+    const payload = initialProposal.payload as ExpenseProposalPayload;
+    setForm((f) => ({
+      ...f,
+      payee: payload.itemName ?? f.payee,
+      date: payload.date ?? f.date,
+      sourceFileName: initialProposal.sourceFileName ?? f.sourceFileName,
+      sourceFileData: initialProposal.sourceFileData ?? f.sourceFileData,
+      propertyId: initialProposal.propertyId ?? f.propertyId,
+    }));
+    setLineItems([
+      {
+        ...blankLineItem(),
+        description: payload.itemName ?? "",
+        amount: payload.cost ? String(payload.cost) : "",
+        rechargeToTenant: !!payload.rechargeToTenant,
+        tenantId: payload.tenantId ?? "",
+      },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProposal?.id]);
+
   const extract = async (file: File) => {
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return toast.error(
@@ -178,33 +257,11 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
         return;
       }
 
-      const matchedProperty = data.property_address
-        ? state.properties.find(
-            (p) =>
-              p.address.toLowerCase().includes(data.property_address!.toLowerCase()) ||
-              data.property_address!.toLowerCase().includes(p.address.toLowerCase()),
-          )
-        : undefined;
-
-      setForm((f) => ({
-        ...f,
-        propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
-        payee: data.vendor ?? f.payee,
-        date: data.due_date ?? f.date,
-      }));
-      setLineItems([{ ...blankLineItem(), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }]);
-      setConfidence(data.confidence ?? null);
+      applyExtracted(data, file.name, base64);
 
       if (!data.vendor && !data.amount) {
-        setExtractEmpty(true);
         toast.warning("Couldn't find details in this file — the fields below are ready for manual entry");
       } else {
-        setExtractSummary({
-          vendor: data.vendor ?? "",
-          amount: data.amount ?? 0,
-          date: data.due_date ?? "",
-          propertyMatched: !!matchedProperty,
-        });
         toast.success("Extracted — review the fields before saving");
       }
     } catch (e) {
@@ -301,6 +358,7 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
       }
     }
 
+    if (initialProposal) markProposalApplied(initialProposal.id);
     setOpen(false);
     reset();
     if (flaggedCount > 0) {
@@ -318,15 +376,21 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1">
-          <Plus className="h-3 w-3" /> Add Transaction
-        </Button>
-      </DialogTrigger>
+      {!initialProposal && (
+        <DialogTrigger asChild>
+          <Button size="sm" className="gap-1">
+            <Plus className="h-3 w-3" /> Add Transaction
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New transaction</DialogTitle>
-          <div className="text-xs text-muted-foreground">Upload a receipt for AI extraction, or enter the details manually.</div>
+          <DialogTitle>{initialProposal ? "Review transaction" : "New transaction"}</DialogTitle>
+          <div className="text-xs text-muted-foreground">
+            {initialProposal
+              ? "Flagged for review — check the details before saving."
+              : "Upload a receipt for AI extraction, or enter the details manually."}
+          </div>
         </DialogHeader>
 
         <div className="grid gap-4 text-sm md:grid-cols-[340px_1fr]">
@@ -557,6 +621,22 @@ export function AddTransactionDialog({ propertyId: lockedPropertyId }: { propert
         </div>
 
         <DialogFooter>
+          {initialProposal && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  dismissProposal(initialProposal.id);
+                  setOpen(false);
+                }}
+              >
+                Dismiss
+              </Button>
+              <Button variant="ghost" onClick={() => setOpen(false)}>
+                Review later
+              </Button>
+            </>
+          )}
           <Button onClick={save} disabled={busy}>
             Save
           </Button>

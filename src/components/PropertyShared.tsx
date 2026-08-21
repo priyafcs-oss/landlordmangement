@@ -84,6 +84,7 @@ import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
+import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
 import { DocumentReviewCard } from "@/components/DocumentReviewCard";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -185,6 +186,18 @@ export function ProposalReviewDialog({
   }, [proposalId, isPending, onOpenChange]);
 
   if (!proposal || !isPending) return null;
+
+  // Bills and one-off transactions get the real Add Bill / Add Transaction forms, pre-filled
+  // from what was already extracted — the same forms used for manual entry, not a lighter-weight
+  // review-only card, so editing an AI-found bill feels identical to adding one by hand. Every
+  // other kind (lease, property document, loan, etc.) doesn't have an equivalent standalone "Add"
+  // form to reuse, so those stay on the purpose-built review cards below.
+  if (proposal.kind === "bill") {
+    return <AddBillDialog initialProposal={proposal} open onOpenChange={onOpenChange} />;
+  }
+  if (proposal.kind === "expense") {
+    return <AddTransactionDialog initialProposal={proposal} open onOpenChange={onOpenChange} />;
+  }
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
