@@ -30,21 +30,7 @@ export const ANNUAL_COST_FIELD: Partial<Record<BillType, keyof Property>> = {
 
 /** Categories offered on a transaction's line items — broader than BillType since a one-off
  * transaction can be almost anything, not just a recurring utility/rates bill. */
-export const EXPENSE_CATEGORIES = [
-  "Repairs & Maintenance",
-  "Management Fees",
-  "Insurance",
-  "Council Rates",
-  "Water",
-  "Legal & Professional",
-  "Advertising",
-  "Cleaning",
-  "Gardening",
-  "Travel",
-  "Capital Works",
-  "Other",
-] as const;
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+export { EXPENSE_CATEGORIES, type ExpenseCategory } from "./types";
 
 /** Only "Capital Works" maps to the Capital Works ATO category — everything else is an
  * immediate deduction, matching how the email-intake pipeline's mapAtoCategory defaults. */

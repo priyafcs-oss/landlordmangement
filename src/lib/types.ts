@@ -2,6 +2,22 @@ export type RentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 export type LeaseDuration = "6 Months" | "12 Months" | "Periodic";
 export type RepaymentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 
+export const EXPENSE_CATEGORIES = [
+  "Repairs & Maintenance",
+  "Management Fees",
+  "Insurance",
+  "Council Rates",
+  "Water",
+  "Legal & Professional",
+  "Advertising",
+  "Cleaning",
+  "Gardening",
+  "Travel",
+  "Capital Works",
+  "Other",
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
 export interface Property {
   id: string;
   address: string;
@@ -280,6 +296,9 @@ export interface Expense {
    * the money moved; Property expenses never set this. */
   direction?: "Income" | "Expense";
   taxCategory: "Immediate Deduction" | "Capital Works";
+  /** The spending category picked at entry time (e.g. "Repairs & Maintenance") — kept alongside
+   * taxCategory so Documents can tell a maintenance invoice apart from a management fee. */
+  category?: ExpenseCategory;
   invoiceFileName?: string;
   invoiceFileData?: string;
   hasWarranty: boolean;

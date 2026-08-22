@@ -15,7 +15,7 @@ export const Route = createFileRoute("/documents")({
   head: () => ({
     meta: [
       { title: "Documents — Landlord OS" },
-      { name: "description", content: "Every bill, rent statement and lease agreement forwarded by email, kept for reference." },
+      { name: "description", content: "Reusable reference records — leases, insurance, compliance certs, loan documents, depreciation reports and more — kept for reference." },
     ],
   }),
   component: DocumentsPage,
@@ -24,7 +24,8 @@ export const Route = createFileRoute("/documents")({
 interface DocumentEntry {
   id: string;
   kind:
-    | "Bill"
+    | "Maintenance"
+    | "Condition Report"
     | "Lease Agreement"
     | "Rent Statement"
     | "Property Document"
@@ -47,9 +48,6 @@ interface DocumentEntry {
 
 function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["kind"] {
   switch (kind) {
-    case "bill":
-    case "expense":
-      return "Bill";
     case "tenant_lease":
       return "Lease Agreement";
     case "property_detail":
@@ -103,8 +101,10 @@ function DocumentsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
         <p className="text-sm text-muted-foreground">
-          Every bill, rent statement and lease agreement forwarded by email — kept here for reference
-          regardless of whether it was applied or dismissed.
+          Reusable reference records — leases, condition reports, insurance and compliance certificates,
+          depreciation reports, loan documents, maintenance invoices/warranties and monthly agent
+          statements — kept here for reference. Routine bills and one-off transactions live in
+          Bills and Transactions instead.
         </p>
       </div>
       <DocumentsContent />
@@ -119,21 +119,14 @@ export function DocumentsContent() {
   const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
   const [query, setQuery] = useState("");
 
-  const seenBillGroups = new Set<string>();
-  const dedupedBills = state.bills.filter((b) => {
-    if (!b.sourceFileData) return false;
-    const key = b.billGroupId ?? b.id;
-    if (seenBillGroups.has(key)) return false;
-    seenBillGroups.add(key);
-    return true;
-  });
-
   const entries: DocumentEntry[] = [
+    // Only expenses that are themselves reusable reference material — a maintenance job's
+    // invoice, or anything carrying a warranty — not every routine one-off transaction.
     ...state.expenses
-      .filter((e) => e.invoiceFileData || e.sourceEmailBody)
+      .filter((e) => (e.invoiceFileData || e.sourceEmailBody) && (e.category === "Repairs & Maintenance" || e.hasWarranty || e.warrantyExpiry))
       .map((e) => ({
         id: e.id,
-        kind: "Bill" as const,
+        kind: "Maintenance" as const,
         date: e.date,
         propertyId: e.propertyId,
         label: e.itemName,
@@ -144,33 +137,36 @@ export function DocumentsContent() {
         subject: e.sourceSubject,
         emailBody: e.sourceEmailBody,
       })),
-    ...dedupedBills.map((b) => ({
-      id: b.id,
-      kind: "Bill" as const,
-      date: b.dueDate,
-      propertyId: b.propertyId,
-      label: b.providerName ? `${b.billType} — ${b.providerName}` : b.billType,
-      amount: b.amount,
-      status: b.status,
-      fileName: b.sourceFileName,
-      fileData: b.sourceFileData,
-    })),
-    ...state.aiProposals.map((p) => {
-      const kind = proposalDocumentKind(p.kind);
-      const label = proposalDocumentLabel(p);
-      return {
-        id: p.id,
-        kind,
-        date: p.created_at?.slice(0, 10) ?? "",
-        propertyId: p.propertyId,
-        label,
-        status: p.status,
-        fileName: p.sourceFileName,
-        fileData: p.sourceFileData,
-        subject: p.sourceSubject,
-        emailBody: p.sourceEmailBody,
-      };
-    }),
+    // Inspection reports/condition reports — currently the only place these get attached.
+    ...state.inspections
+      .filter((i) => i.fileData)
+      .map((i) => ({
+        id: i.id,
+        kind: "Condition Report" as const,
+        date: i.date,
+        propertyId: i.propertyId,
+        label: `${i.type} inspection`,
+        fileName: i.fileFileName,
+        fileData: i.fileData,
+      })),
+    ...state.aiProposals
+      .filter((p) => p.kind !== "bill" && p.kind !== "expense")
+      .map((p) => {
+        const kind = proposalDocumentKind(p.kind);
+        const label = proposalDocumentLabel(p);
+        return {
+          id: p.id,
+          kind,
+          date: p.created_at?.slice(0, 10) ?? "",
+          propertyId: p.propertyId,
+          label,
+          status: p.status,
+          fileName: p.sourceFileName,
+          fileData: p.sourceFileData,
+          subject: p.sourceSubject,
+          emailBody: p.sourceEmailBody,
+        };
+      }),
   ].sort((a, b) => (a.date < b.date ? 1 : -1));
 
   const filtered = entries.filter((d) => {
@@ -195,7 +191,6 @@ export function DocumentsContent() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__">All types</SelectItem>
-            <SelectItem value="Bill">Bills</SelectItem>
             <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
             <SelectItem value="Rent Statement">Rent statements</SelectItem>
             <SelectItem value="Property Document">Property documents</SelectItem>
@@ -204,6 +199,8 @@ export function DocumentsContent() {
             <SelectItem value="Loan Statement">Loan statements</SelectItem>
             <SelectItem value="Bank Statement">Bank statements</SelectItem>
             <SelectItem value="Property Sale">Property sales</SelectItem>
+            <SelectItem value="Maintenance">Maintenance</SelectItem>
+            <SelectItem value="Condition Report">Condition reports</SelectItem>
             <SelectItem value="Unrecognised">Unrecognised</SelectItem>
           </SelectContent>
         </Select>

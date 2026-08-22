@@ -355,6 +355,7 @@ export function AddTransactionDialog({
           date: form.date,
           propertyId,
           taxCategory: expenseCategoryToTaxCategory(li.category),
+          category: li.category,
           direction: li.direction === "Income" ? "Income" : undefined,
           hasWarranty: false,
           rechargeToTenant: !!(li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1),

@@ -566,6 +566,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
   const { state, addLedger, addExpense, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [tenantId, setTenantId] = useState(proposal.matchedTenantId ?? "");
   const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => true));
   const expenseLines = payload.expenseLines ?? [];
@@ -574,13 +575,13 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
   // creating a second, disconnected Expense for the same real-world payment.
   const billMatches = expenseLines.map((e) =>
-    findMatchingUnpaidBill(state.bills, { propertyId: proposal.propertyId, vendorOrDescription: e.vendor, amount: e.amount, date: e.date }),
+    findMatchingUnpaidBill(state.bills, { propertyId, vendorOrDescription: e.vendor, amount: e.amount, date: e.date }),
   );
   const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
 
-  const tenantsAtProperty = proposal.propertyId
-    ? state.tenants.filter((t) => t.propertyId === proposal.propertyId)
-    : state.tenants;
+  const tenantsAtProperty = propertyId ? state.tenants.filter((t) => t.propertyId === propertyId) : state.tenants;
+  const tenantNameMatched =
+    !payload.tenantName || tenantsAtProperty.some((t) => t.name.trim().toLowerCase() === payload.tenantName!.trim().toLowerCase());
 
   const includedIncome = payload.transactions.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
   const includedExpenses = expenseLines.reduce((s, e, i) => (expensesIncluded[i] ? s + e.amount : s), 0);
@@ -611,7 +612,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         itemName: e.vendor,
         cost: e.amount,
         date: e.date,
-        propertyId: proposal.propertyId ?? undefined,
+        propertyId: propertyId || undefined,
         taxCategory: "Immediate Deduction",
         hasWarranty: false,
         rechargeToTenant: false,
@@ -640,6 +641,37 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           </span>
         </div>
 
+        {!propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">
+              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+            </span>
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger className="h-7 w-[220px] text-xs">
+                <SelectValue placeholder="Assign property" />
+              </SelectTrigger>
+              <SelectContent>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.alias || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <PropertyDialog
+              property={null}
+              onDone={() => {}}
+              initialAddress={proposal.rawPropertyAddress}
+              onCreated={(id) => setPropertyId(id)}
+              trigger={
+                <Button size="sm" variant="outline">
+                  Add new property
+                </Button>
+              }
+            />
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Tenant:</span>
           <Select value={tenantId} onValueChange={setTenantId}>
@@ -654,8 +686,19 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               ))}
             </SelectContent>
           </Select>
-          {!proposal.propertyId && proposal.rawPropertyAddress && (
-            <span className="text-xs text-destructive">No property matched — "{proposal.rawPropertyAddress}"</span>
+          {!tenantId && payload.tenantName && !tenantNameMatched && (
+            <>
+              <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
+              <TenantDialog
+                propertyId={propertyId}
+                initialValues={{ name: payload.tenantName }}
+                onSaved={(id) => setTenantId(id)}
+              >
+                <Button size="sm" variant="outline" disabled={!propertyId}>
+                  Add as new tenant
+                </Button>
+              </TenantDialog>
+            </>
           )}
         </div>
 
@@ -1294,10 +1337,16 @@ export function PropertyDialog({
   property,
   onDone,
   trigger,
+  initialAddress,
+  onCreated,
 }: {
   property: Property | null;
   onDone: () => void;
   trigger?: React.ReactNode;
+  /** Pre-fills a *new* property's address from AI-extracted data (e.g. a reviewed rent statement). Ignored in edit mode. */
+  initialAddress?: string;
+  /** Called after a *new* property is actually created (not on edit, not when the dialog merely opens), with its id. */
+  onCreated?: (propertyId: string) => void;
 }) {
   const { state, addProperty, updateProperty, findOrCreateEntity, updateAsset } = useStore();
   const asset = property ? state.assets.find((a) => a.id === property.assetId) : undefined;
@@ -1307,7 +1356,7 @@ export function PropertyDialog({
   const [newEntityType, setNewEntityType] = useState<Entity["type"]>("Individual");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    address: property?.address ?? "",
+    address: property?.address ?? initialAddress ?? "",
     alias: property?.alias ?? "",
     tenantCode: property?.tenantCode ?? "",
     managerName: property?.managerName ?? "",
@@ -1985,8 +2034,12 @@ export function PropertyDialog({
                 dwellingConfiguration: form.dwellingConfiguration,
                 units: form.dwellingConfiguration !== "House" && units.length > 0 ? units : undefined,
               };
-              if (property) updateProperty(property.id, payload);
-              else addProperty(payload);
+              if (property) {
+                updateProperty(property.id, payload);
+              } else {
+                const newId = addProperty(payload);
+                onCreated?.(newId);
+              }
               setOpen(false);
               onDone();
               toast.success("Property saved");
@@ -4075,8 +4128,8 @@ export function TenantDialog({
   tenant?: Tenant;
   /** Pre-fills a *new* tenant's form from AI-extracted data (e.g. a reviewed lease proposal). Ignored in edit mode. */
   initialValues?: TenantInitialValues;
-  /** Called after the tenant is actually saved (not when the dialog merely opens). */
-  onSaved?: () => void;
+  /** Called after the tenant is actually saved (not when the dialog merely opens), with its id. */
+  onSaved?: (tenantId: string) => void;
   children?: React.ReactNode;
 }) {
   const { addTenant, updateTenant, state } = useStore();
@@ -4364,10 +4417,15 @@ export function TenantDialog({
                   : undefined,
                 paidUpToDate: tenant?.paidUpToDate ?? defaultPaid,
               };
-              if (tenant) updateTenant(tenant.id, payload);
-              else addTenant(payload);
+              let savedId: string;
+              if (tenant) {
+                updateTenant(tenant.id, payload);
+                savedId = tenant.id;
+              } else {
+                savedId = addTenant(payload);
+              }
               setOpen(false);
-              onSaved?.();
+              onSaved?.(savedId);
               toast.success("Tenant saved");
             }}
           >

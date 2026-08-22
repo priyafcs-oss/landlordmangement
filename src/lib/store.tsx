@@ -94,11 +94,11 @@ interface StoreCtx {
   set: (updater: (s: AppState) => AppState) => void;
   reset: () => void;
 
-  addProperty: (p: Omit<Property, "id">) => void;
+  addProperty: (p: Omit<Property, "id">) => string;
   updateProperty: (id: string, p: Partial<Property>) => void;
   deleteProperty: (id: string) => void;
 
-  addTenant: (t: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string }) => void;
+  addTenant: (t: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string }) => string;
   updateTenant: (id: string, t: Partial<Tenant>) => void;
   deleteTenant: (id: string) => void;
 
@@ -381,6 +381,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         assets: [...s.assets, assetRow],
         valuationSnapshots: [...s.valuationSnapshots, snap],
       }));
+      return propertyId;
     },
     updateProperty: (id, p) => {
       void updateRow(TABLES.properties, id, p as Record<string, unknown>);
@@ -453,6 +454,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: Tenant = { ...t, paidUpToDate: t.paidUpToDate || defaultPaidUp, id: uid("t") };
       void upsertRow(TABLES.tenants, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, tenants: [...s.tenants, row] }));
+      return row.id;
     },
     updateTenant: (id, patch) =>
       set((s) => {
