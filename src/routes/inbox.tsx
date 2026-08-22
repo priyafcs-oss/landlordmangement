@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,6 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Inbox as InboxIcon, Paperclip, TriangleAlert } from "lucide-react";
 import type { EmailInboxLogEntry } from "@/lib/types";
+import { DOCUMENT_TYPE_LABEL } from "@/lib/inboxLabels";
+import { BillDetailDialog } from "@/components/BillDetailDialog";
+import { InboxProposalDialog } from "@/components/InboxProposalDialog";
+import { InboxEntryDetailDialog } from "@/components/InboxEntryDetailDialog";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({
@@ -32,18 +36,33 @@ const STATUS_BADGE_CLASS: Record<EmailInboxLogEntry["status"], string> = {
   failed: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
-const DOCUMENT_TYPE_LABEL: Record<string, string> = {
-  bill: "Bill",
-  lease_agreement: "Lease agreement",
-  rent_statement: "Rent statement",
-  property_document: "Property document",
-  depreciation_report: "Depreciation report",
-  loan_document: "Loan document",
-  loan_statement: "Loan statement",
-  bank_statement: "Bank statement",
-  property_sale: "Property sale",
-  other: "Unrecognised",
-};
+// forwardRef + prop spread so Radix's <DialogTrigger asChild> can attach onClick/ref to the
+// actual DOM node when this is used as the trigger — a plain component silently drops them.
+const InboxRowContent = forwardRef<
+  HTMLDivElement,
+  { entry: EmailInboxLogEntry } & React.HTMLAttributes<HTMLDivElement>
+>(({ entry: e, ...rest }, ref) => (
+  <CardContent ref={ref} className="space-y-1 p-4 text-sm" {...rest}>
+    <div className="flex flex-wrap items-center gap-2">
+      <Badge variant="outline" className={STATUS_BADGE_CLASS[e.status]}>
+        {STATUS_LABEL[e.status]}
+      </Badge>
+      {e.documentType && <Badge variant="secondary">{DOCUMENT_TYPE_LABEL[e.documentType] ?? e.documentType}</Badge>}
+      <span className="font-medium">{e.subject || "(no subject)"}</span>
+      {e.hasAttachment && <Paperclip className="h-3 w-3 text-muted-foreground" />}
+    </div>
+    <div className="text-xs text-muted-foreground">
+      {e.fromAddress || "Unknown sender"} • {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
+      {e.attachmentFileName && ` • ${e.attachmentFileName}`}
+    </div>
+    {e.status === "failed" && e.errorMessage && (
+      <div className="mt-1 rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+        {e.errorMessage}
+      </div>
+    )}
+  </CardContent>
+));
+InboxRowContent.displayName = "InboxRowContent";
 
 function InboxPage() {
   return (
@@ -119,29 +138,22 @@ export function InboxContent() {
             </CardContent>
           </Card>
         )}
-        {filtered.map((e) => (
-          <Card key={e.id}>
-            <CardContent className="space-y-1 p-4 text-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className={STATUS_BADGE_CLASS[e.status]}>
-                  {STATUS_LABEL[e.status]}
-                </Badge>
-                {e.documentType && <Badge variant="secondary">{DOCUMENT_TYPE_LABEL[e.documentType] ?? e.documentType}</Badge>}
-                <span className="font-medium">{e.subject || "(no subject)"}</span>
-                {e.hasAttachment && <Paperclip className="h-3 w-3 text-muted-foreground" />}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {e.fromAddress || "Unknown sender"} • {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
-                {e.attachmentFileName && ` • ${e.attachmentFileName}`}
-              </div>
-              {e.status === "failed" && e.errorMessage && (
-                <div className="mt-1 rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                  {e.errorMessage}
-                </div>
+        {filtered.map((e) => {
+          const bill = e.billId ? state.bills.find((b) => b.id === e.billId) : undefined;
+          const proposal = e.proposalId ? state.aiProposals.find((p) => p.id === e.proposalId) : undefined;
+          const content = <InboxRowContent entry={e} />;
+          return (
+            <Card key={e.id} className="cursor-pointer hover:border-primary/50">
+              {bill ? (
+                <BillDetailDialog bill={bill} trigger={content} />
+              ) : proposal && proposal.status === "pending" ? (
+                <InboxProposalDialog proposal={proposal} trigger={content} />
+              ) : (
+                <InboxEntryDetailDialog entry={e} bill={bill} proposal={proposal} trigger={content} />
               )}
-            </CardContent>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

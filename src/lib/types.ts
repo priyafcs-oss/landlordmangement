@@ -814,7 +814,7 @@ export interface EmailInboxLogEntry {
   status: "processed" | "staged" | "skipped" | "failed";
   documentType?: string;
   proposalId?: string;
-  expenseId?: string;
+  billId?: string;
   errorMessage?: string;
 }
 
