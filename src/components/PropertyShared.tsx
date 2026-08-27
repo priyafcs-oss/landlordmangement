@@ -98,6 +98,9 @@ import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/fil
 import { FileSignature } from "lucide-react";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
+/** Sentinel for "no specific dwelling" in a Dwelling Select — Radix Select item values can't be
+ * an empty string, and shared/whole-property genuinely needs its own selectable option. */
+const SHARED_UNIT = "__shared__";
 
 interface DomainSuggestResult {
   ok?: boolean;
@@ -567,23 +570,62 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
   );
 }
 
+/** Sentinel for "no specific tenant" in the expense-line assignment Select — Radix Select
+ * item values can't be an empty string, and unassigned/shared genuinely needs its own real
+ * selectable option here (unlike the transaction row Select, where an empty value just means
+ * "nothing picked yet" and is never itself a valid choice). */
+const SHARED_EXPENSE_TENANT = "__shared__";
+
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
   const { state, addLedger, addExpense, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
-  const [tenantId, setTenantId] = useState(proposal.matchedTenantId ?? "");
+  const expenseLines = payload.expenseLines ?? [];
+
+  const tenantsAtProperty = propertyId ? state.tenants.filter((t) => t.propertyId === propertyId) : state.tenants;
+  // A changeover statement (outgoing + incoming tenant in the same period) needs each line
+  // attributed individually rather than one tenant picked for the whole statement — but that's
+  // only ever ambiguous when the property actually has more than one tenant on file.
+  const multiTenant = tenantsAtProperty.length > 1;
+  const tenantNameMatched =
+    !payload.tenantName || tenantsAtProperty.some((t) => t.name.trim().toLowerCase() === payload.tenantName!.trim().toLowerCase());
+
+  /** Best guess for one transaction row: its own extracted tenantName (changeover statements) >
+   * the sole tenant at the property > whatever the server-side matcher resolved for the whole
+   * statement. Left blank (forcing a manual pick) when none of those apply. */
+  const defaultTenantFor = (name?: string): string => {
+    if (name) {
+      const q = name.trim().toLowerCase();
+      const match = tenantsAtProperty.find((t) => t.name.trim().toLowerCase() === q);
+      if (match) return match.id;
+    }
+    if (tenantsAtProperty.length === 1) return tenantsAtProperty[0].id;
+    return proposal.matchedTenantId ?? "";
+  };
+
+  const [txTenantIds, setTxTenantIds] = useState<string[]>(() =>
+    payload.transactions.map((tx) => defaultTenantFor(tx.tenantName)),
+  );
   // Rows that already look like a duplicate of a ledger entry that exists at mount time start
   // unchecked, so the landlord has to actively opt back in rather than silently re-posting them.
   const [included, setIncluded] = useState<boolean[]>(() =>
-    payload.transactions.map((tx) =>
-      tenantId ? !findDuplicateLedgerEntry(state.ledger, { tenantId, amount: tx.amount, date: tx.date }) : true,
-    ),
+    payload.transactions.map((tx) => {
+      const tId = defaultTenantFor(tx.tenantName);
+      return tId ? !findDuplicateLedgerEntry(state.ledger, { tenantId: tId, amount: tx.amount, date: tx.date }) : true;
+    }),
   );
-  const ledgerDuplicates = payload.transactions.map((tx) =>
-    tenantId ? findDuplicateLedgerEntry(state.ledger, { tenantId, amount: tx.amount, date: tx.date }) : null,
+  const ledgerDuplicates = payload.transactions.map((tx, i) =>
+    txTenantIds[i] ? findDuplicateLedgerEntry(state.ledger, { tenantId: txTenantIds[i], amount: tx.amount, date: tx.date }) : null,
   );
-  const expenseLines = payload.expenseLines ?? [];
   const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() => expenseLines.map(() => true));
+  // Deductions default to the one tenant every included payment is already going to (the common
+  // single-tenant case) — left "shared" whenever more than one tenant is actually involved, since
+  // which tenant (if any) a given fee line relates to isn't something to guess at.
+  const soleTxTenant = (() => {
+    const ids = new Set(payload.transactions.map((tx) => defaultTenantFor(tx.tenantName)).filter(Boolean));
+    return ids.size === 1 ? [...ids][0] : SHARED_EXPENSE_TENANT;
+  })();
+  const [expTenantIds, setExpTenantIds] = useState<string[]>(() => expenseLines.map(() => soleTxTenant));
   // An agent statement's deduction is often just reporting that a bill already sitting in
   // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
   // creating a second, disconnected Expense for the same real-world payment.
@@ -592,32 +634,37 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   );
   const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
 
-  const tenantsAtProperty = propertyId ? state.tenants.filter((t) => t.propertyId === propertyId) : state.tenants;
-  const tenantNameMatched =
-    !payload.tenantName || tenantsAtProperty.some((t) => t.name.trim().toLowerCase() === payload.tenantName!.trim().toLowerCase());
-
   const includedIncome = payload.transactions.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
   const includedExpenses = expenseLines.reduce((s, e, i) => (expensesIncluded[i] ? s + e.amount : s), 0);
   const computedNet = includedIncome - includedExpenses;
+  // A statement can show a running balance the agent holds between periods — when it does, the
+  // amount actually paid to the owner is this period's activity adjusted by that rollover, not
+  // period income/expenses alone (see LEDGER_PROMPT in parse-ledger.ts).
+  const hasBalanceRollover = payload.openingBalance !== undefined || payload.closingBalance !== undefined;
+  const reconciledNet = computedNet + (payload.openingBalance ?? 0) - (payload.closingBalance ?? 0);
 
   const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
-  const matchedTenant = state.tenants.find((t) => t.id === tenantId);
+  const assignedIncludedTenantIds = [...new Set(payload.transactions.filter((_, i) => included[i]).map((_, i) => txTenantIds[i]).filter(Boolean))];
+  const singleAssignedTenant =
+    assignedIncludedTenantIds.length === 1 ? state.tenants.find((t) => t.id === assignedIncludedTenantIds[0]) : undefined;
   const feeChecks: FeeCheckResult[] =
     agent && hasFeeTerms(agent)
       ? verifyAgentFees({
           provider: agent,
           rentCollected: includedIncome,
           lines: expenseLines.filter((_, i) => expensesIncluded[i]),
-          tenantRent: matchedTenant ? { amount: matchedTenant.rentAmount, frequency: matchedTenant.rentFrequency } : undefined,
+          tenantRent: singleAssignedTenant ? { amount: singleAssignedTenant.rentAmount, frequency: singleAssignedTenant.rentFrequency } : undefined,
         })
       : [];
 
   const confirm = () => {
-    if (!tenantId) return toast.error("Select a tenant first");
+    if (payload.transactions.some((_, i) => included[i] && !txTenantIds[i])) {
+      return toast.error("Assign a tenant to every included payment first");
+    }
     payload.transactions.forEach((tx, i) => {
       if (!included[i]) return;
       addLedger({
-        tenantId,
+        tenantId: txTenantIds[i],
         date: tx.date,
         type: "Rent Payment",
         description: tx.description,
@@ -635,6 +682,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         markBillPaid(match.id, { paidDate: e.date });
         return;
       }
+      const lineTenantId = expTenantIds[i];
       addExpense({
         itemName: e.vendor,
         cost: e.amount,
@@ -648,6 +696,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         notes: e.category || undefined,
         hasWarranty: false,
         rechargeToTenant: false,
+        tenantId: lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined,
         status: "approved",
         source: "email_auto",
         rawPropertyAddress: proposal.rawPropertyAddress,
@@ -704,35 +753,60 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Tenant:</span>
-          <Select value={tenantId} onValueChange={setTenantId}>
-            <SelectTrigger className="h-7 w-[220px] text-xs">
-              <SelectValue placeholder="Select tenant" />
-            </SelectTrigger>
-            <SelectContent>
-              {tenantsAtProperty.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {!tenantId && payload.tenantName && !tenantNameMatched && (
-            <>
-              <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
-              <TenantDialog
-                propertyId={propertyId}
-                initialValues={{ name: payload.tenantName }}
-                onSaved={(id) => setTenantId(id)}
-              >
-                <Button size="sm" variant="outline" disabled={!propertyId}>
-                  Add as new tenant
-                </Button>
-              </TenantDialog>
-            </>
-          )}
-        </div>
+        {!multiTenant && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Tenant:</span>
+            <Select
+              value={txTenantIds[0] ?? ""}
+              onValueChange={(v) => {
+                setTxTenantIds((ids) => ids.map(() => v));
+                setExpTenantIds((ids) => ids.map(() => v));
+              }}
+            >
+              <SelectTrigger className="h-7 w-[220px] text-xs">
+                <SelectValue placeholder="Select tenant" />
+              </SelectTrigger>
+              <SelectContent>
+                {tenantsAtProperty.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!txTenantIds[0] && payload.tenantName && !tenantNameMatched && (
+              <>
+                <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
+                <TenantDialog
+                  propertyId={propertyId}
+                  initialValues={{ name: payload.tenantName }}
+                  onSaved={(id) => {
+                    setTxTenantIds((ids) => ids.map(() => id));
+                    setExpTenantIds((ids) => ids.map(() => id));
+                  }}
+                >
+                  <Button size="sm" variant="outline" disabled={!propertyId}>
+                    Add as new tenant
+                  </Button>
+                </TenantDialog>
+              </>
+            )}
+          </div>
+        )}
+
+        {multiTenant && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              Multiple tenants at this property — assign each payment below (a changeover statement can include both an
+              outgoing and incoming tenant).
+            </span>
+            <TenantDialog propertyId={propertyId}>
+              <Button size="sm" variant="outline" disabled={!propertyId}>
+                Add tenant
+              </Button>
+            </TenantDialog>
+          </div>
+        )}
 
         <div className="space-y-1 rounded border p-2">
           <div className="text-[11px] font-medium text-muted-foreground">Rent income → ledger</div>
@@ -746,7 +820,24 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                 />
                 <span className="w-24 shrink-0">{tx.date}</span>
                 <span className="w-20 shrink-0 font-medium">{fmtCurrency(tx.amount)}</span>
-                <span className="truncate text-muted-foreground">{tx.description}</span>
+                <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
+                {multiTenant && (
+                  <Select
+                    value={txTenantIds[i]}
+                    onValueChange={(v) => setTxTenantIds((ids) => ids.map((val, j) => (j === i ? v : val)))}
+                  >
+                    <SelectTrigger className="h-6 w-[140px] shrink-0 text-xs">
+                      <SelectValue placeholder="Assign tenant" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tenantsAtProperty.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </label>
               {ledgerDuplicates[i] && (
                 <div className="ml-6 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
@@ -776,7 +867,25 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                   <span className="w-24 shrink-0">{e.date}</span>
                   <span className="w-20 shrink-0 font-medium">{fmtCurrency(e.amount)}</span>
                   <span className="w-28 shrink-0 truncate">{e.vendor}</span>
-                  <span className="truncate text-muted-foreground">{e.description}</span>
+                  <span className="flex-1 truncate text-muted-foreground">{e.description}</span>
+                  {multiTenant && (
+                    <Select
+                      value={expTenantIds[i]}
+                      onValueChange={(v) => setExpTenantIds((ids) => ids.map((val, j) => (j === i ? v : val)))}
+                    >
+                      <SelectTrigger className="h-6 w-[160px] shrink-0 text-xs">
+                        <SelectValue placeholder="Shared" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SHARED_EXPENSE_TENANT}>Shared / whole property</SelectItem>
+                        {tenantsAtProperty.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </label>
                 {billMatches[i] && (
                   <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
@@ -798,20 +907,29 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-3 rounded border bg-muted/30 p-2 text-xs">
-          <span>
-            Net (income − deductions): <span className="font-medium">{fmtCurrency(computedNet)}</span>
-          </span>
-          {payload.netToOwner !== undefined && (
-            <span
-              className={
-                Math.abs(computedNet - payload.netToOwner) < 0.01 ? "text-emerald-600" : "text-destructive"
-              }
-            >
-              Statement says {fmtCurrency(payload.netToOwner)}
-              {Math.abs(computedNet - payload.netToOwner) < 0.01 ? " ✓ matches" : " — doesn't match, check inclusions"}
+        <div className="space-y-1 rounded border bg-muted/30 p-2 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span>
+              Net (income − deductions): <span className="font-medium">{fmtCurrency(computedNet)}</span>
             </span>
-          )}
+            {hasBalanceRollover && (
+              <span className="text-muted-foreground">
+                {payload.openingBalance !== undefined && <>+ brought forward {fmtCurrency(payload.openingBalance)} </>}
+                {payload.closingBalance !== undefined && <>− carried forward {fmtCurrency(payload.closingBalance)} </>}
+                = expected payout <span className="font-medium text-foreground">{fmtCurrency(reconciledNet)}</span>
+              </span>
+            )}
+            {payload.netToOwner !== undefined && (
+              <span
+                className={
+                  Math.abs(reconciledNet - payload.netToOwner) < 0.01 ? "text-emerald-600" : "text-destructive"
+                }
+              >
+                Statement says {fmtCurrency(payload.netToOwner)}
+                {Math.abs(reconciledNet - payload.netToOwner) < 0.01 ? " ✓ matches" : " — doesn't match, check inclusions"}
+              </span>
+            )}
+          </div>
         </div>
 
         {feeChecks.length > 0 && (
@@ -968,14 +1086,57 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
  * marks it applied so it's easy to find later in Documents; the source document itself is already
  * safe (attached to this proposal row) either way.
  */
+/** Every DocumentType the pipeline has a dedicated parser for (router.ts) except "other" itself —
+ * offered as "tell it what this actually is" choices on an unclassified document. */
+const REPARSE_DOCUMENT_TYPES: { value: string; label: string }[] = [
+  { value: "bill", label: "Bill" },
+  { value: "lease_agreement", label: "Lease Agreement" },
+  { value: "rent_statement", label: "Rent Statement" },
+  { value: "property_document", label: "Property Document" },
+  { value: "depreciation_report", label: "Depreciation Report" },
+  { value: "loan_document", label: "Loan Document" },
+  { value: "loan_statement", label: "Loan Statement" },
+  { value: "bank_statement", label: "Bank Statement" },
+  { value: "property_sale", label: "Property Sale" },
+];
+
 function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProposal } = useStore();
+  const { state, updateProposal, refresh } = useStore();
   const payload = proposal.payload as UnclassifiedProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  const [reclassifyAs, setReclassifyAs] = useState("");
+  const [reparsing, setReparsing] = useState(false);
 
   const file = () => {
     updateProposal(proposal.id, { propertyId: propertyId || undefined, status: "applied" });
     toast.success("Filed in Documents");
+  };
+
+  // Re-runs extraction with the type-specific parser the landlord picked (the exact same
+  // DB-writing parsers the email/upload pipeline dispatches to, see router.ts) instead of relying
+  // on Gemini's own classification guess. Deletes this unclassified row once the replacement is
+  // confirmed written — see reparse-document/index.ts.
+  const reparse = async () => {
+    if (!reclassifyAs) return toast.error("Choose what kind of document this is first");
+    setReparsing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>("reparse-document", {
+        body: { proposalId: proposal.id, documentType: reclassifyAs },
+      });
+      if (error) throw error;
+      if (!data?.ok) {
+        toast.error(data?.error || "Couldn't read this document as that type");
+        return;
+      }
+      await refresh();
+      toast.success(
+        `Re-parsed as ${REPARSE_DOCUMENT_TYPES.find((t) => t.value === reclassifyAs)?.label ?? reclassifyAs} — check the review queue`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Re-parse failed");
+    } finally {
+      setReparsing(false);
+    }
   };
 
   return (
@@ -985,8 +1146,27 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           <span className="font-medium">{payload.documentCategory}</span>
         </div>
         <div className="text-xs text-muted-foreground">
-          Couldn't tell what kind of document this is, so nothing was extracted — the file itself is safe. Assign a
-          property (optional) and file it, or dismiss it.
+          Couldn't tell what kind of document this is, so nothing was extracted — the file itself is safe. Tell it
+          what this actually is to try extraction again, assign a property and file it as-is, or dismiss it.
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded border p-2">
+          <span className="text-xs text-muted-foreground">This is actually a:</span>
+          <Select value={reclassifyAs} onValueChange={setReclassifyAs}>
+            <SelectTrigger className="h-7 w-[200px] text-xs">
+              <SelectValue placeholder="Choose document type" />
+            </SelectTrigger>
+            <SelectContent>
+              {REPARSE_DOCUMENT_TYPES.map((t) => (
+                <SelectItem key={t.value} value={t.value}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" onClick={reparse} disabled={!reclassifyAs || reparsing}>
+            {reparsing ? "Reading…" : "Re-parse"}
+          </Button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1544,7 +1724,7 @@ export function PropertyDialog({
   };
 
   const addUnit = () =>
-    setUnits((rows) => [...rows, { label: rows.length === 0 ? "Main house" : `Unit ${rows.length + 1}` }]);
+    setUnits((rows) => [...rows, { id: uid("unit"), label: rows.length === 0 ? "Main house" : `Unit ${rows.length + 1}` }]);
   const removeUnit = (idx: number) => setUnits((rows) => rows.filter((_, i) => i !== idx));
   const updateUnit = (idx: number, patch: Partial<PropertyUnit>) =>
     setUnits((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -1650,8 +1830,8 @@ export function PropertyDialog({
                 if (next !== "House" && units.length === 0) {
                   setUnits(
                     next === "Dual Key"
-                      ? [{ label: "Unit 1" }, { label: "Unit 2" }]
-                      : [{ label: "Main house" }, { label: "Granny flat" }],
+                      ? [{ id: uid("unit"), label: "Unit 1" }, { id: uid("unit"), label: "Unit 2" }]
+                      : [{ id: uid("unit"), label: "Main house" }, { id: uid("unit"), label: "Granny flat" }],
                   );
                 }
               }}
@@ -3745,12 +3925,14 @@ function ProviderDialog({
   provider?: Provider;
   children: React.ReactNode;
 }) {
-  const { addProvider, updateProvider } = useStore();
+  const { addProvider, updateProvider, state } = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
   const [form, setForm] = useState({
     name: provider?.name ?? "",
     role: provider?.role ?? ("Other" as ProviderRole),
+    unitId: provider?.unitId ?? SHARED_UNIT,
     email: provider?.email ?? "",
     phone: provider?.phone ?? "",
     website: provider?.website ?? "",
@@ -3870,6 +4052,7 @@ function ProviderDialog({
     const payload = {
       name: form.name.trim(),
       role: form.role,
+      unitId: form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       email: form.email.trim() || undefined,
       phone: form.phone.trim() || undefined,
       website: form.website.trim() || undefined,
@@ -3927,6 +4110,23 @@ function ProviderDialog({
               </SelectContent>
             </Select>
           </Field>
+          {propertyUnits.length > 0 && (
+            <Field label="Dwelling">
+              <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SHARED_UNIT}>Whole property</SelectItem>
+                  {propertyUnits.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Email">
             <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
           </Field>
@@ -4600,6 +4800,7 @@ export function TenantDialog({
 }) {
   const { addTenant, updateTenant, state } = useStore();
   const [open, setOpen] = useState(false);
+  const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
   const [form, setForm] = useState({
     name: tenant?.name ?? initialValues?.name ?? "",
     email: tenant?.email ?? initialValues?.email ?? "",
@@ -4609,6 +4810,7 @@ export function TenantDialog({
     emergencyContactPhone: tenant?.emergencyContactPhone ?? "",
     permanentAddress: tenant?.permanentAddress ?? "",
     unitAddress: tenant?.unitAddress ?? "",
+    unitId: tenant?.unitId ?? "",
     noticePeriod: tenant?.noticePeriod ?? "",
     leaseStart: tenant?.leaseStart ?? initialValues?.leaseStart ?? "",
     leaseExpiry: tenant?.leaseExpiry ?? initialValues?.leaseExpiry ?? "",
@@ -4702,19 +4904,35 @@ export function TenantDialog({
           <Field label="Phone">
             <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </Field>
+          {propertyUnits.length > 0 && (
+            <Field label="Dwelling">
+              <Select
+                value={form.unitId}
+                onValueChange={(v) => {
+                  const unit = propertyUnits.find((u) => u.id === v);
+                  setForm((f) => ({ ...f, unitId: v, unitAddress: unit?.address || f.unitAddress }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Which dwelling is this tenancy in?" />
+                </SelectTrigger>
+                <SelectContent>
+                  {propertyUnits.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <div className="col-span-2">
             <Field label="Unit / dwelling address (optional)">
               <Input
-                list="tenant-unit-addresses"
                 value={form.unitAddress}
                 onChange={(e) => setForm({ ...form, unitAddress: e.target.value })}
                 placeholder="Only needed if this tenant's own address differs from the property's — e.g. a granny flat sharing one title"
               />
-              <datalist id="tenant-unit-addresses">
-                {(state.properties.find((p) => p.id === propertyId)?.units ?? []).map((u) => (
-                  <option key={u.label} value={u.address || u.label} />
-                ))}
-              </datalist>
             </Field>
           </div>
           <Field label="Lease start date">
@@ -4859,6 +5077,7 @@ export function TenantDialog({
                 emergencyContactPhone: form.emergencyContactPhone || undefined,
                 permanentAddress: form.permanentAddress || undefined,
                 unitAddress: form.unitAddress || undefined,
+                unitId: form.unitId || undefined,
                 noticePeriod: form.noticePeriod || undefined,
                 propertyId,
                 leaseStart: form.leaseStart || undefined,

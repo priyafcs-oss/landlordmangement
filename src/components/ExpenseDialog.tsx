@@ -27,6 +27,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
+ * an empty string, and shared/whole-property genuinely needs its own selectable option. */
+const SHARED_UNIT = "__shared__";
+
 /** Simple single-category expense form — used for editing an existing expense (e.g. from the
  * needs-review queue). New expenses are created via AddTransactionDialog instead, which supports
  * multi-line-item receipts and property-split; this stays around purely for the edit path. */
@@ -47,6 +51,7 @@ export function ExpenseDialog({
           cost: String(expense.cost),
           date: expense.date,
           propertyId: expense.propertyId ?? state.properties[0]?.id ?? "",
+          unitId: expense.unitId ?? SHARED_UNIT,
           category: (expense.category ?? "Sundry Rental Expenses") as ExpenseCategory,
           hasWarranty: expense.hasWarranty,
           warrantyExpiry: expense.warrantyExpiry ?? "",
@@ -60,6 +65,7 @@ export function ExpenseDialog({
           cost: "",
           date: todayISO(),
           propertyId: state.properties[0]?.id ?? "",
+          unitId: SHARED_UNIT,
           category: "Sundry Rental Expenses" as ExpenseCategory,
           hasWarranty: false,
           warrantyExpiry: "",
@@ -87,6 +93,7 @@ export function ExpenseDialog({
       cost,
       date: form.date,
       propertyId: form.propertyId,
+      unitId: form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       category: form.category,
       taxCategory: expenseCategoryToTaxCategory(form.category),
       hasWarranty: form.hasWarranty,
@@ -137,6 +144,7 @@ export function ExpenseDialog({
       cost: "",
       date: todayISO(),
       propertyId: state.properties[0]?.id ?? "",
+      unitId: SHARED_UNIT,
       category: "Sundry Rental Expenses",
       hasWarranty: false,
       warrantyExpiry: "",
@@ -148,6 +156,7 @@ export function ExpenseDialog({
   };
 
   const tenantsForProp = state.tenants.filter((t) => t.propertyId === form.propertyId);
+  const propertyUnits = state.properties.find((p) => p.id === form.propertyId)?.units ?? [];
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -186,6 +195,23 @@ export function ExpenseDialog({
               </SelectContent>
             </Select>
           </Field>
+          {propertyUnits.length > 0 && (
+            <Field label="Dwelling">
+              <Select value={form.unitId} onValueChange={(v) => setForm({ ...form, unitId: v })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SHARED_UNIT}>Shared / whole property</SelectItem>
+                  {propertyUnits.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Category">
             <Select
               value={form.category}

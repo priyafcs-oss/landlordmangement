@@ -43,6 +43,9 @@ import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Pro
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
+/** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
+ * an empty string, and shared/whole-property genuinely needs its own selectable option. */
+const SHARED_UNIT = "__shared__";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
@@ -145,6 +148,7 @@ export function AddBillDialog({
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? "",
+    unitId: "",
     billType: "Water" as BillType,
     category: billTypeToDefaultCategory("Water") as ExpenseCategory,
     providerName: "",
@@ -192,6 +196,7 @@ export function AddBillDialog({
   const propertyId = form.propertyId || lockedPropertyId || "";
   const providersForProperty = state.providers.filter((p) => p.propertyId === propertyId);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === propertyId);
+  const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
 
   /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
@@ -433,6 +438,7 @@ export function AddBillDialog({
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;
     const shared = {
       propertyId,
+      unitId: form.unitId && form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       billType: form.billType,
       category: form.category,
       taxCategory: expenseCategoryToTaxCategory(form.category),
@@ -710,6 +716,25 @@ export function AddBillDialog({
                   </Select>
                 </Field>
               </div>
+              {propertyUnits.length > 0 && (
+                <div className="sm:col-span-2">
+                  <Field label="Dwelling">
+                    <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Shared / whole property" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SHARED_UNIT}>Shared / whole property</SelectItem>
+                        {propertyUnits.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              )}
               <Field label="Bill type">
                 <Select value={form.billType} onValueChange={(v) => setForm((f) => ({ ...f, billType: v as BillType }))}>
                   <SelectTrigger>

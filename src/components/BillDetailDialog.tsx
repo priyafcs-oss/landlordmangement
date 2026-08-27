@@ -26,6 +26,9 @@ import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
+/** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
+ * an empty string, and shared/whole-property genuinely needs its own selectable option. */
+const SHARED_UNIT = "__shared__";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -107,6 +110,7 @@ export function BillDetailDialog({
     notes: bill.notes ?? "",
     dueDate: bill.dueDate,
     category: (bill.category ?? billTypeToDefaultCategory(bill.billType)) as ExpenseCategory,
+    unitId: bill.unitId ?? SHARED_UNIT,
   });
   const [lineItems, setLineItems] = useState<LineItemRow[]>(toLineItemRows(bill.lineItems));
 
@@ -123,6 +127,7 @@ export function BillDetailDialog({
       notes: b.notes ?? "",
       dueDate: b.dueDate,
       category: (b.category ?? billTypeToDefaultCategory(b.billType)) as ExpenseCategory,
+      unitId: b.unitId ?? SHARED_UNIT,
     });
     setLineItems(toLineItemRows(b.lineItems));
     setEditingSchedule(false);
@@ -130,6 +135,7 @@ export function BillDetailDialog({
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === selected.propertyId);
+  const propertyUnits = state.properties.find((p) => p.id === selected.propertyId)?.units ?? [];
 
   /** No browser email client can attach a file automatically (a security restriction, not
    * something this app can work around) — same downloadPdfAndEmailViaGmail pattern used
@@ -167,6 +173,7 @@ export function BillDetailDialog({
       notes: form.notes || undefined,
       category: form.category,
       taxCategory: expenseCategoryToTaxCategory(form.category),
+      unitId: form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       lineItems: lineItems.filter((li) => parseFloat(li.amount) > 0).map((li) => {
         const amount = parseFloat(li.amount) || 0;
         const nowRecharging = li.rechargeToTenant && li.tenantId && !li.recharged;
@@ -372,6 +379,25 @@ export function BillDetailDialog({
                     <Input value={form.providerName} onChange={(e) => setForm((f) => ({ ...f, providerName: e.target.value }))} />
                   </Field>
                 </div>
+                {propertyUnits.length > 0 && (
+                  <div className="sm:col-span-2">
+                    <Field label="Dwelling">
+                      <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={SHARED_UNIT}>Shared / whole property</SelectItem>
+                          {propertyUnits.map((u) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                )}
                 <Field label="Reference #">
                   <Input value={form.referenceNumber} onChange={(e) => setForm((f) => ({ ...f, referenceNumber: e.target.value }))} />
                 </Field>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,6 +85,12 @@ interface TxRow {
    * row's property (left unset if the property has none or more than one, rather than guessing). */
   tenantId?: string;
   tenantName?: string;
+  /** Which dwelling (PropertyUnit) this row belongs to on a multi-unit property — direct on
+   * ledger rows via the paying tenant's own unitId (rent is always dwelling-specific), and on
+   * expense/bill rows only when the landlord explicitly filed it to one unit. Never inferred for
+   * expenses: an untagged bill (council rates, land tax) stays whole-property/shared by design,
+   * it is not split or guessed at just because the property happens to have units. */
+  unitId?: string;
   /** Which ATO category group this expense falls under — undefined for ledger (rent) rows, which
    * have no tax treatment of their own. Drives the "For tax" breakdown and the EOFY deductible
    * total; falls back to the legacy coarse taxCategory for expenses saved before the grouped
@@ -109,6 +115,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
+  const [unitId, setUnitId] = useState("__all__");
   const [query, setQuery] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
@@ -123,6 +130,17 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     const at = state.tenants.filter((t) => t.propertyId === propId);
     return at.length === 1 ? at[0] : undefined;
   };
+
+  // The dwelling filter only makes sense once viewing exactly one property — either this table is
+  // locked to one (embedded on a property's own page) or the landlord has picked one from the
+  // portfolio-wide Property filter — and only when that property actually has units on file.
+  const singlePropertyId = lockedPropertyId ?? (propertyId !== "__all__" ? propertyId : "");
+  const propertyUnitsForFilter = singlePropertyId ? state.properties.find((p) => p.id === singlePropertyId)?.units ?? [] : [];
+  // Clears a stale selection when the property in scope changes (or the dwelling filter is no
+  // longer applicable) rather than silently leaving an invisible filter narrowing the list.
+  useEffect(() => {
+    setUnitId("__all__");
+  }, [singlePropertyId]);
 
   const fys = useMemo(() => {
     const years: string[] = [];
@@ -149,6 +167,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           source: e.source === "rent_statement" ? ("Upload" as const) : ("Manual" as const),
           tenantId: e.tenantId,
           tenantName: tenant?.name,
+          unitId: tenant?.unitId,
           sourceFileName: e.sourceFileName,
           sourceFileData: e.sourceFileData,
         };
@@ -168,6 +187,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         expenseId: e.id,
         tenantId: tenant?.id,
         tenantName: tenant?.name,
+        unitId: e.unitId,
         taxGroup: categoryGroupOf(e.category) ?? (e.taxCategory === "Immediate Deduction" ? "Running Expenses" : "Cost Base (Capital)"),
         sourceFileName: e.invoiceFileName,
         sourceFileData: e.invoiceFileData,
@@ -184,6 +204,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     .filter((r) => propertyId === "__all__" || r.propertyId === propertyId)
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
     .filter((r) => tenantId === "__all__" || r.tenantId === tenantId)
+    .filter((r) => unitId === "__all__" || r.unitId === unitId)
     .filter((r) => !query || `${r.description} ${r.category} ${r.tenantName ?? ""}`.toLowerCase().includes(query.toLowerCase()))
     .filter((r) => !needsAttentionOnly || r.needsAttention)
     .filter((r) => !anyTypeFilter || (typeFilter.income && r.amount > 0) || (typeFilter.expense && r.amount < 0))
@@ -309,6 +330,21 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                 ))}
             </SelectContent>
           </Select>
+          {propertyUnitsForFilter.length > 0 && (
+            <Select value={unitId} onValueChange={setUnitId}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="All dwellings" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All dwellings</SelectItem>
+                {propertyUnitsForFilter.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1">

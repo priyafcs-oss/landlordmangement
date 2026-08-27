@@ -335,8 +335,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
       loadSettings(),
     ]);
+    // Units predating PropertyUnit.id (added for dwelling-scoped tenancies/expenses) load with no
+    // id — backfilled here so every consumer always sees a stable one; re-saving the property
+    // then persists it back to the DB, self-healing without requiring a manual edit first.
+    const propertiesWithUnitIds = properties.map((p) =>
+      p.units && p.units.length > 0 ? { ...p, units: p.units.map((u) => (u.id ? u : { ...u, id: uid("unit") })) } : p,
+    );
     const next: AppState = {
-      properties,
+      properties: propertiesWithUnitIds,
       tenants,
       providers,
       entities,

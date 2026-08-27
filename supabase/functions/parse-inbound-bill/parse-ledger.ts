@@ -5,14 +5,16 @@ import type { NormalizedBillInput, ParsedLedgerFields, ProposalParseResult } fro
 
 const LEDGER_PROMPT = `You are extracting rent payment transactions from a rent statement/ledger for an Australian rental property. This may come as a narrative remittance advice from a managing agent, OR as a spreadsheet-style weekly table a landlord keeps themselves (columns like Week Start Date, Week End Date, Rent Due, Rent Paid, Paid Date, Balance, Status). Handle both shapes.
 Extract the fields defined in the response schema as strict JSON.
-- transactions is every individual rent payment actually recorded: date (YYYY-MM-DD), amount (the rent payment amount, positive number), and a short description.
+- transactions is every individual rent payment actually recorded: date (YYYY-MM-DD), amount (the rent payment amount, positive number), a short description, and tenantName.
+- tenantName on a transaction is REQUIRED as a key but its value is nullable — set it to the specific tenant's name ONLY when this statement covers a tenant changeover (an outgoing tenant and an incoming tenant both paying rent within the same period, e.g. two different names appear against different payment rows) and this particular row is clearly attributable to one of them. Leave it null when the whole statement is for a single tenant (the common case) — the top-level tenantName field already covers that.
 - If the source is a weekly table: emit ONE transaction per row where "Rent Paid" (or equivalent) has an actual non-blank, non-zero amount — use that row's Week Start Date (or Paid Date if present) as the transaction date. SKIP rows where the paid amount is blank/zero, even if a "Status" column says "paid" — a blank amount is not a confirmed transaction, regardless of what an adjacent status label claims.
 - A single row's paid amount may be larger than one week's normal rent (a lump-sum catch-up payment covering several weeks, e.g. $5000 against a $900/week rent) — extract it as ONE transaction for that row's date and its full amount; do not try to split it across multiple weeks.
 - Do NOT put agent fees, deductions, or bills paid on the owner's behalf into transactions — those go in expenseLines instead (see below). transactions is rent income only.
 - expenseLines is REQUIRED — always include it, even as an empty array [] when there's nothing to report. A managing agent's ownership/disbursement statement typically deducts its own management fee, and sometimes pays a bill (e.g. water usage charges) on the owner's behalf before remitting the balance — extract each such deduction as one expenseLine: vendor (who it was paid to — the agent itself for its own fee, or the actual biller e.g. "Sydney Water" for a bill they paid), amount (positive number), date (YYYY-MM-DD), description, and category (a short free-text tax category like "management_fees" or "water_rates").
-- netToOwner is the statement's own stated net amount paid/remitted to the owner, if shown (often labelled "Net to owner", "Amount paid to you", or similar) — null if not stated. This should equal rent income minus expenseLines; it's used only as a sanity check, not written anywhere directly.
+- netToOwner is the statement's own stated net amount actually paid/remitted to the owner this period, if shown (often labelled "Net to owner", "Amount paid to you", or similar) — null if not stated. It's used only as a reconciliation sanity check, not written anywhere directly.
+- openingBalance and closingBalance: many agent statements carry a running balance the agent holds (e.g. "Balance brought forward $200" ... "Balance carried forward $150") separate from this period's own rent/expense activity — extract these two figures when shown, else null for either/both. When present, netToOwner is expected to equal (rent income − expenseLines) + openingBalance − closingBalance, NOT just rent income minus expenseLines alone — do not fold a balance rollover into netToOwner itself or invent one when the statement shows no such balance line.
 - periodStart, periodEnd should be the statement's covering period in YYYY-MM-DD, or null if not stated.
-- tenantName should be the tenant's name if stated, else null.
+- tenantName (top-level) should be the tenant's name if the whole statement is for one tenant, else null (e.g. leave this null too on a changeover statement covering two tenants — rely on each transaction's own tenantName instead).
 - document_date: the statement's own issue/print date, distinct from periodStart/periodEnd — null if not stated.
 - managing_agent_name: the agency issuing the statement, if any — null if this looks self-managed.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is, based on how clearly each field was stated in the source. Use 1.0 only when every field was explicit and unambiguous; lower it when you had to infer or guess.`;
@@ -31,8 +33,9 @@ const LEDGER_SCHEMA = {
           date: { type: "STRING" },
           amount: { type: "NUMBER" },
           description: { type: "STRING" },
+          tenantName: { type: "STRING", nullable: true },
         },
-        required: ["date", "amount", "description"],
+        required: ["date", "amount", "description", "tenantName"],
       },
     },
     expenseLines: {
@@ -50,6 +53,8 @@ const LEDGER_SCHEMA = {
       },
     },
     netToOwner: { type: "NUMBER", nullable: true },
+    openingBalance: { type: "NUMBER", nullable: true },
+    closingBalance: { type: "NUMBER", nullable: true },
     property_address: { type: "STRING" },
     document_date: { type: "STRING", nullable: true },
     managing_agent_name: { type: "STRING", nullable: true },
@@ -147,9 +152,11 @@ export async function parseRentStatement(
       tenantName: parsed.tenantName ?? undefined,
       periodStart: parsed.periodStart ?? undefined,
       periodEnd: parsed.periodEnd ?? undefined,
-      transactions: parsed.transactions ?? [],
+      transactions: (parsed.transactions ?? []).map((t) => ({ ...t, tenantName: t.tenantName ?? undefined })),
       expenseLines: parsed.expenseLines ?? [],
       netToOwner: parsed.netToOwner ?? undefined,
+      openingBalance: parsed.openingBalance ?? undefined,
+      closingBalance: parsed.closingBalance ?? undefined,
       confidence: parsed.confidence,
     },
   };

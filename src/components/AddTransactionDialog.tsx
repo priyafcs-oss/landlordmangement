@@ -35,6 +35,9 @@ import type { AiIntakeProposal, ExpenseProposalPayload } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
+/** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
+ * an empty string, and shared/whole-property genuinely needs its own selectable option. */
+const SHARED_UNIT = "__shared__";
 
 const PRICE_SPIKE_MULTIPLIER = 1.4;
 
@@ -138,6 +141,7 @@ export function AddTransactionDialog({
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? state.properties[0]?.id ?? "",
     secondPropertyId: "",
+    unitId: "",
     payee: "",
     referenceNumber: "",
     date: todayISO(),
@@ -164,6 +168,7 @@ export function AddTransactionDialog({
 
   const netTotal = lineItems.reduce((s, li) => s + (li.direction === "Income" ? 1 : -1) * (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === form.propertyId);
+  const propertyUnits = state.properties.find((p) => p.id === form.propertyId)?.units ?? [];
 
   /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
@@ -356,6 +361,7 @@ export function AddTransactionDialog({
           cost: amount,
           date: form.date,
           propertyId,
+          unitId: perPropertyDivisor === 1 && form.unitId && form.unitId !== SHARED_UNIT ? form.unitId : undefined,
           taxCategory: expenseCategoryToTaxCategory(li.category),
           category: li.category,
           direction: li.direction === "Income" ? "Income" : undefined,
@@ -516,6 +522,22 @@ export function AddTransactionDialog({
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
+                  </Field>
+                ) : propertyUnits.length > 0 ? (
+                  <Field label="Dwelling">
+                    <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Shared / whole property" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SHARED_UNIT}>Shared / whole property</SelectItem>
+                        {propertyUnits.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 ) : (
                   <div className="flex items-end">

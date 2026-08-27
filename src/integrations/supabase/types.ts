@@ -412,6 +412,7 @@ export type Database = {
           status: string
           taxCategory: string
           tenantId: string | null
+          unitId: string | null
           warrantyExpiry: string | null
         }
         Insert: {
@@ -445,6 +446,7 @@ export type Database = {
           status?: string
           taxCategory?: string
           tenantId?: string | null
+          unitId?: string | null
           warrantyExpiry?: string | null
         }
         Update: {
@@ -478,6 +480,7 @@ export type Database = {
           status?: string
           taxCategory?: string
           tenantId?: string | null
+          unitId?: string | null
           warrantyExpiry?: string | null
         }
         Relationships: []
@@ -1058,6 +1061,7 @@ export type Database = {
           status: string
           taxCategory: string | null
           tenantRebillStatus: string | null
+          unitId: string | null
         }
         Insert: {
           amount?: number
@@ -1092,6 +1096,7 @@ export type Database = {
           status?: string
           taxCategory?: string | null
           tenantRebillStatus?: string | null
+          unitId?: string | null
         }
         Update: {
           amount?: number
@@ -1126,6 +1131,7 @@ export type Database = {
           status?: string
           taxCategory?: string | null
           tenantRebillStatus?: string | null
+          unitId?: string | null
         }
         Relationships: []
       }
@@ -1156,6 +1162,7 @@ export type Database = {
           portalUsername: string | null
           propertyId: string | null
           role: string
+          unitId: string | null
           website: string | null
         }
         Insert: {
@@ -1184,6 +1191,7 @@ export type Database = {
           portalUsername?: string | null
           propertyId?: string | null
           role?: string
+          unitId?: string | null
           website?: string | null
         }
         Update: {
@@ -1212,6 +1220,7 @@ export type Database = {
           portalUsername?: string | null
           propertyId?: string | null
           role?: string
+          unitId?: string | null
           website?: string | null
         }
         Relationships: []
@@ -1319,6 +1328,7 @@ export type Database = {
           rentFrequency: string
           tenantConsentsToElectronicService: boolean | null
           unitAddress: string | null
+          unitId: string | null
         }
         Insert: {
           additionalLeaseTerms?: string | null
@@ -1359,6 +1369,7 @@ export type Database = {
           rentFrequency?: string
           tenantConsentsToElectronicService?: boolean | null
           unitAddress?: string | null
+          unitId?: string | null
         }
         Update: {
           additionalLeaseTerms?: string | null
@@ -1399,6 +1410,7 @@ export type Database = {
           rentFrequency?: string
           tenantConsentsToElectronicService?: boolean | null
           unitAddress?: string | null
+          unitId?: string | null
         }
         Relationships: []
       }

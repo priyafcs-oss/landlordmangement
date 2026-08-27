@@ -98,11 +98,21 @@ export interface ParsedLedgerFields {
   tenantName: string | null;
   periodStart: string | null;
   periodEnd: string | null;
-  transactions: { date: string; amount: number; description: string }[];
+  /** tenantName here is per-line, distinct from the top-level tenantName — set only when a
+   * changeover statement clearly attributes this specific payment to a named tenant (an outgoing
+   * and incoming tenant both paying rent within the same statement period). Null otherwise. */
+  transactions: { date: string; amount: number; description: string; tenantName: string | null }[];
   /** Expense lines on the same statement — e.g. a managing agent's fee, or a bill they paid on the owner's behalf. */
   expenseLines: { vendor: string; amount: number; date: string; description: string; category: string }[];
   /** The statement's own stated net-to-owner figure, if shown, for a reconciliation sanity check. Null if not stated. */
   netToOwner: number | null;
+  /** Balance held by the agent brought forward from the previous statement / carried forward to
+   * the next one — when present, the actual amount paid to the owner is
+   * (period income - period expenses) + openingBalance - closingBalance, not just the period's
+   * own activity, which is why these are captured separately rather than folded into netToOwner.
+   * Null if the statement shows no balance rollover. */
+  openingBalance: number | null;
+  closingBalance: number | null;
   property_address: string;
   /** The statement's own issue/print date — distinct from periodStart/periodEnd. Null if not stated. */
   document_date: string | null;

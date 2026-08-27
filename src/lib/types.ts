@@ -155,8 +155,12 @@ export interface Property {
   units?: PropertyUnit[];
 }
 
-/** One dwelling on a multi-dwelling title — see Property.dwellingConfiguration/units. */
+/** One dwelling on a multi-dwelling title — see Property.dwellingConfiguration/units. Its own
+ * tenancy, rent, managing agent and expenses scope to this `id` via Tenant/Provider/Expense/
+ * PropertyBill.unitId; whole-property shared costs (council rates, land tax, building insurance)
+ * simply never set a unitId, they aren't artificially split across units. */
 export interface PropertyUnit {
+  id: string;
   label: string;
   address?: string;
   bedrooms?: number;
@@ -245,6 +249,10 @@ export interface Tenant {
    * tenant portal) — for a title with multiple dwellings (e.g. a house + granny flat sharing one
    * Property record for purchase price/loan/cost base) where each tenant needs a distinct address. */
   unitAddress?: string;
+  /** Which PropertyUnit (dwelling) this tenancy is in, when the property has more than one —
+   * the authoritative link Transactions/Documents scope by, distinct from the free-text
+   * `unitAddress` display override above. Unset on a single-dwelling property. */
+  unitId?: string;
   propertyId: string;
   leaseStart?: string;
   leaseExpiry?: string; // empty string / undefined = Periodic
@@ -343,6 +351,12 @@ export interface Expense {
   propertyId?: string;
   /** Which Asset this transaction belongs to — set for every asset type, propertyId only for Property. */
   assetId?: string;
+  /** Which PropertyUnit (dwelling) this expense is directly attributable to, on a multi-dwelling
+   * property — e.g. a granny flat's own repair, or a separately metered unit's utility bill.
+   * Unset means a whole-property shared cost (council rates, land tax, building insurance) —
+   * never inferred/split automatically, only ever set when the landlord explicitly files it to
+   * one dwelling. */
+  unitId?: string;
   /** Unset means "Expense" — every historical row is an outgoing. Only Income exists for
    * non-property assets (a gold sale, an ETF dividend) where cost alone can't say which way
    * the money moved; Property expenses never set this. */
@@ -467,6 +481,10 @@ export interface Provider {
   id: string;
   created_at?: string;
   propertyId?: string;
+  /** Which PropertyUnit (dwelling) this contact belongs to — lets one dwelling on a multi-unit
+   * property have its own managing agent distinct from the whole property's. Unset means it
+   * applies property-wide (the common case, and every contact on a single-dwelling property). */
+  unitId?: string;
   name: string;
   role: ProviderRole;
   email?: string;
@@ -646,6 +664,9 @@ export interface PropertyBill {
   propertyId?: string;
   /** Which Asset this bill belongs to — set for every asset type, propertyId only for Property. */
   assetId?: string;
+  /** Which PropertyUnit (dwelling) this bill is directly attributable to — see Expense.unitId.
+   * Unset means whole-property shared (the common case: council rates, land tax, insurance). */
+  unitId?: string;
   billType: BillType;
   amount: number;
   dueDate: string;
@@ -717,11 +738,17 @@ export interface RentLedgerProposalPayload {
   tenantName?: string;
   periodStart?: string;
   periodEnd?: string;
-  transactions: { date: string; amount: number; description: string }[];
+  /** tenantName here is per-line, set only on a changeover statement where this specific payment
+   * is clearly attributable to a named tenant distinct from the statement's overall tenantName. */
+  transactions: { date: string; amount: number; description: string; tenantName?: string }[];
   /** Expense lines on the same statement (e.g. an agent's management fee or a bill paid on the owner's behalf) — staged for review like everything else from this pipeline, never auto-applied. */
   expenseLines?: { vendor: string; amount: number; date: string; description: string; category: string }[];
   /** Rent income minus expense lines, for a quick "does this match the stated net-to-owner" sanity check. */
   netToOwner?: number;
+  /** Balance the agent holds, carried between statements — when set, netToOwner is expected to
+   * equal (income - expenseLines) + openingBalance - closingBalance, not period activity alone. */
+  openingBalance?: number;
+  closingBalance?: number;
   confidence: number;
 }
 

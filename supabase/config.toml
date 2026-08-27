@@ -27,5 +27,8 @@ verify_jwt = false
 [functions.extract-agency-agreement]
 verify_jwt = false
 
+[functions.reparse-document]
+verify_jwt = false
+
 [functions.domain-lookup]
 verify_jwt = false
