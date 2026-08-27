@@ -207,7 +207,7 @@ export function buildTenantLedger(
       rows.push({
         id: `due-${tenant.id}-${cursor}`,
         date: cursor,
-        description: `Rent Due: ${cursor} → ${cycleEnd} (${period} days)`,
+        description: `Rent Due: ${cursor} → ${cycleEnd}`,
         debit: Math.round(cycleAmount * 100) / 100,
         credit: 0,
         balance: 0,

@@ -226,6 +226,9 @@ export interface CashBuffer {
 
 export interface Tenant {
   id: string;
+  /** Server-set on insert — when this tenant record was created, used by Documents to show
+   * "date added" separately from lease/business dates. */
+  created_at?: string;
   name: string; // required
   rentAmount: number; // required
   rentFrequency: RentFrequency; // required
@@ -295,6 +298,10 @@ export interface LedgerEntry {
   daysShift?: number;
   /** How this entry was posted — unset for historical rows predating this field. */
   source?: "manual" | "bank_feed" | "rent_statement";
+  /** The statement/document this payment was read off, when there is one (set for
+   * source: "rent_statement" rows) — lets Transactions link straight back to it. */
+  sourceFileName?: string;
+  sourceFileData?: string;
 }
 
 export interface TenantInvoice {
@@ -327,6 +334,9 @@ export interface Loan {
 
 export interface Expense {
   id: string;
+  /** Server-set on insert — when this expense was actually recorded, distinct from its business
+   * `date`. Used by Documents to show "date added". */
+  created_at?: string;
   itemName: string;
   cost: number;
   date: string;
@@ -391,6 +401,7 @@ export interface InspectionIssue {
 
 export interface Inspection {
   id: string;
+  created_at?: string;
   propertyId: string;
   /** The tenant in place at the time of this inspection — kept explicit so history stays correct across tenant changes. */
   tenantId?: string;
@@ -417,6 +428,7 @@ export interface RentChange {
 
 export interface LeaseHistory {
   id: string;
+  created_at?: string;
   tenantId: string;
   originalStartDate: string;
   pastStartDate: string;
@@ -453,6 +465,7 @@ export type FeeFrequency = "Per Statement" | "Monthly" | "Quarterly" | "Annually
 /** A vendor/contact linked to a property — council, managing agent, insurer, tradesperson, etc. */
 export interface Provider {
   id: string;
+  created_at?: string;
   propertyId?: string;
   name: string;
   role: ProviderRole;

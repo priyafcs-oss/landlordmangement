@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert } from "lucide-react";
+import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
@@ -89,12 +90,22 @@ interface TxRow {
    * total; falls back to the legacy coarse taxCategory for expenses saved before the grouped
    * taxonomy existed and never got a specific category. */
   taxGroup?: CategoryGroup;
+  /** The source document this row was read off, when there is one — ledger rows from a rent
+   * statement (LedgerEntry.sourceFileName/Data) and expense rows with an attached invoice/receipt
+   * (Expense.invoiceFileName/Data). Lets the Source column link straight back to it. */
+  sourceFileName?: string;
+  sourceFileData?: string;
+}
+
+function formatMonthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
 export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
-  const { state, deleteExpense } = useStore();
-  const currentFY = ausFinancialYear(todayISO());
-  const [fy, setFy] = useState(currentFY);
+  const { state } = useStore();
+  const [fy, setFy] = useState("all");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
@@ -102,7 +113,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
   const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false });
-  const { start, end } = fyRange(fy);
+  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
+  const fyLabel = fy === "all" ? "All time" : `FY ${fy}`;
 
   /** Sole current tenant at a property, if there's exactly one — used to attribute a row with no
    * direct tenant link (a general property expense) without guessing across dual-key properties. */
@@ -137,6 +149,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           source: e.source === "rent_statement" ? ("Upload" as const) : ("Manual" as const),
           tenantId: e.tenantId,
           tenantName: tenant?.name,
+          sourceFileName: e.sourceFileName,
+          sourceFileData: e.sourceFileData,
         };
       }),
     ...state.expenses.map((e) => {
@@ -155,6 +169,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         tenantId: tenant?.id,
         tenantName: tenant?.name,
         taxGroup: categoryGroupOf(e.category) ?? (e.taxCategory === "Immediate Deduction" ? "Running Expenses" : "Cost Base (Capital)"),
+        sourceFileName: e.invoiceFileName,
+        sourceFileData: e.invoiceFileData,
       };
     }),
   ];
@@ -164,7 +180,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const anySourceFilter = sourceFilter.manual || sourceFilter.email || sourceFilter.upload;
 
   const filtered = allRows
-    .filter((r) => r.date >= start && r.date <= end)
+    .filter((r) => fy === "all" || (r.date >= start && r.date <= end))
     .filter((r) => propertyId === "__all__" || r.propertyId === propertyId)
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
     .filter((r) => tenantId === "__all__" || r.tenantId === tenantId)
@@ -196,6 +212,18 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     }, {});
   const deductibleNow = byTaxGroup["Running Expenses"] ?? 0;
 
+  const groups = useMemo(() => {
+    if (groupBy === "none") return null;
+    const map = new Map<string, TxRow[]>();
+    for (const r of filtered) {
+      const key = groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    // Most recent group first, matching the flat (ungrouped) list's own sort order.
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [filtered, groupBy]);
+
   const exportCsv = () => {
     const header = ["Date", "Description", "Category", "Tenant", "Source", "Asset", "Amount"];
     const rows = filtered.map((r) => {
@@ -220,11 +248,22 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
               {fys.map((y) => (
                 <SelectItem key={y} value={y}>
                   FY {y}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No grouping</SelectItem>
+              <SelectItem value="month">By month</SelectItem>
+              <SelectItem value="fy">By financial year</SelectItem>
             </SelectContent>
           </Select>
           {!lockedPropertyId && (
@@ -313,85 +352,26 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Card>
-            {filtered.length === 0 ? (
-              <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                <Receipt className="mx-auto mb-2 h-6 w-6" />
-                No transactions match these filters.
-              </CardContent>
+            {groupBy === "none" || !groups ? (
+              <TxTable rows={filtered} lockedPropertyId={lockedPropertyId} />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-xs text-muted-foreground">
-                      <th className="px-3 py-2 font-medium">Date</th>
-                      <th className="px-3 py-2 font-medium">Description</th>
-                      <th className="px-3 py-2 font-medium">Category</th>
-                      <th className="px-3 py-2 font-medium">Tenant</th>
-                      <th className="px-3 py-2 font-medium">Source</th>
-                      <th className="px-3 py-2 text-right font-medium">Amount</th>
-                      <th className="w-16 px-2 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((r) => {
-                      const prop = state.properties.find((p) => p.id === r.propertyId);
-                      const asset = state.assets.find((a) => a.id === r.assetId);
-                      const label = lockedPropertyId ? undefined : prop?.alias || prop?.address || asset?.name;
-                      const expense = r.expenseId ? state.expenses.find((e) => e.id === r.expenseId) : undefined;
-                      return (
-                        <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="whitespace-nowrap px-3 py-2 text-xs">{r.date}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-1.5 font-medium">
-                              {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
-                              {r.description}
-                            </div>
-                            {label && <div className="text-xs text-muted-foreground">{label}</div>}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground">{r.tenantName ?? "—"}</td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground">{r.source ?? "—"}</td>
-                          <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
-                            {r.amount < 0 ? "−" : "+"}
-                            {fmtCurrency(Math.abs(r.amount))}
-                          </td>
-                          <td className="px-2 py-2">
-                            {expense && (
-                              <div className="flex items-center justify-end gap-0.5">
-                                <ExpenseDialog
-                                  expense={expense}
-                                  trigger={
-                                    <Button size="icon" variant="ghost" className="h-6 w-6">
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                  }
-                                />
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-6 w-6"
-                                  onClick={() => {
-                                    if (confirm(`Delete "${expense.itemName}"?`)) {
-                                      deleteExpense(expense.id);
-                                      toast.success("Transaction removed");
-                                    }
-                                  }}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="space-y-2 p-2">
+                {groups.length === 0 && (
+                  <div className="p-4 text-center text-sm text-muted-foreground">No transactions match these filters.</div>
+                )}
+                {groups.map(([key, groupRows]) => (
+                  <TxGroupSection
+                    key={key}
+                    label={groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
+                    rows={groupRows}
+                    lockedPropertyId={lockedPropertyId}
+                  />
+                ))}
               </div>
             )}
             <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
               <span>
-                {filtered.length} of {allRows.filter((r) => r.date >= start && r.date <= end).length} transactions
+                {filtered.length} of {(fy === "all" ? allRows : allRows.filter((r) => r.date >= start && r.date <= end)).length} transactions
               </span>
               <span>
                 Income <span className="text-emerald-600">{fmtCurrency(totalIncome)}</span> · Expenses{" "}
@@ -404,7 +384,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Summary — FY {fy}</CardTitle>
+              <CardTitle className="text-base">Summary — {fyLabel}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 text-sm">
               <div className="flex justify-between">
@@ -461,6 +441,135 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         </div>
       </div>
     </div>
+  );
+}
+
+function TxTable({ rows, lockedPropertyId }: { rows: TxRow[]; lockedPropertyId?: string }) {
+  const { state, deleteExpense } = useStore();
+  if (rows.length === 0) {
+    return (
+      <div className="p-6 text-center text-sm text-muted-foreground">
+        <Receipt className="mx-auto mb-2 h-6 w-6" />
+        No transactions in this period.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs text-muted-foreground">
+            <th className="px-3 py-2 font-medium">Date</th>
+            <th className="px-3 py-2 font-medium">Description</th>
+            <th className="px-3 py-2 font-medium">Category</th>
+            <th className="px-3 py-2 font-medium">Tenant</th>
+            <th className="px-3 py-2 font-medium">Source</th>
+            <th className="px-3 py-2 text-right font-medium">Amount</th>
+            <th className="w-16 px-2 py-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const prop = state.properties.find((p) => p.id === r.propertyId);
+            const asset = state.assets.find((a) => a.id === r.assetId);
+            const label = lockedPropertyId ? undefined : prop?.alias || prop?.address || asset?.name;
+            const expense = r.expenseId ? state.expenses.find((e) => e.id === r.expenseId) : undefined;
+            return (
+              <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
+                <td className="whitespace-nowrap px-3 py-2 text-xs">{r.date}</td>
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
+                    {r.description}
+                  </div>
+                  {label && <div className="text-xs text-muted-foreground">{label}</div>}
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{r.tenantName ?? "—"}</td>
+                <td className="px-3 py-2 text-xs">
+                  {r.sourceFileData ? (
+                    <a
+                      href={r.sourceFileData}
+                      download={r.sourceFileName || "document.pdf"}
+                      className="inline-flex items-center gap-1 text-primary underline"
+                    >
+                      <FileText className="h-3 w-3 shrink-0" />
+                      <span className="max-w-[140px] truncate">{r.sourceFileName || "Document"}</span>
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">{r.source ?? "—"}</span>
+                  )}
+                </td>
+                <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
+                  {r.amount < 0 ? "−" : "+"}
+                  {fmtCurrency(Math.abs(r.amount))}
+                </td>
+                <td className="px-2 py-2">
+                  {expense && (
+                    <div className="flex items-center justify-end gap-0.5">
+                      <ExpenseDialog
+                        expense={expense}
+                        trigger={
+                          <Button size="icon" variant="ghost" className="h-6 w-6">
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        }
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={() => {
+                          if (confirm(`Delete "${expense.itemName}"?`)) {
+                            deleteExpense(expense.id);
+                            toast.success("Transaction removed");
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TxGroupSection({
+  label,
+  rows,
+  lockedPropertyId,
+}: {
+  label: string;
+  rows: TxRow[];
+  lockedPropertyId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const income = rows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+  const expenses = rows.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
+      <CollapsibleTrigger asChild>
+        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
+          <span className="flex items-center gap-2 font-medium">
+            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {label}
+          </span>
+          <span className="flex gap-3 text-xs text-muted-foreground">
+            <span className="text-emerald-600">Income {fmtCurrency(income)}</span>
+            <span className="text-destructive">Expenses {fmtCurrency(Math.abs(expenses))}</span>
+          </span>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t">
+        <TxTable rows={rows} lockedPropertyId={lockedPropertyId} />
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

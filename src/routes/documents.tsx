@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, FolderOpen } from "lucide-react";
-import { fmtCurrency } from "@/lib/calculations";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { FileText, FolderOpen, ChevronDown, ChevronUp } from "lucide-react";
+import { fmtCurrency, ausFinancialYear, fyRange } from "@/lib/calculations";
 import type { AiIntakeProposal } from "@/lib/types";
 
 export const Route = createFileRoute("/documents")({
@@ -34,9 +35,21 @@ interface DocumentEntry {
     | "Loan Document"
     | "Loan Statement"
     | "Bank Statement"
-    | "Property Sale";
+    | "Property Sale"
+    | "Management Agreement";
+  /** The date this document is anchored to for period filtering/grouping/sorting — the period it
+   * covers when there is one (a statement's periodStart, a lease's start date), not necessarily
+   * when it was added. */
   date: string;
+  /** When the underlying record was actually created — shown as "Date added", separate from
+   * `date` above. Undefined for sources with no created_at wired through yet. */
+  dateAdded?: string;
+  /** Pre-formatted "start → end" (or a single date) for the period this document covers, when
+   * there is one — e.g. a rent statement's billing period, a lease's term. Undefined when a
+   * document has no real period (an ID scan, a condition report). */
+  period?: string;
   propertyId?: string;
+  tenantId?: string;
   label: string;
   amount?: number;
   status?: string;
@@ -44,6 +57,31 @@ interface DocumentEntry {
   fileData?: string;
   subject?: string;
   emailBody?: string;
+}
+
+function formatDocMonthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+}
+
+/** Best-effort period range read off an AI-extracted proposal's payload — the payload union
+ * doesn't share a common shape, so this checks for the fields by name rather than per-kind. */
+function payloadPeriod(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.periodStart === "string" && typeof p.periodEnd === "string") return `${p.periodStart} → ${p.periodEnd}`;
+  if (typeof p.effectiveFrom === "string") return `From ${p.effectiveFrom}`;
+  return undefined;
+}
+
+/** The date this proposal's document actually belongs to (its period/document date), falling
+ * back to when it was uploaded — used for FY filtering/grouping instead of upload date alone. */
+function payloadAnchorDate(payload: unknown, documentDate: string | undefined, createdAt: string | undefined): string {
+  if (payload && typeof payload === "object") {
+    const p = payload as Record<string, unknown>;
+    if (typeof p.periodStart === "string") return p.periodStart;
+  }
+  return documentDate || createdAt?.slice(0, 10) || "";
 }
 
 type FileFormat = "PDF" | "Image" | "Spreadsheet" | "Document" | "Email / web" | "Other";
@@ -147,11 +185,21 @@ function DocumentsPage() {
 export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state } = useStore();
   const [propertyFilter, setPropertyFilter] = useState("__all__");
+  const [tenantId, setTenantId] = useState("__all__");
   const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
   const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
   const [tab, setTab] = useState<"all" | "needsHome">("all");
+  const [fy, setFy] = useState("all");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
   const [query, setQuery] = useState("");
   const propertyId = lockedPropertyId ?? propertyFilter;
+
+  const fys = useMemo(() => {
+    const years: string[] = [];
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
+    return years;
+  }, []);
 
   const entries: DocumentEntry[] = [
     // A tenant's signed lease, ID proof and bond transfer form are entered directly on the
@@ -164,7 +212,10 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
           id: `${t.id}-lease`,
           kind: "Lease Agreement",
           date: t.leaseStart ?? "",
+          dateAdded: t.created_at,
+          period: t.leaseStart ? `${t.leaseStart} → ${t.leaseExpiry || "Periodic"}` : undefined,
           propertyId: t.propertyId,
+          tenantId: t.id,
           label: `${t.name} — lease agreement`,
           fileName: t.leaseDocumentFileName,
           fileData: t.leaseDocumentFileData,
@@ -175,7 +226,9 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
           id: `${t.id}-id`,
           kind: "Tenant Document",
           date: t.leaseStart ?? "",
+          dateAdded: t.created_at,
           propertyId: t.propertyId,
+          tenantId: t.id,
           label: `${t.name} — ID proof`,
           fileName: t.idProofFileName,
           fileData: t.idProofFileData,
@@ -186,7 +239,9 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
           id: `${t.id}-bond`,
           kind: "Tenant Document",
           date: t.bondLodgementDate ?? t.leaseStart ?? "",
+          dateAdded: t.created_at,
           propertyId: t.propertyId,
+          tenantId: t.id,
           label: `${t.name} — bond transfer form`,
           fileName: t.bondTransferFileName,
           fileData: t.bondTransferFileData,
@@ -203,7 +258,10 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
           id: `${h.id}-lease`,
           kind: "Lease Agreement" as const,
           date: h.pastStartDate,
+          dateAdded: h.created_at,
+          period: `${h.pastStartDate} → ${h.pastEndDate}`,
           propertyId: tenant?.propertyId,
+          tenantId: h.tenantId,
           label: `${tenant?.name ?? "Former tenant"} — lease (${h.pastStartDate} to ${h.pastEndDate})`,
           fileName: h.leaseDocumentFileName,
           fileData: h.leaseDocumentFileData,
@@ -217,7 +275,10 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
         id: e.id,
         kind: "Maintenance" as const,
         date: e.date,
+        dateAdded: e.created_at,
+        period: e.periodStart && e.periodEnd ? `${e.periodStart} → ${e.periodEnd}` : undefined,
         propertyId: e.propertyId,
+        tenantId: e.tenantId,
         label: e.itemName,
         amount: e.cost,
         status: e.status,
@@ -233,7 +294,9 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
         id: i.id,
         kind: "Condition Report" as const,
         date: i.date,
+        dateAdded: i.created_at,
         propertyId: i.propertyId,
+        tenantId: i.tenantId,
         label: `${i.type} inspection`,
         fileName: i.fileFileName,
         fileData: i.fileData,
@@ -246,8 +309,11 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
         return {
           id: p.id,
           kind,
-          date: p.created_at?.slice(0, 10) ?? "",
+          date: payloadAnchorDate(p.payload, p.documentDate, p.created_at),
+          dateAdded: p.created_at,
+          period: payloadPeriod(p.payload),
           propertyId: p.propertyId,
+          tenantId: p.matchedTenantId,
           label,
           status: p.status,
           fileName: p.sourceFileName,
@@ -256,6 +322,23 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
           emailBody: p.sourceEmailBody,
         };
       }),
+    // The signed Property Management Agreement on an Agent provider — has nowhere else to live
+    // as a document, and its fee terms are directly tied to a period (start → next review).
+    ...state.providers
+      .filter((p) => p.contractFileData)
+      .map((p) => ({
+        id: `${p.id}-agreement`,
+        kind: "Management Agreement" as const,
+        date: p.contractStartDate ?? p.created_at?.slice(0, 10) ?? "",
+        dateAdded: p.created_at,
+        period: p.contractStartDate
+          ? `${p.contractStartDate} → ${p.contractReviewDate || "ongoing"}`
+          : undefined,
+        propertyId: p.propertyId,
+        label: `${p.name} — management agreement`,
+        fileName: p.contractFileName,
+        fileData: p.contractFileData,
+      })),
   ].sort((a, b) => (a.date < b.date ? 1 : -1));
 
   const needsHome = (d: DocumentEntry) => !d.propertyId;
@@ -265,12 +348,27 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
   const scoped = entries.filter((d) => propertyId === "__all__" || d.propertyId === propertyId);
   const tabbed = tab === "needsHome" ? scoped.filter(needsHome) : scoped;
 
+  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
+
   const filtered = tabbed.filter((d) => {
     if (kind !== "__all__" && d.kind !== kind) return false;
     if (fileFormat !== "__all__" && fileFormatOf(d) !== fileFormat) return false;
-    if (query && !`${d.label} ${d.subject ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+    if (tenantId !== "__all__" && d.tenantId !== tenantId) return false;
+    if (fy !== "all" && !(d.date >= start && d.date <= end)) return false;
+    if (query && !`${d.label} ${d.fileName ?? ""} ${d.subject ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
+
+  const groups = useMemo(() => {
+    if (groupBy === "none") return null;
+    const map = new Map<string, DocumentEntry[]>();
+    for (const d of filtered) {
+      const key = !d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(d);
+    }
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [filtered, groupBy]);
 
   const lastAdded = scoped.reduce<string>((latest, d) => (d.date > latest ? d.date : latest), "");
   const byType = Object.entries(
@@ -330,6 +428,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
                 <SelectItem value="Property Sale">Property sales</SelectItem>
                 <SelectItem value="Maintenance">Maintenance</SelectItem>
                 <SelectItem value="Condition Report">Condition reports</SelectItem>
+                <SelectItem value="Management Agreement">Management agreements</SelectItem>
                 <SelectItem value="Unrecognised">Unrecognised</SelectItem>
               </SelectContent>
             </Select>
@@ -344,6 +443,44 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
                     {f}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={fy} onValueChange={setFy}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                {fys.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    FY {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No grouping</SelectItem>
+                <SelectItem value="month">By month</SelectItem>
+                <SelectItem value="fy">By financial year</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={tenantId} onValueChange={setTenantId}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="All tenants" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All tenants</SelectItem>
+                {state.tenants
+                  .filter((t) => propertyId === "__all__" || t.propertyId === propertyId)
+                  .map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             {!lockedPropertyId && (
@@ -364,38 +501,21 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
           </div>
 
           <Card>
-            {filtered.length === 0 ? (
-              <CardContent className="p-6 text-center text-sm text-muted-foreground">
-                <FolderOpen className="mx-auto mb-2 h-6 w-6" />
-                No documents match these filters.
-              </CardContent>
+            {groupBy === "none" || !groups ? (
+              <DocTable rows={filtered} lockedPropertyId={lockedPropertyId} />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-xs text-muted-foreground">
-                      <th className="px-3 py-2 font-medium">Name</th>
-                      <th className="px-3 py-2 font-medium">Type</th>
-                      <th className="px-3 py-2 font-medium">Size</th>
-                      <th className="px-3 py-2 font-medium">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((d) => {
-                      const property = state.properties.find((p) => p.id === d.propertyId);
-                      return (
-                        <tr key={`${d.kind}-${d.id}`} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="px-3 py-2">
-                            <DocumentNameCell d={d} showProperty={!lockedPropertyId} property={property} />
-                          </td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground">{d.kind}</td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground">{estimateFileSize(d.fileData)}</td>
-                          <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.date || "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="space-y-2 p-2">
+                {groups.length === 0 && (
+                  <div className="p-4 text-center text-sm text-muted-foreground">No documents match these filters.</div>
+                )}
+                {groups.map(([key, groupRows]) => (
+                  <DocGroupSection
+                    key={key}
+                    label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatDocMonthLabel(key) : `FY ${key}`}
+                    rows={groupRows}
+                    lockedPropertyId={lockedPropertyId}
+                  />
+                ))}
               </div>
             )}
             <div className="border-t px-3 py-2 text-xs text-muted-foreground">
@@ -447,6 +567,79 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
   );
 }
 
+function DocTable({ rows, lockedPropertyId }: { rows: DocumentEntry[]; lockedPropertyId?: string }) {
+  const { state } = useStore();
+  if (rows.length === 0) {
+    return (
+      <div className="p-6 text-center text-sm text-muted-foreground">
+        <FolderOpen className="mx-auto mb-2 h-6 w-6" />
+        No documents in this period.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs text-muted-foreground">
+            <th className="px-3 py-2 font-medium">Name</th>
+            <th className="px-3 py-2 font-medium">Type</th>
+            <th className="px-3 py-2 font-medium">Period</th>
+            <th className="px-3 py-2 font-medium">Date added</th>
+            <th className="px-3 py-2 font-medium">Size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d) => {
+            const property = state.properties.find((p) => p.id === d.propertyId);
+            return (
+              <tr key={`${d.kind}-${d.id}`} className="border-b last:border-0 hover:bg-muted/30">
+                <td className="px-3 py-2">
+                  <DocumentNameCell d={d} showProperty={!lockedPropertyId} property={property} />
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{d.kind}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.period ?? d.date ?? "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.dateAdded?.slice(0, 10) ?? "—"}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{estimateFileSize(d.fileData)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DocGroupSection({
+  label,
+  rows,
+  lockedPropertyId,
+}: {
+  label: string;
+  rows: DocumentEntry[];
+  lockedPropertyId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
+      <CollapsibleTrigger asChild>
+        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
+          <span className="flex items-center gap-2 font-medium">
+            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {label}
+          </span>
+          <Badge variant="outline" className="font-normal">
+            {rows.length} document{rows.length === 1 ? "" : "s"}
+          </Badge>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t">
+        <DocTable rows={rows} lockedPropertyId={lockedPropertyId} />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function DocumentNameCell({
   d,
   showProperty,
@@ -457,13 +650,15 @@ function DocumentNameCell({
   property?: { alias?: string; address: string };
 }) {
   const [showEmail, setShowEmail] = useState(false);
+  const primaryName = d.fileName || d.label;
+  const showLabelSubtitle = !!d.fileName && !!d.label && d.label !== d.fileName;
 
   const inner = (
     <div className="flex items-center gap-2">
       <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5 font-medium">
-          <span className="truncate">{d.label}</span>
+          <span className="truncate">{primaryName}</span>
           {d.amount !== undefined && <span className="font-normal text-muted-foreground">{fmtCurrency(d.amount)}</span>}
           {d.status && (
             <Badge variant="secondary" className="font-normal">
@@ -471,6 +666,7 @@ function DocumentNameCell({
             </Badge>
           )}
         </div>
+        {showLabelSubtitle && <div className="truncate text-xs text-muted-foreground">{d.label}</div>}
         {showProperty && property && (
           <div className="truncate text-xs text-muted-foreground">{property.alias || property.address}</div>
         )}

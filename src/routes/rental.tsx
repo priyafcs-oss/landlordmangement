@@ -65,7 +65,7 @@ import type { Tenant, Property } from "@/lib/types";
 import { toast } from "sonner";
 import { MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import jsPDF from "jspdf";
-import { downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
+import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
 import { supabase } from "@/integrations/supabase/client";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
@@ -690,6 +690,22 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     toast.success(`Posted ${fmtCurrency(val)} — paid-up date recalculated (${daysCovered} days).`);
   };
 
+  /** Emails a short "rent received" confirmation — the just-entered payment amount/date if the
+   * landlord has typed one in, otherwise the most recent actual payment on this tenant's ledger.
+   * Always states the authoritative, store-recalculated paidUpToDate rather than anything
+   * computed locally, so it can never say something the ledger itself doesn't back up. */
+  const emailRentReceived = () => {
+    if (!tenant.email) return toast.error("This tenant has no email on file");
+    const typedAmount = parseFloat(amount);
+    const lastPayment = rows.filter((r) => r.credit > 0).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    const receivedAmount = typedAmount > 0 ? typedAmount : lastPayment?.credit;
+    const receivedDate = typedAmount > 0 ? paymentDate : lastPayment?.date;
+    if (!receivedAmount) return toast.error("No rent payment to reference — enter an amount or post a payment first");
+    const subject = `Rent received — ${propertyAddress || "your rental"}`;
+    const body = `Hi ${tenant.name},\n\nWe've received your rent payment of ${fmtCurrency(receivedAmount)}${receivedDate ? ` on ${receivedDate}` : ""}.\n\nYou are now paid up to ${tenant.paidUpToDate}.\n\nThanks`;
+    openGmailCompose(tenant.email, subject, body);
+  };
+
   const removeRow = (row: LedgerRow) => {
     if (row.invoiceId) {
       deleteInvoice(row.invoiceId);
@@ -763,6 +779,9 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
           </div>
           <Button onClick={postPayment}>Post Payment</Button>
           <AdjustmentDialog tenant={tenant} />
+          <Button variant="outline" className="gap-1" onClick={emailRentReceived} disabled={!tenant.email}>
+            <Mail className="h-4 w-4" /> Email Tenant
+          </Button>
         </div>
 
         <div className="flex flex-wrap items-end gap-2">

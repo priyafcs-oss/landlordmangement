@@ -624,6 +624,8 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         debit: 0,
         credit: tx.amount,
         source: "rent_statement",
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
       });
     });
     expenseLines.forEach((e, i) => {

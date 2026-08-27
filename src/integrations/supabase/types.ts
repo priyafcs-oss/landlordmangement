@@ -620,6 +620,8 @@ export type Database = {
           manual: boolean | null
           newPaidUpToDate: string | null
           source: string | null
+          sourceFileData: string | null
+          sourceFileName: string | null
           tenantId: string
           type: string
         }
@@ -635,6 +637,8 @@ export type Database = {
           manual?: boolean | null
           newPaidUpToDate?: string | null
           source?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
           tenantId: string
           type?: string
         }
@@ -650,6 +654,8 @@ export type Database = {
           manual?: boolean | null
           newPaidUpToDate?: string | null
           source?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
           tenantId?: string
           type?: string
         }
