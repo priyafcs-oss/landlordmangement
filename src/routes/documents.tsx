@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, Mail, FolderOpen } from "lucide-react";
+import { FileText, FolderOpen } from "lucide-react";
 import { fmtCurrency } from "@/lib/calculations";
 import type { AiIntakeProposal } from "@/lib/types";
 
@@ -47,19 +46,34 @@ interface DocumentEntry {
   emailBody?: string;
 }
 
-/** Groups the flat entry list into labelled sections so a growing pile of paperwork stays
- * scannable instead of one long undifferentiated feed — order here is the display order. */
-const DOCUMENT_GROUPS: { label: string; kinds: DocumentEntry["kind"][] }[] = [
-  { label: "Leases & Tenant Documents", kinds: ["Lease Agreement", "Tenant Document"] },
-  { label: "Rent Statements", kinds: ["Rent Statement"] },
-  { label: "Property & Compliance", kinds: ["Property Document"] },
-  { label: "Loans", kinds: ["Loan Document", "Loan Statement"] },
-  { label: "Depreciation & Cost Base", kinds: ["Depreciation Report"] },
-  { label: "Maintenance & Condition Reports", kinds: ["Maintenance", "Condition Report"] },
-  { label: "Bank Statements", kinds: ["Bank Statement"] },
-  { label: "Property Sale", kinds: ["Property Sale"] },
-  { label: "Unrecognised", kinds: ["Unrecognised"] },
-];
+type FileFormat = "PDF" | "Image" | "Spreadsheet" | "Document" | "Email / web" | "Other";
+const FILE_FORMATS: FileFormat[] = ["PDF", "Image", "Spreadsheet", "Document", "Email / web", "Other"];
+
+/** File format is inferred from the extension since nothing stores it explicitly — falls back to
+ * "Email / web" for an entry that only ever carried the source email (no attachment), and "Other"
+ * for an unrecognised extension that still has an actual file attached. */
+function fileFormatOf(d: Pick<DocumentEntry, "fileName" | "fileData" | "emailBody">): FileFormat | undefined {
+  if (d.fileData) {
+    const ext = d.fileName?.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "pdf") return "PDF";
+    if (["png", "jpg", "jpeg", "gif", "webp", "heic"].includes(ext)) return "Image";
+    if (["xls", "xlsx", "csv"].includes(ext)) return "Spreadsheet";
+    if (["doc", "docx"].includes(ext)) return "Document";
+    return "Other";
+  }
+  if (d.emailBody) return "Email / web";
+  return undefined;
+}
+
+/** Rough size from the base64 payload — nothing stores an actual byte count. */
+function estimateFileSize(dataUrl?: string): string {
+  if (!dataUrl) return "—";
+  const base64 = dataUrl.includes(",") ? dataUrl.slice(dataUrl.indexOf(",") + 1) : dataUrl;
+  const bytes = (base64.length * 3) / 4;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["kind"] {
   switch (kind) {
@@ -134,6 +148,8 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
   const { state } = useStore();
   const [propertyFilter, setPropertyFilter] = useState("__all__");
   const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
+  const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
+  const [tab, setTab] = useState<"all" | "needsHome">("all");
   const [query, setQuery] = useState("");
   const propertyId = lockedPropertyId ?? propertyFilter;
 
@@ -242,143 +258,249 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
       }),
   ].sort((a, b) => (a.date < b.date ? 1 : -1));
 
-  const filtered = entries.filter((d) => {
-    if (propertyId !== "__all__" && d.propertyId !== propertyId) return false;
+  const needsHome = (d: DocumentEntry) => !d.propertyId;
+  // Scoped to the property picker only (not Type/File/search) — mirrors the reference design,
+  // where the Insights panel and tab counts describe everything filed here, not the current
+  // working filter on the table below.
+  const scoped = entries.filter((d) => propertyId === "__all__" || d.propertyId === propertyId);
+  const tabbed = tab === "needsHome" ? scoped.filter(needsHome) : scoped;
+
+  const filtered = tabbed.filter((d) => {
     if (kind !== "__all__" && d.kind !== kind) return false;
+    if (fileFormat !== "__all__" && fileFormatOf(d) !== fileFormat) return false;
     if (query && !`${d.label} ${d.subject ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
 
+  const lastAdded = scoped.reduce<string>((latest, d) => (d.date > latest ? d.date : latest), "");
+  const byType = Object.entries(
+    scoped.reduce<Record<string, number>>((acc, d) => {
+      acc[d.kind] = (acc[d.kind] ?? 0) + 1;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const maxByType = Math.max(1, ...byType.map(([, count]) => count));
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Search…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="max-w-[220px]"
-        />
-        <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All types</SelectItem>
-            <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
-            <SelectItem value="Tenant Document">Tenant documents (ID, bond)</SelectItem>
-            <SelectItem value="Rent Statement">Rent statements</SelectItem>
-            <SelectItem value="Property Document">Property documents</SelectItem>
-            <SelectItem value="Depreciation Report">Depreciation reports</SelectItem>
-            <SelectItem value="Loan Document">Loan documents</SelectItem>
-            <SelectItem value="Loan Statement">Loan statements</SelectItem>
-            <SelectItem value="Bank Statement">Bank statements</SelectItem>
-            <SelectItem value="Property Sale">Property sales</SelectItem>
-            <SelectItem value="Maintenance">Maintenance</SelectItem>
-            <SelectItem value="Condition Report">Condition reports</SelectItem>
-            <SelectItem value="Unrecognised">Unrecognised</SelectItem>
-          </SelectContent>
-        </Select>
-        {!lockedPropertyId && (
-          <Select value={propertyFilter} onValueChange={setPropertyFilter}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="All properties" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All properties</SelectItem>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.alias || p.address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setTab("all")}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            tab === "all" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
+          }`}
+        >
+          All ({scoped.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("needsHome")}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            tab === "needsHome" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
+          }`}
+        >
+          Needs a home ({scoped.filter(needsHome).length})
+        </button>
       </div>
 
-      <div className="space-y-6">
-        {filtered.length === 0 && (
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="space-y-3 lg:col-span-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Search documents…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="max-w-[220px]"
+            />
+            <Select value={kind} onValueChange={(v) => setKind(v as typeof kind)}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All types</SelectItem>
+                <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
+                <SelectItem value="Tenant Document">Tenant documents (ID, bond)</SelectItem>
+                <SelectItem value="Rent Statement">Rent statements</SelectItem>
+                <SelectItem value="Property Document">Property documents</SelectItem>
+                <SelectItem value="Depreciation Report">Depreciation reports</SelectItem>
+                <SelectItem value="Loan Document">Loan documents</SelectItem>
+                <SelectItem value="Loan Statement">Loan statements</SelectItem>
+                <SelectItem value="Bank Statement">Bank statements</SelectItem>
+                <SelectItem value="Property Sale">Property sales</SelectItem>
+                <SelectItem value="Maintenance">Maintenance</SelectItem>
+                <SelectItem value="Condition Report">Condition reports</SelectItem>
+                <SelectItem value="Unrecognised">Unrecognised</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={fileFormat} onValueChange={(v) => setFileFormat(v as typeof fileFormat)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="File" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All files</SelectItem>
+                {FILE_FORMATS.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!lockedPropertyId && (
+              <Select value={propertyFilter} onValueChange={setPropertyFilter}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="All properties" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All properties</SelectItem>
+                  {state.properties.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.alias || p.address}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
           <Card>
-            <CardContent className="p-6 text-center text-sm text-muted-foreground">
-              <FolderOpen className="mx-auto mb-2 h-6 w-6" />
-              No documents match these filters.
+            {filtered.length === 0 ? (
+              <CardContent className="p-6 text-center text-sm text-muted-foreground">
+                <FolderOpen className="mx-auto mb-2 h-6 w-6" />
+                No documents match these filters.
+              </CardContent>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Name</th>
+                      <th className="px-3 py-2 font-medium">Type</th>
+                      <th className="px-3 py-2 font-medium">Size</th>
+                      <th className="px-3 py-2 font-medium">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((d) => {
+                      const property = state.properties.find((p) => p.id === d.propertyId);
+                      return (
+                        <tr key={`${d.kind}-${d.id}`} className="border-b last:border-0 hover:bg-muted/30">
+                          <td className="px-3 py-2">
+                            <DocumentNameCell d={d} showProperty={!lockedPropertyId} property={property} />
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{d.kind}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{estimateFileSize(d.fileData)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.date || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+              {filtered.length} of {tabbed.length} document{tabbed.length === 1 ? "" : "s"}
+            </div>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Documents</CardTitle>
+              <div className="text-xs text-muted-foreground">
+                {lockedPropertyId ? "Filed for this property" : "Filed across your portfolio"}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="text-2xl font-semibold tracking-tight">{scoped.length}</div>
+              <div className="flex items-center justify-between border-t pt-3">
+                <span className="text-muted-foreground">Last added</span>
+                <span className="font-medium">{lastAdded || "—"}</span>
+              </div>
             </CardContent>
           </Card>
-        )}
-        {DOCUMENT_GROUPS.map((group) => {
-          const rows = filtered.filter((d) => group.kinds.includes(d.kind));
-          if (rows.length === 0) return null;
-          return (
-            <div key={group.label} className="space-y-2">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {group.label}
-                <Badge variant="outline" className="font-normal">
-                  {rows.length}
-                </Badge>
-              </div>
-              {rows.map((d) => {
-                const property = state.properties.find((p) => p.id === d.propertyId);
-                return (
-                  <Card key={`${d.kind}-${d.id}`}>
-                    <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">{d.kind}</Badge>
-                          <span className="font-medium">{d.label}</span>
-                          {d.amount !== undefined && <span className="text-muted-foreground">{fmtCurrency(d.amount)}</span>}
-                          {d.status && <Badge variant="secondary">{d.status}</Badge>}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {d.date || "—"} {!lockedPropertyId && property && `• ${property.alias || property.address}`}
-                        </div>
-                      </div>
-                      <DocumentLinks fileName={d.fileName} fileData={d.fileData} subject={d.subject} emailBody={d.emailBody} />
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          );
-        })}
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">By type</CardTitle>
+              <div className="text-xs text-muted-foreground">Documents by category</div>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {byType.length === 0 && <div className="text-xs text-muted-foreground">No documents yet.</div>}
+              {byType.map(([k, count]) => (
+                <div key={k}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{k}</span>
+                    <span className="font-medium">{count}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
+                    <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${(count / maxByType) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
 }
 
-function DocumentLinks({
-  fileName,
-  fileData,
-  subject,
-  emailBody,
+function DocumentNameCell({
+  d,
+  showProperty,
+  property,
 }: {
-  fileName?: string;
-  fileData?: string;
-  subject?: string;
-  emailBody?: string;
+  d: DocumentEntry;
+  showProperty: boolean;
+  property?: { alias?: string; address: string };
 }) {
   const [showEmail, setShowEmail] = useState(false);
-  if (!fileData && !emailBody) return <span className="text-xs text-muted-foreground">No document attached</span>;
-  return (
-    <div className="flex flex-wrap items-center gap-3 text-xs">
-      {fileData && (
-        <a href={fileData} download={fileName || "document.pdf"} className="inline-flex items-center gap-1 text-primary underline">
-          <FileText className="h-3 w-3" /> View file
-        </a>
-      )}
-      {emailBody && (
-        <>
-          <button type="button" onClick={() => setShowEmail(true)} className="inline-flex items-center gap-1 text-primary underline">
-            <Mail className="h-3 w-3" /> View email
-          </button>
-          <Dialog open={showEmail} onOpenChange={setShowEmail}>
-            <DialogContent className="max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>{subject || "Email"}</DialogTitle>
-              </DialogHeader>
-              <pre className="whitespace-pre-wrap text-xs">{emailBody}</pre>
-            </DialogContent>
-          </Dialog>
-        </>
-      )}
+
+  const inner = (
+    <div className="flex items-center gap-2">
+      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5 font-medium">
+          <span className="truncate">{d.label}</span>
+          {d.amount !== undefined && <span className="font-normal text-muted-foreground">{fmtCurrency(d.amount)}</span>}
+          {d.status && (
+            <Badge variant="secondary" className="font-normal">
+              {d.status}
+            </Badge>
+          )}
+        </div>
+        {showProperty && property && (
+          <div className="truncate text-xs text-muted-foreground">{property.alias || property.address}</div>
+        )}
+      </div>
     </div>
   );
+
+  if (d.fileData) {
+    return (
+      <a href={d.fileData} download={d.fileName || "document.pdf"} className="inline-flex items-center hover:underline">
+        {inner}
+      </a>
+    );
+  }
+  if (d.emailBody) {
+    return (
+      <>
+        <button type="button" onClick={() => setShowEmail(true)} className="inline-flex items-center text-left hover:underline">
+          {inner}
+        </button>
+        <Dialog open={showEmail} onOpenChange={setShowEmail}>
+          <DialogContent className="max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{d.subject || "Email"}</DialogTitle>
+            </DialogHeader>
+            <pre className="whitespace-pre-wrap text-xs">{d.emailBody}</pre>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+  return inner;
 }
