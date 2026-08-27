@@ -8,7 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -23,7 +25,7 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, EXPENSE_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
+import { fmtCurrency, todayISO, CATEGORY_GROUPS, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -80,7 +82,7 @@ interface LineItemRow {
 const blankLineItem = (): LineItemRow => ({
   key: uid("li"),
   description: "",
-  category: "Other",
+  category: "Sundry Rental Expenses",
   direction: "Expense",
   amount: "",
   gst: "",
@@ -341,7 +343,7 @@ export function AddTransactionDialog({
         if (li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1) {
           addInvoice({
             tenantId: li.tenantId,
-            chargeType: billTypeToChargeType(li.category === "Water" ? "Water" : "Other"),
+            chargeType: billTypeToChargeType(li.category === "Water Charges" ? "Water" : "Other"),
             amountDue: amount,
             dateIssued: todayISO(),
             dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
@@ -570,10 +572,15 @@ export function AddTransactionDialog({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {EXPENSE_CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
+                          {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
+                            <SelectGroup key={group}>
+                              <SelectLabel>{group}</SelectLabel>
+                              {categories.map((c) => (
+                                <SelectItem key={c} value={c}>
+                                  {c}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
                           ))}
                         </SelectContent>
                       </Select>

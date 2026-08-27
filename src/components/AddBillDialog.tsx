@@ -8,7 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -23,13 +25,21 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, billTypeToChargeType, ANNUAL_COST_FIELD } from "@/lib/calculations";
+import {
+  fmtCurrency,
+  todayISO,
+  billTypeToChargeType,
+  billTypeToDefaultCategory,
+  expenseCategoryToTaxCategory,
+  ANNUAL_COST_FIELD,
+  CATEGORY_GROUPS,
+} from "@/lib/calculations";
 import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
-import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider } from "@/lib/types";
+import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
@@ -136,7 +146,7 @@ export function AddBillDialog({
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? "",
     billType: "Water" as BillType,
-    taxCategory: "Immediate Deduction" as "Immediate Deduction" | "Capital Works",
+    category: billTypeToDefaultCategory("Water") as ExpenseCategory,
     providerName: "",
     portalUrl: "",
     portalUsername: "",
@@ -207,6 +217,7 @@ export function AddBillDialog({
       sourceFileData: sourceFileData ?? f.sourceFileData,
       propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
       billType: mapBillType(data.bill_category),
+      category: billTypeToDefaultCategory(mapBillType(data.bill_category)),
       providerName: data.vendor ?? f.providerName,
       dueDate: data.due_date ?? f.dueDate,
       bpayBillerCode: data.bpay_biller_code ?? f.bpayBillerCode,
@@ -269,7 +280,10 @@ export function AddBillDialog({
     setForm((f) => ({
       ...f,
       propertyId: initialProposal.propertyId ?? f.propertyId,
-      taxCategory: payload.atoCategory,
+      // atoCategory is only the coarse two-value AI guess — "Capital Works" nudges the default
+      // toward the Cost Base group, otherwise the billType-derived default from applyExtracted
+      // above (already applied to `f`) stands; the landlord still reviews/edits before saving.
+      category: payload.atoCategory === "Capital Works" ? "Capital Improvement" : f.category,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProposal?.id]);
@@ -420,7 +434,8 @@ export function AddBillDialog({
     const shared = {
       propertyId,
       billType: form.billType,
-      taxCategory: form.taxCategory,
+      category: form.category,
+      taxCategory: expenseCategoryToTaxCategory(form.category),
       status: "Unpaid" as const,
       providerName: form.providerName.trim(),
       referenceNumber: form.referenceNumber || undefined,
@@ -709,17 +724,25 @@ export function AddBillDialog({
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="Tax category">
+              <Field label="Category">
                 <Select
-                  value={form.taxCategory}
-                  onValueChange={(v) => setForm((f) => ({ ...f, taxCategory: v as typeof f.taxCategory }))}
+                  value={form.category}
+                  onValueChange={(v) => setForm((f) => ({ ...f, category: v as ExpenseCategory }))}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Immediate Deduction">Immediate Deduction</SelectItem>
-                    <SelectItem value="Capital Works">Capital Works</SelectItem>
+                    {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
+                      <SelectGroup key={group}>
+                        <SelectLabel>{group}</SelectLabel>
+                        {categories.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {c}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
                   </SelectContent>
                 </Select>
               </Field>

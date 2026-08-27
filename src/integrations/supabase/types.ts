@@ -10,19 +10,48 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.17"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
       ai_intake_proposals: {
         Row: {
+          addressedTo: string | null
           created_at: string
+          documentDate: string | null
           emailMessageId: string | null
           id: string
           kind: string
+          matchedLoanId: string | null
           matchedTenantId: string | null
           payload: Json
           propertyId: string | null
+          providerName: string | null
           rawPropertyAddress: string | null
           reviewReason: string | null
           sourceEmailBody: string | null
@@ -32,13 +61,17 @@ export type Database = {
           status: string
         }
         Insert: {
+          addressedTo?: string | null
           created_at?: string
+          documentDate?: string | null
           emailMessageId?: string | null
           id: string
           kind: string
+          matchedLoanId?: string | null
           matchedTenantId?: string | null
           payload: Json
           propertyId?: string | null
+          providerName?: string | null
           rawPropertyAddress?: string | null
           reviewReason?: string | null
           sourceEmailBody?: string | null
@@ -48,13 +81,17 @@ export type Database = {
           status?: string
         }
         Update: {
+          addressedTo?: string | null
           created_at?: string
+          documentDate?: string | null
           emailMessageId?: string | null
           id?: string
           kind?: string
+          matchedLoanId?: string | null
           matchedTenantId?: string | null
           payload?: Json
           propertyId?: string | null
+          providerName?: string | null
           rawPropertyAddress?: string | null
           reviewReason?: string | null
           sourceEmailBody?: string | null
@@ -71,6 +108,7 @@ export type Database = {
           id: string
           landlordProfile: Json
           leaseTemplate: Json | null
+          reportHistory: Json | null
           tenantInfoStatement: Json | null
           updated_at: string
         }
@@ -79,6 +117,7 @@ export type Database = {
           id: string
           landlordProfile?: Json
           leaseTemplate?: Json | null
+          reportHistory?: Json | null
           tenantInfoStatement?: Json | null
           updated_at?: string
         }
@@ -87,28 +126,285 @@ export type Database = {
           id?: string
           landlordProfile?: Json
           leaseTemplate?: Json | null
+          reportHistory?: Json | null
           tenantInfoStatement?: Json | null
           updated_at?: string
         }
         Relationships: []
       }
+      assets: {
+        Row: {
+          assetType: string
+          created_at: string
+          currentValue: number
+          id: string
+          linkedPropertyId: string | null
+          name: string
+          notes: string | null
+          ownerEntityId: string | null
+          purchaseCost: number | null
+          purchaseDate: string | null
+          status: string
+          tags: string[] | null
+          updated_at: string
+          valuationDate: string | null
+        }
+        Insert: {
+          assetType: string
+          created_at?: string
+          currentValue?: number
+          id: string
+          linkedPropertyId?: string | null
+          name: string
+          notes?: string | null
+          ownerEntityId?: string | null
+          purchaseCost?: number | null
+          purchaseDate?: string | null
+          status?: string
+          tags?: string[] | null
+          updated_at?: string
+          valuationDate?: string | null
+        }
+        Update: {
+          assetType?: string
+          created_at?: string
+          currentValue?: number
+          id?: string
+          linkedPropertyId?: string | null
+          name?: string
+          notes?: string | null
+          ownerEntityId?: string | null
+          purchaseCost?: number | null
+          purchaseDate?: string | null
+          status?: string
+          tags?: string[] | null
+          updated_at?: string
+          valuationDate?: string | null
+        }
+        Relationships: []
+      }
+      buffers: {
+        Row: {
+          created_at: string
+          currentBalance: number
+          id: string
+          label: string
+          scopeId: string | null
+          scopeType: string
+          targetAmount: number | null
+          targetMonths: number | null
+        }
+        Insert: {
+          created_at?: string
+          currentBalance?: number
+          id: string
+          label?: string
+          scopeId?: string | null
+          scopeType?: string
+          targetAmount?: number | null
+          targetMonths?: number | null
+        }
+        Update: {
+          created_at?: string
+          currentBalance?: number
+          id?: string
+          label?: string
+          scopeId?: string | null
+          scopeType?: string
+          targetAmount?: number | null
+          targetMonths?: number | null
+        }
+        Relationships: []
+      }
+      depreciation_items: {
+        Row: {
+          assetId: string
+          created_at: string
+          description: string
+          division: string | null
+          effectiveFrom: string | null
+          effectiveLifeYears: number
+          id: string
+          method: string | null
+          purchaseCost: number
+          purchaseDate: string | null
+          quantitySurveyor: string | null
+          reportDate: string | null
+          reportId: string | null
+          reportReference: string | null
+          sourceFileData: string | null
+          sourceFileName: string | null
+        }
+        Insert: {
+          assetId: string
+          created_at?: string
+          description: string
+          division?: string | null
+          effectiveFrom?: string | null
+          effectiveLifeYears?: number
+          id: string
+          method?: string | null
+          purchaseCost?: number
+          purchaseDate?: string | null
+          quantitySurveyor?: string | null
+          reportDate?: string | null
+          reportId?: string | null
+          reportReference?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
+        }
+        Update: {
+          assetId?: string
+          created_at?: string
+          description?: string
+          division?: string | null
+          effectiveFrom?: string | null
+          effectiveLifeYears?: number
+          id?: string
+          method?: string | null
+          purchaseCost?: number
+          purchaseDate?: string | null
+          quantitySurveyor?: string | null
+          reportDate?: string | null
+          reportId?: string | null
+          reportReference?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
+        }
+        Relationships: []
+      }
+      email_inbox_log: {
+        Row: {
+          attachmentFileName: string | null
+          billId: string | null
+          created_at: string
+          documentType: string | null
+          emailId: string | null
+          errorMessage: string | null
+          fromAddress: string | null
+          hasAttachment: boolean
+          id: string
+          proposalId: string | null
+          status: string
+          subject: string | null
+        }
+        Insert: {
+          attachmentFileName?: string | null
+          billId?: string | null
+          created_at?: string
+          documentType?: string | null
+          emailId?: string | null
+          errorMessage?: string | null
+          fromAddress?: string | null
+          hasAttachment?: boolean
+          id: string
+          proposalId?: string | null
+          status: string
+          subject?: string | null
+        }
+        Update: {
+          attachmentFileName?: string | null
+          billId?: string | null
+          created_at?: string
+          documentType?: string | null
+          emailId?: string | null
+          errorMessage?: string | null
+          fromAddress?: string | null
+          hasAttachment?: boolean
+          id?: string
+          proposalId?: string | null
+          status?: string
+          subject?: string | null
+        }
+        Relationships: []
+      }
+      entities: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          notes: string | null
+          owners: Json
+          type: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          name: string
+          notes?: string | null
+          owners?: Json
+          type?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          notes?: string | null
+          owners?: Json
+          type?: string
+        }
+        Relationships: []
+      }
+      etf_details: {
+        Row: {
+          assetId: string
+          avgCostPerUnit: number | null
+          created_at: string
+          exchange: string | null
+          ticker: string | null
+          unitsHeld: number | null
+        }
+        Insert: {
+          assetId: string
+          avgCostPerUnit?: number | null
+          created_at?: string
+          exchange?: string | null
+          ticker?: string | null
+          unitsHeld?: number | null
+        }
+        Update: {
+          assetId?: string
+          avgCostPerUnit?: number | null
+          created_at?: string
+          exchange?: string | null
+          ticker?: string | null
+          unitsHeld?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etf_details_assetId_fkey"
+            columns: ["assetId"]
+            isOneToOne: true
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expenses: {
         Row: {
+          assetId: string | null
           bpayBillerCode: string | null
           bpayReference: string | null
+          category: string | null
           cost: number
           created_at: string
           date: string
+          direction: string | null
           emailMessageId: string | null
           hasWarranty: boolean
           id: string
           invoiceFileData: string | null
           invoiceFileName: string | null
           itemName: string
+          notes: string | null
           paidDate: string | null
+          periodEnd: string | null
+          periodStart: string | null
           propertyId: string | null
           rawPropertyAddress: string | null
+          recharged: boolean
           rechargeToTenant: boolean
+          referenceNumber: string | null
           reviewReason: string | null
           source: string
           sourceEmailBody: string | null
@@ -119,21 +415,29 @@ export type Database = {
           warrantyExpiry: string | null
         }
         Insert: {
+          assetId?: string | null
           bpayBillerCode?: string | null
           bpayReference?: string | null
+          category?: string | null
           cost?: number
           created_at?: string
           date?: string
+          direction?: string | null
           emailMessageId?: string | null
           hasWarranty?: boolean
           id: string
           invoiceFileData?: string | null
           invoiceFileName?: string | null
           itemName?: string
+          notes?: string | null
           paidDate?: string | null
+          periodEnd?: string | null
+          periodStart?: string | null
           propertyId?: string | null
           rawPropertyAddress?: string | null
+          recharged?: boolean
           rechargeToTenant?: boolean
+          referenceNumber?: string | null
           reviewReason?: string | null
           source?: string
           sourceEmailBody?: string | null
@@ -144,21 +448,29 @@ export type Database = {
           warrantyExpiry?: string | null
         }
         Update: {
+          assetId?: string | null
           bpayBillerCode?: string | null
           bpayReference?: string | null
+          category?: string | null
           cost?: number
           created_at?: string
           date?: string
+          direction?: string | null
           emailMessageId?: string | null
           hasWarranty?: boolean
           id?: string
           invoiceFileData?: string | null
           invoiceFileName?: string | null
           itemName?: string
+          notes?: string | null
           paidDate?: string | null
+          periodEnd?: string | null
+          periodStart?: string | null
           propertyId?: string | null
           rawPropertyAddress?: string | null
+          recharged?: boolean
           rechargeToTenant?: boolean
+          referenceNumber?: string | null
           reviewReason?: string | null
           source?: string
           sourceEmailBody?: string | null
@@ -169,6 +481,38 @@ export type Database = {
           warrantyExpiry?: string | null
         }
         Relationships: []
+      }
+      gold_details: {
+        Row: {
+          assetId: string
+          created_at: string
+          form: string | null
+          gramsHeld: number | null
+          storageLocation: string | null
+        }
+        Insert: {
+          assetId: string
+          created_at?: string
+          form?: string | null
+          gramsHeld?: number | null
+          storageLocation?: string | null
+        }
+        Update: {
+          assetId?: string
+          created_at?: string
+          form?: string | null
+          gramsHeld?: number | null
+          storageLocation?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gold_details_assetId_fkey"
+            columns: ["assetId"]
+            isOneToOne: true
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inspections: {
         Row: {
@@ -311,8 +655,33 @@ export type Database = {
         }
         Relationships: []
       }
+      loan_balance_snapshots: {
+        Row: {
+          balance: number
+          created_at: string
+          date: string
+          id: string
+          loanId: string
+        }
+        Insert: {
+          balance: number
+          created_at?: string
+          date: string
+          id: string
+          loanId: string
+        }
+        Update: {
+          balance?: number
+          created_at?: string
+          date?: string
+          id?: string
+          loanId?: string
+        }
+        Relationships: []
+      }
       loans: {
         Row: {
+          assetId: string | null
           bankName: string
           created_at: string
           dueDayOfMonth: number | null
@@ -321,11 +690,13 @@ export type Database = {
           isDirectDebit: boolean | null
           linkedBankAccount: string | null
           monthlyEmi: number
+          offsetBalance: number | null
           propertyId: string
           status: string | null
           totalBalance: number
         }
         Insert: {
+          assetId?: string | null
           bankName?: string
           created_at?: string
           dueDayOfMonth?: number | null
@@ -334,11 +705,13 @@ export type Database = {
           isDirectDebit?: boolean | null
           linkedBankAccount?: string | null
           monthlyEmi?: number
+          offsetBalance?: number | null
           propertyId: string
           status?: string | null
           totalBalance?: number
         }
         Update: {
+          assetId?: string | null
           bankName?: string
           created_at?: string
           dueDayOfMonth?: number | null
@@ -347,6 +720,7 @@ export type Database = {
           isDirectDebit?: boolean | null
           linkedBankAccount?: string | null
           monthlyEmi?: number
+          offsetBalance?: number | null
           propertyId?: string
           status?: string | null
           totalBalance?: number
@@ -411,20 +785,35 @@ export type Database = {
         Row: {
           address: string
           alias: string | null
+          assetId: string | null
+          bathrooms: number | null
+          bedrooms: number | null
+          carSpaces: number | null
           councilRateRef: string | null
           councilRatesAnnual: number | null
           created_at: string
           currentValue: number
           deposit: number | null
+          domainPropertyType: string | null
+          dwellingConfiguration: string | null
           electricalRepairsContactName: string | null
           electricalRepairsContactPhone: string | null
+          electricalSafetyCertExpiry: string | null
           electricityEmbeddedNetwork: boolean | null
+          entityId: string | null
           gasEmbeddedNetwork: boolean | null
+          gasSafetyCertExpiry: string | null
           hasSwimmingPool: boolean | null
           id: string
           inspectionFrequencyMonths: number | null
           insuranceAnnual: number | null
+          insurancePolicyNumber: string | null
+          insurancePremium: number | null
+          insuranceRenewalDate: string | null
+          insuranceSumInsured: number | null
+          insurerName: string | null
           interestRate: number | null
+          landSizeSqm: number | null
           landTaxAnnual: number | null
           lender: string | null
           loanAccountRef: string | null
@@ -435,28 +824,37 @@ export type Database = {
           managerPhone: string | null
           maxOccupants: number | null
           notes: string | null
+          occupancyType: string | null
           otherRepairsContactName: string | null
           otherRepairsContactPhone: string | null
           photos: Json | null
           physicalAttributes: string | null
           plumbingRepairsContactName: string | null
           plumbingRepairsContactPhone: string | null
-          premisesInclusions: string | null
           pmFeePercent: number | null
+          poolSafetyCertExpiry: string | null
+          premisesInclusions: string | null
           purchaseDate: string | null
           purchasePrice: number
           repairsMaintenanceAnnual: number | null
           repaymentFrequency: string | null
+          saleDate: string | null
+          salePrice: number | null
+          sellingCosts: number | null
           smokeAlarmBackupBatteryReplaceable: boolean | null
           smokeAlarmBackupBatteryType: string | null
           smokeAlarmBatteryReplaceable: boolean | null
           smokeAlarmBatteryType: string | null
+          smokeAlarmCheckDueDate: string | null
           smokeAlarmType: string | null
           stampDuty: number | null
           strataBylawsApply: boolean | null
           strataFeesAnnual: number | null
+          strataLevyAmount: number | null
+          strataLevyFrequency: string | null
           strataResponsibleForSmokeAlarms: boolean | null
           tenantCode: string | null
+          units: Json | null
           videos: Json | null
           waterAccountRef: string | null
           waterRatesAnnual: number | null
@@ -465,20 +863,35 @@ export type Database = {
         Insert: {
           address?: string
           alias?: string | null
+          assetId?: string | null
+          bathrooms?: number | null
+          bedrooms?: number | null
+          carSpaces?: number | null
           councilRateRef?: string | null
           councilRatesAnnual?: number | null
           created_at?: string
           currentValue?: number
           deposit?: number | null
+          domainPropertyType?: string | null
+          dwellingConfiguration?: string | null
           electricalRepairsContactName?: string | null
           electricalRepairsContactPhone?: string | null
+          electricalSafetyCertExpiry?: string | null
           electricityEmbeddedNetwork?: boolean | null
+          entityId?: string | null
           gasEmbeddedNetwork?: boolean | null
+          gasSafetyCertExpiry?: string | null
           hasSwimmingPool?: boolean | null
           id: string
           inspectionFrequencyMonths?: number | null
           insuranceAnnual?: number | null
+          insurancePolicyNumber?: string | null
+          insurancePremium?: number | null
+          insuranceRenewalDate?: string | null
+          insuranceSumInsured?: number | null
+          insurerName?: string | null
           interestRate?: number | null
+          landSizeSqm?: number | null
           landTaxAnnual?: number | null
           lender?: string | null
           loanAccountRef?: string | null
@@ -489,28 +902,37 @@ export type Database = {
           managerPhone?: string | null
           maxOccupants?: number | null
           notes?: string | null
+          occupancyType?: string | null
           otherRepairsContactName?: string | null
           otherRepairsContactPhone?: string | null
           photos?: Json | null
           physicalAttributes?: string | null
           plumbingRepairsContactName?: string | null
           plumbingRepairsContactPhone?: string | null
-          premisesInclusions?: string | null
           pmFeePercent?: number | null
+          poolSafetyCertExpiry?: string | null
+          premisesInclusions?: string | null
           purchaseDate?: string | null
           purchasePrice?: number
           repairsMaintenanceAnnual?: number | null
           repaymentFrequency?: string | null
+          saleDate?: string | null
+          salePrice?: number | null
+          sellingCosts?: number | null
           smokeAlarmBackupBatteryReplaceable?: boolean | null
           smokeAlarmBackupBatteryType?: string | null
           smokeAlarmBatteryReplaceable?: boolean | null
           smokeAlarmBatteryType?: string | null
+          smokeAlarmCheckDueDate?: string | null
           smokeAlarmType?: string | null
           stampDuty?: number | null
           strataBylawsApply?: boolean | null
           strataFeesAnnual?: number | null
+          strataLevyAmount?: number | null
+          strataLevyFrequency?: string | null
           strataResponsibleForSmokeAlarms?: boolean | null
           tenantCode?: string | null
+          units?: Json | null
           videos?: Json | null
           waterAccountRef?: string | null
           waterRatesAnnual?: number | null
@@ -519,20 +941,35 @@ export type Database = {
         Update: {
           address?: string
           alias?: string | null
+          assetId?: string | null
+          bathrooms?: number | null
+          bedrooms?: number | null
+          carSpaces?: number | null
           councilRateRef?: string | null
           councilRatesAnnual?: number | null
           created_at?: string
           currentValue?: number
           deposit?: number | null
+          domainPropertyType?: string | null
+          dwellingConfiguration?: string | null
           electricalRepairsContactName?: string | null
           electricalRepairsContactPhone?: string | null
+          electricalSafetyCertExpiry?: string | null
           electricityEmbeddedNetwork?: boolean | null
+          entityId?: string | null
           gasEmbeddedNetwork?: boolean | null
+          gasSafetyCertExpiry?: string | null
           hasSwimmingPool?: boolean | null
           id?: string
           inspectionFrequencyMonths?: number | null
           insuranceAnnual?: number | null
+          insurancePolicyNumber?: string | null
+          insurancePremium?: number | null
+          insuranceRenewalDate?: string | null
+          insuranceSumInsured?: number | null
+          insurerName?: string | null
           interestRate?: number | null
+          landSizeSqm?: number | null
           landTaxAnnual?: number | null
           lender?: string | null
           loanAccountRef?: string | null
@@ -543,28 +980,37 @@ export type Database = {
           managerPhone?: string | null
           maxOccupants?: number | null
           notes?: string | null
+          occupancyType?: string | null
           otherRepairsContactName?: string | null
           otherRepairsContactPhone?: string | null
           photos?: Json | null
           physicalAttributes?: string | null
           plumbingRepairsContactName?: string | null
           plumbingRepairsContactPhone?: string | null
-          premisesInclusions?: string | null
           pmFeePercent?: number | null
+          poolSafetyCertExpiry?: string | null
+          premisesInclusions?: string | null
           purchaseDate?: string | null
           purchasePrice?: number
           repairsMaintenanceAnnual?: number | null
           repaymentFrequency?: string | null
+          saleDate?: string | null
+          salePrice?: number | null
+          sellingCosts?: number | null
           smokeAlarmBackupBatteryReplaceable?: boolean | null
           smokeAlarmBackupBatteryType?: string | null
           smokeAlarmBatteryReplaceable?: boolean | null
           smokeAlarmBatteryType?: string | null
+          smokeAlarmCheckDueDate?: string | null
           smokeAlarmType?: string | null
           stampDuty?: number | null
           strataBylawsApply?: boolean | null
           strataFeesAnnual?: number | null
+          strataLevyAmount?: number | null
+          strataLevyFrequency?: string | null
           strataResponsibleForSmokeAlarms?: boolean | null
           tenantCode?: string | null
+          units?: Json | null
           videos?: Json | null
           waterAccountRef?: string | null
           waterRatesAnnual?: number | null
@@ -575,48 +1021,156 @@ export type Database = {
       property_bills: {
         Row: {
           amount: number
+          assetId: string | null
+          billGroupId: string | null
           billType: string
+          bpayBillerCode: string | null
+          bpayReference: string | null
+          category: string | null
           created_at: string
           dueDate: string
+          emailMessageId: string | null
           id: string
+          issueDate: string | null
+          label: string | null
+          lineItems: Json | null
+          linkedExpenseId: string | null
           notes: string | null
           paidDate: string | null
           passwordNote: string | null
+          periodEnd: string | null
+          periodStart: string | null
           portalUrl: string | null
           portalUsername: string | null
-          propertyId: string
+          propertyId: string | null
+          providerName: string | null
           recurrenceMonths: number | null
+          referenceNumber: string | null
+          source: string | null
+          sourceFileData: string | null
+          sourceFileName: string | null
           status: string
+          taxCategory: string | null
+          tenantRebillStatus: string | null
         }
         Insert: {
           amount?: number
+          assetId?: string | null
+          billGroupId?: string | null
           billType?: string
+          bpayBillerCode?: string | null
+          bpayReference?: string | null
+          category?: string | null
           created_at?: string
           dueDate?: string
+          emailMessageId?: string | null
           id: string
+          issueDate?: string | null
+          label?: string | null
+          lineItems?: Json | null
+          linkedExpenseId?: string | null
           notes?: string | null
           paidDate?: string | null
           passwordNote?: string | null
+          periodEnd?: string | null
+          periodStart?: string | null
           portalUrl?: string | null
           portalUsername?: string | null
-          propertyId: string
+          propertyId?: string | null
+          providerName?: string | null
           recurrenceMonths?: number | null
+          referenceNumber?: string | null
+          source?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
           status?: string
+          taxCategory?: string | null
+          tenantRebillStatus?: string | null
         }
         Update: {
           amount?: number
+          assetId?: string | null
+          billGroupId?: string | null
           billType?: string
+          bpayBillerCode?: string | null
+          bpayReference?: string | null
+          category?: string | null
           created_at?: string
           dueDate?: string
+          emailMessageId?: string | null
           id?: string
+          issueDate?: string | null
+          label?: string | null
+          lineItems?: Json | null
+          linkedExpenseId?: string | null
           notes?: string | null
           paidDate?: string | null
           passwordNote?: string | null
+          periodEnd?: string | null
+          periodStart?: string | null
           portalUrl?: string | null
           portalUsername?: string | null
-          propertyId?: string
+          propertyId?: string | null
+          providerName?: string | null
           recurrenceMonths?: number | null
+          referenceNumber?: string | null
+          source?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
           status?: string
+          taxCategory?: string | null
+          tenantRebillStatus?: string | null
+        }
+        Relationships: []
+      }
+      providers: {
+        Row: {
+          abn: string | null
+          address: string | null
+          created_at: string
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          passwordNote: string | null
+          phone: string | null
+          portalUrl: string | null
+          portalUsername: string | null
+          propertyId: string | null
+          role: string
+          website: string | null
+        }
+        Insert: {
+          abn?: string | null
+          address?: string | null
+          created_at?: string
+          email?: string | null
+          id: string
+          name: string
+          notes?: string | null
+          passwordNote?: string | null
+          phone?: string | null
+          portalUrl?: string | null
+          portalUsername?: string | null
+          propertyId?: string | null
+          role?: string
+          website?: string | null
+        }
+        Update: {
+          abn?: string | null
+          address?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          passwordNote?: string | null
+          phone?: string | null
+          portalUrl?: string | null
+          portalUsername?: string | null
+          propertyId?: string | null
+          role?: string
+          website?: string | null
         }
         Relationships: []
       }
@@ -722,6 +1276,7 @@ export type Database = {
           rentAmount: number
           rentFrequency: string
           tenantConsentsToElectronicService: boolean | null
+          unitAddress: string | null
         }
         Insert: {
           additionalLeaseTerms?: string | null
@@ -761,6 +1316,7 @@ export type Database = {
           rentAmount?: number
           rentFrequency?: string
           tenantConsentsToElectronicService?: boolean | null
+          unitAddress?: string | null
         }
         Update: {
           additionalLeaseTerms?: string | null
@@ -800,12 +1356,57 @@ export type Database = {
           rentAmount?: number
           rentFrequency?: string
           tenantConsentsToElectronicService?: boolean | null
+          unitAddress?: string | null
+        }
+        Relationships: []
+      }
+      valuation_snapshots: {
+        Row: {
+          assetId: string
+          created_at: string
+          date: string
+          id: string
+          value: number
+        }
+        Insert: {
+          assetId: string
+          created_at?: string
+          date: string
+          id: string
+          value: number
+        }
+        Update: {
+          assetId?: string
+          created_at?: string
+          date?: string
+          id?: string
+          value?: number
         }
         Relationships: []
       }
     }
     Views: {
-      [_ in never]: never
+      properties_public: {
+        Row: {
+          address: string | null
+          alias: string | null
+          id: string | null
+          tenantCode: string | null
+        }
+        Insert: {
+          address?: string | null
+          alias?: string | null
+          id?: string | null
+          tenantCode?: string | null
+        }
+        Update: {
+          address?: string | null
+          alias?: string | null
+          id?: string | null
+          tenantCode?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
@@ -937,6 +1538,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

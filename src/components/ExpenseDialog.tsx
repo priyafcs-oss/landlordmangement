@@ -12,11 +12,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
-import { todayISO } from "@/lib/calculations";
+import { todayISO, CATEGORY_GROUPS, expenseCategoryToTaxCategory } from "@/lib/calculations";
 import { toast } from "sonner";
-import type { Expense } from "@/lib/types";
+import type { Expense, ExpenseCategory } from "@/lib/types";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -47,7 +47,7 @@ export function ExpenseDialog({
           cost: String(expense.cost),
           date: expense.date,
           propertyId: expense.propertyId ?? state.properties[0]?.id ?? "",
-          taxCategory: expense.taxCategory,
+          category: (expense.category ?? "Sundry Rental Expenses") as ExpenseCategory,
           hasWarranty: expense.hasWarranty,
           warrantyExpiry: expense.warrantyExpiry ?? "",
           rechargeToTenant: expense.rechargeToTenant,
@@ -60,7 +60,7 @@ export function ExpenseDialog({
           cost: "",
           date: todayISO(),
           propertyId: state.properties[0]?.id ?? "",
-          taxCategory: "Immediate Deduction" as Expense["taxCategory"],
+          category: "Sundry Rental Expenses" as ExpenseCategory,
           hasWarranty: false,
           warrantyExpiry: "",
           rechargeToTenant: false,
@@ -87,7 +87,8 @@ export function ExpenseDialog({
       cost,
       date: form.date,
       propertyId: form.propertyId,
-      taxCategory: form.taxCategory,
+      category: form.category,
+      taxCategory: expenseCategoryToTaxCategory(form.category),
       hasWarranty: form.hasWarranty,
       warrantyExpiry: form.hasWarranty ? form.warrantyExpiry : undefined,
       rechargeToTenant: form.rechargeToTenant,
@@ -136,7 +137,7 @@ export function ExpenseDialog({
       cost: "",
       date: todayISO(),
       propertyId: state.properties[0]?.id ?? "",
-      taxCategory: "Immediate Deduction",
+      category: "Sundry Rental Expenses",
       hasWarranty: false,
       warrantyExpiry: "",
       rechargeToTenant: false,
@@ -185,17 +186,25 @@ export function ExpenseDialog({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="ATO Tax Category">
+          <Field label="Category">
             <Select
-              value={form.taxCategory}
-              onValueChange={(v) => setForm({ ...form, taxCategory: v as Expense["taxCategory"] })}
+              value={form.category}
+              onValueChange={(v) => setForm({ ...form, category: v as ExpenseCategory })}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Immediate Deduction">Immediate Deduction</SelectItem>
-                <SelectItem value="Capital Works">Capital Works</SelectItem>
+                {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
+                  <SelectGroup key={group}>
+                    <SelectLabel>{group}</SelectLabel>
+                    {categories.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
               </SelectContent>
             </Select>
           </Field>

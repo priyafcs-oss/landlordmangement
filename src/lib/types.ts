@@ -2,21 +2,63 @@ export type RentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 export type LeaseDuration = "6 Months" | "12 Months" | "Periodic";
 export type RepaymentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 
-export const EXPENSE_CATEGORIES = [
-  "Repairs & Maintenance",
-  "Management Fees",
-  "Insurance",
-  "Council Rates",
-  "Water",
-  "Legal & Professional",
-  "Advertising",
-  "Cleaning",
-  "Gardening",
-  "Travel",
-  "Capital Works",
-  "Other",
-] as const;
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+/** ATO-aligned expense category taxonomy, grouped by tax treatment. Running Expenses are the
+ * only group claimable as an immediate deduction in the year incurred — Depreciation lines are
+ * informational (the real depreciation schedule lives in DepreciationItem), Cost Base (Capital)
+ * items add to the property's cost base for a future CGT calculation rather than reducing this
+ * year's taxable income, and Non-Deductible items (private-use travel, loan principal) are
+ * tracked as spending but never claimed. See categoryGroupOf/expenseCategoryToTaxCategory in
+ * calculations.ts for how a chosen category maps onto the coarser two-value taxCategory field. */
+export const CATEGORY_GROUPS = {
+  "Running Expenses": [
+    "Advertising for Tenants",
+    "Body Corporate Fees",
+    "Borrowing Expenses",
+    "Cleaning",
+    "Council Rates",
+    "Gardening / Lawn Mowing",
+    "Insurance",
+    "Interest on Loan",
+    "Land Tax",
+    "Legal Fees",
+    "Pest Control",
+    "Property Agent Fees",
+    "Repairs & Maintenance",
+    "Strata Levies",
+    "Water Charges",
+    "Electricity",
+    "Gas",
+    "Telephone / Internet",
+    "Tax Agent / Accounting Fees",
+    "Letting Fees",
+    "Sundry Rental Expenses",
+  ],
+  Depreciation: ["Depreciation - Plant & Equipment (Div 40)", "Capital Works Deduction (Div 43)"],
+  "Cost Base (Capital)": [
+    "Purchase Cost",
+    "Capital Improvement",
+    "Initial Repairs (Capital)",
+    "Stamp Duty",
+    "Conveyancer Fees",
+    "Conveyancing / Legal (Purchase)",
+    "Buyer's Agent Fee",
+    "Building / Pest Inspection (Purchase)",
+    "Selling Agent's Commission",
+    "Selling Costs (Marketing / Auction / Staging)",
+  ],
+  "Non-Deductible": ["Travel Expenses", "Loan Principal Repayment", "Other Expense"],
+} as const;
+export type CategoryGroup = keyof typeof CATEGORY_GROUPS;
+export type ExpenseCategory = (typeof CATEGORY_GROUPS)[CategoryGroup][number];
+export const EXPENSE_CATEGORIES = Object.values(CATEGORY_GROUPS).flat() as ExpenseCategory[];
+/** Which group a category belongs to — undefined for a legacy/unrecognised value (e.g. an
+ * expense saved before this taxonomy existed). */
+export function categoryGroupOf(category?: string | null): CategoryGroup | undefined {
+  for (const [group, items] of Object.entries(CATEGORY_GROUPS)) {
+    if ((items as readonly string[]).includes(category ?? "")) return group as CategoryGroup;
+  }
+  return undefined;
+}
 
 export interface Property {
   id: string;
@@ -606,6 +648,10 @@ export interface PropertyBill {
    * Absent on bills created before this field existed — markBillPaid falls back to "Immediate
    * Deduction" for those. */
   taxCategory?: "Immediate Deduction" | "Capital Works";
+  /** The specific ATO category picked at entry time (e.g. "Water Charges", "Capital Improvement")
+   * — kept alongside taxCategory the same way Expense.category is, and drives it via
+   * expenseCategoryToTaxCategory. Absent on bills saved before this field existed. */
+  category?: ExpenseCategory;
   /** Set for bills created via the email/upload pipeline — lets a retried webhook be recognized
    * as already-processed even though (unlike before) no paired Expense exists to check instead. */
   emailMessageId?: string;

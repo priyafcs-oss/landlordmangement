@@ -47,7 +47,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
-import { findMatchingUnpaidBill } from "@/lib/billMatch";
+import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
 import type {
   Property,
   Tenant,
@@ -568,7 +568,16 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [tenantId, setTenantId] = useState(proposal.matchedTenantId ?? "");
-  const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => true));
+  // Rows that already look like a duplicate of a ledger entry that exists at mount time start
+  // unchecked, so the landlord has to actively opt back in rather than silently re-posting them.
+  const [included, setIncluded] = useState<boolean[]>(() =>
+    payload.transactions.map((tx) =>
+      tenantId ? !findDuplicateLedgerEntry(state.ledger, { tenantId, amount: tx.amount, date: tx.date }) : true,
+    ),
+  );
+  const ledgerDuplicates = payload.transactions.map((tx) =>
+    tenantId ? findDuplicateLedgerEntry(state.ledger, { tenantId, amount: tx.amount, date: tx.date }) : null,
+  );
   const expenseLines = payload.expenseLines ?? [];
   const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() => expenseLines.map(() => true));
   // An agent statement's deduction is often just reporting that a bill already sitting in
@@ -705,16 +714,26 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         <div className="space-y-1 rounded border p-2">
           <div className="text-[11px] font-medium text-muted-foreground">Rent income → ledger</div>
           {payload.transactions.map((tx, i) => (
-            <label key={i} className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={included[i]}
-                onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
-              />
-              <span className="w-24 shrink-0">{tx.date}</span>
-              <span className="w-20 shrink-0 font-medium">{fmtCurrency(tx.amount)}</span>
-              <span className="truncate text-muted-foreground">{tx.description}</span>
-            </label>
+            <div key={i} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={included[i]}
+                  onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+                />
+                <span className="w-24 shrink-0">{tx.date}</span>
+                <span className="w-20 shrink-0 font-medium">{fmtCurrency(tx.amount)}</span>
+                <span className="truncate text-muted-foreground">{tx.description}</span>
+              </label>
+              {ledgerDuplicates[i] && (
+                <div className="ml-6 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  Possible duplicate — {fmtCurrency(ledgerDuplicates[i]!.credit)} rent payment already on this
+                  tenant's ledger dated {ledgerDuplicates[i]!.date}
+                  {ledgerDuplicates[i]!.description ? ` ("${ledgerDuplicates[i]!.description}")` : ""}. Left
+                  unchecked — tick the box above to add it anyway.
+                </div>
+              )}
+            </div>
           ))}
         </div>
 

@@ -16,10 +16,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
-import type { AssetType } from "@/lib/types";
+import type { AssetType, CategoryGroup } from "@/lib/types";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ExpenseDialog } from "@/components/ExpenseDialog";
@@ -77,6 +77,16 @@ interface TxRow {
    * Rent-payment ledger rows have their own edit/delete flow on the tenant's own ledger, which
    * also reverses the paid-up-to-date shift correctly; this table doesn't duplicate that. */
   expenseId?: string;
+  /** The tenant this row is tied to — direct on ledger rows (whose payer is always a tenant) and
+   * on expenses explicitly recharged to one; otherwise inferred as the sole current tenant at the
+   * row's property (left unset if the property has none or more than one, rather than guessing). */
+  tenantId?: string;
+  tenantName?: string;
+  /** Which ATO category group this expense falls under — undefined for ledger (rent) rows, which
+   * have no tax treatment of their own. Drives the "For tax" breakdown and the EOFY deductible
+   * total; falls back to the legacy coarse taxCategory for expenses saved before the grouped
+   * taxonomy existed and never got a specific category. */
+  taxGroup?: CategoryGroup;
 }
 
 export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
@@ -85,11 +95,20 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [fy, setFy] = useState(currentFY);
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
+  const [tenantId, setTenantId] = useState("__all__");
   const [query, setQuery] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
   const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false });
   const { start, end } = fyRange(fy);
+
+  /** Sole current tenant at a property, if there's exactly one — used to attribute a row with no
+   * direct tenant link (a general property expense) without guessing across dual-key properties. */
+  const soleTenantAt = (propId?: string) => {
+    if (!propId) return undefined;
+    const at = state.tenants.filter((t) => t.propertyId === propId);
+    return at.length === 1 ? at[0] : undefined;
+  };
 
   const fys = useMemo(() => {
     const years: string[] = [];
@@ -109,25 +128,33 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         return {
           id: `ledg_${e.id}`,
           date: e.date,
-          description: `${e.type} — ${tenant?.name ?? "Unknown tenant"}`,
+          description: e.description || e.type,
           category: e.type,
           propertyId: tenant?.propertyId,
           amount: e.credit,
-          source: "Manual" as const,
+          source: e.source === "rent_statement" ? ("Upload" as const) : ("Manual" as const),
+          tenantId: e.tenantId,
+          tenantName: tenant?.name,
         };
       }),
-    ...state.expenses.map((e) => ({
-      id: `exp_${e.id}`,
-      date: e.date,
-      description: e.itemName,
-      category: e.taxCategory,
-      propertyId: e.propertyId,
-      assetId: e.assetId,
-      amount: e.direction === "Income" ? e.cost : -e.cost,
-      source: e.source === "email_auto" ? ("Email" as const) : e.source === "upload" ? ("Upload" as const) : ("Manual" as const),
-      needsAttention: e.status === "needs_review",
-      expenseId: e.id,
-    })),
+    ...state.expenses.map((e) => {
+      const tenant = e.tenantId ? state.tenants.find((t) => t.id === e.tenantId) : soleTenantAt(e.propertyId);
+      return {
+        id: `exp_${e.id}`,
+        date: e.date,
+        description: e.itemName,
+        category: e.category ?? e.taxCategory,
+        propertyId: e.propertyId,
+        assetId: e.assetId,
+        amount: e.direction === "Income" ? e.cost : -e.cost,
+        source: e.source === "email_auto" ? ("Email" as const) : e.source === "upload" ? ("Upload" as const) : ("Manual" as const),
+        needsAttention: e.status === "needs_review",
+        expenseId: e.id,
+        tenantId: tenant?.id,
+        tenantName: tenant?.name,
+        taxGroup: categoryGroupOf(e.category) ?? (e.taxCategory === "Immediate Deduction" ? "Running Expenses" : "Cost Base (Capital)"),
+      };
+    }),
   ];
 
   const assetTypeOf = (r: TxRow) => state.assets.find((a) => a.id === r.assetId)?.assetType;
@@ -138,7 +165,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     .filter((r) => r.date >= start && r.date <= end)
     .filter((r) => propertyId === "__all__" || r.propertyId === propertyId)
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
-    .filter((r) => !query || `${r.description} ${r.category}`.toLowerCase().includes(query.toLowerCase()))
+    .filter((r) => tenantId === "__all__" || r.tenantId === tenantId)
+    .filter((r) => !query || `${r.description} ${r.category} ${r.tenantName ?? ""}`.toLowerCase().includes(query.toLowerCase()))
     .filter((r) => !needsAttentionOnly || r.needsAttention)
     .filter((r) => !anyTypeFilter || (typeFilter.income && r.amount > 0) || (typeFilter.expense && r.amount < 0))
     .filter(
@@ -158,19 +186,20 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
       acc[r.category] = (acc[r.category] ?? 0) + Math.abs(r.amount);
       return acc;
     }, {});
-  const byTaxCategory = filtered
-    .filter((r) => r.amount < 0 && (r.category === "Immediate Deduction" || r.category === "Capital Works"))
+  const byTaxGroup = filtered
+    .filter((r) => r.amount < 0 && r.taxGroup)
     .reduce<Record<string, number>>((acc, r) => {
-      acc[r.category] = (acc[r.category] ?? 0) + Math.abs(r.amount);
+      acc[r.taxGroup!] = (acc[r.taxGroup!] ?? 0) + Math.abs(r.amount);
       return acc;
     }, {});
+  const deductibleNow = byTaxGroup["Running Expenses"] ?? 0;
 
   const exportCsv = () => {
-    const header = ["Date", "Description", "Category", "Source", "Asset", "Amount"];
+    const header = ["Date", "Description", "Category", "Tenant", "Source", "Asset", "Amount"];
     const rows = filtered.map((r) => {
       const prop = state.properties.find((p) => p.id === r.propertyId);
       const asset = state.assets.find((a) => a.id === r.assetId);
-      return [r.date, r.description, r.category, r.source ?? "", prop?.alias || prop?.address || asset?.name || "", r.amount];
+      return [r.date, r.description, r.category, r.tenantName ?? "", r.source ?? "", prop?.alias || prop?.address || asset?.name || "", r.amount];
     });
     downloadCsv(`transactions-${fy}.csv`, header, rows);
     toast.success("Transactions CSV downloaded");
@@ -224,6 +253,21 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               </SelectContent>
             </Select>
           )}
+          <Select value={tenantId} onValueChange={setTenantId}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="All tenants" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All tenants</SelectItem>
+              {state.tenants
+                .filter((t) => propertyId === "__all__" || t.propertyId === propertyId)
+                .map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1">
@@ -280,6 +324,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                       <th className="px-3 py-2 font-medium">Date</th>
                       <th className="px-3 py-2 font-medium">Description</th>
                       <th className="px-3 py-2 font-medium">Category</th>
+                      <th className="px-3 py-2 font-medium">Tenant</th>
                       <th className="px-3 py-2 font-medium">Source</th>
                       <th className="px-3 py-2 text-right font-medium">Amount</th>
                       <th className="w-16 px-2 py-2" />
@@ -302,6 +347,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                             {label && <div className="text-xs text-muted-foreground">{label}</div>}
                           </td>
                           <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{r.tenantName ?? "—"}</td>
                           <td className="px-3 py-2 text-xs text-muted-foreground">{r.source ?? "—"}</td>
                           <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
                             {r.amount < 0 ? "−" : "+"}
@@ -394,16 +440,20 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           <Card>
             <CardHeader>
               <CardTitle className="text-base">For tax</CardTitle>
-              <div className="text-xs text-muted-foreground">Claimable vs capital</div>
+              <div className="text-xs text-muted-foreground">Only Running Expenses reduce this year's taxable income</div>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              {Object.keys(byTaxCategory).length === 0 && <div className="text-xs text-muted-foreground">No expenses in this range.</div>}
-              {Object.entries(byTaxCategory).map(([cat, amount]) => (
-                <div key={cat} className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{cat}</span>
+              {Object.keys(byTaxGroup).length === 0 && <div className="text-xs text-muted-foreground">No expenses in this range.</div>}
+              {Object.entries(byTaxGroup).map(([group, amount]) => (
+                <div key={group} className="flex items-center justify-between">
+                  <span className={group === "Running Expenses" ? "font-medium" : "text-muted-foreground"}>{group}</span>
                   <span className="font-medium">{fmtCurrency(amount)}</span>
                 </div>
               ))}
+              <div className="flex items-center justify-between border-t pt-2">
+                <span className="font-medium">Deductible now</span>
+                <span className="font-semibold">{fmtCurrency(deductibleNow)}</span>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -461,8 +511,14 @@ function EofyReport() {
         .filter((e) => tenantIds.includes(e.tenantId) && e.date >= start && e.date <= end && e.type === "Rent Payment")
         .reduce((s, e) => s + e.credit, 0);
       const expenses = state.expenses.filter((e) => e.propertyId === prop.id && e.date >= start && e.date <= end);
-      for (const e of expenses) byCategory[e.taxCategory] = (byCategory[e.taxCategory] ?? 0) + e.cost;
-      totalExp += expenses.reduce((s, e) => s + e.cost, 0);
+      for (const e of expenses) {
+        const group =
+          categoryGroupOf(e.category) ?? (e.taxCategory === "Immediate Deduction" ? "Running Expenses" : "Cost Base (Capital)");
+        byCategory[group] = (byCategory[group] ?? 0) + e.cost;
+        // Only Running Expenses reduce this year's taxable income — Depreciation, Cost Base
+        // (Capital) and Non-Deductible spending is real cash out but not a current-year deduction.
+        if (group === "Running Expenses") totalExp += e.cost;
+      }
       const loan = state.loans.find((l) => l.propertyId === prop.id);
       if (loan) interest += (loan.totalBalance * loan.interestRate) / 100;
     }
@@ -500,12 +556,12 @@ function EofyReport() {
     line("Gross rent collected", fmtCurrency(report.gross), true);
     y += 2;
     doc.setFont("helvetica", "bold");
-    doc.text("Expenses by ATO category", marginX, y);
+    doc.text("Expenses by ATO category group", marginX, y);
     y += 6;
     for (const [k, v] of Object.entries(report.byCategory)) {
       line(`  ${k}`, fmtCurrency(v));
     }
-    line("Total expenses", fmtCurrency(report.total), true);
+    line("Total deductible (Running Expenses)", fmtCurrency(report.total), true);
     y += 2;
     line("Estimated loan interest paid", fmtCurrency(report.interest));
     y += 2;
@@ -579,7 +635,7 @@ function EofyReport() {
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <Stat label="Gross rent collected" value={fmtCurrency(report.gross)} />
-                <Stat label="Total expenses" value={fmtCurrency(report.total)} />
+                <Stat label="Total deductible (Running Expenses)" value={fmtCurrency(report.total)} />
                 <Stat label="Loan interest (est.)" value={fmtCurrency(report.interest)} />
                 <Stat
                   label="Net taxable profit / loss"
@@ -589,7 +645,10 @@ function EofyReport() {
                 />
               </div>
               <div>
-                <div className="mb-1 text-xs font-medium">Expenses by category</div>
+                <div className="mb-1 text-xs font-medium">Expenses by ATO category group</div>
+                <div className="mb-1 text-xs text-muted-foreground">
+                  Only Running Expenses is deducted above — Depreciation, Cost Base (Capital) and Non-Deductible are shown for reference.
+                </div>
                 {Object.entries(report.byCategory).map(([k, v]) => (
                   <div key={k} className="flex justify-between border-t py-1">
                     <span>{k}</span>

@@ -10,7 +10,9 @@ import type {
   AiIntakeProposal,
   BillType,
   DepreciationItem,
+  ExpenseCategory,
 } from "./types";
+import { categoryGroupOf } from "./types";
 
 /** Maps a bill's type onto the tenant-invoice charge-type enum, for recharging a bill line item to a tenant. */
 export function billTypeToChargeType(billType: BillType): TenantInvoice["chargeType"] {
@@ -30,12 +32,38 @@ export const ANNUAL_COST_FIELD: Partial<Record<BillType, keyof Property>> = {
 
 /** Categories offered on a transaction's line items — broader than BillType since a one-off
  * transaction can be almost anything, not just a recurring utility/rates bill. */
-export { EXPENSE_CATEGORIES, type ExpenseCategory } from "./types";
+export { EXPENSE_CATEGORIES, CATEGORY_GROUPS, categoryGroupOf, type ExpenseCategory, type CategoryGroup } from "./types";
 
-/** Only "Capital Works" maps to the Capital Works ATO category — everything else is an
- * immediate deduction, matching how the email-intake pipeline's mapAtoCategory defaults. */
+/** Only the "Running Expenses" group is an immediate deduction — Depreciation, Cost Base
+ * (Capital), and Non-Deductible items all fall on the "Capital Works" side of this coarser
+ * two-value field (unclaimed this year, whether because they're capitalised or not deductible at
+ * all). An unrecognised category defaults to "Capital Works" too, so an unmapped value never
+ * silently overclaims a deduction. */
 export function expenseCategoryToTaxCategory(category: string): Expense["taxCategory"] {
-  return category === "Capital Works" ? "Capital Works" : "Immediate Deduction";
+  return categoryGroupOf(category) === "Running Expenses" ? "Immediate Deduction" : "Capital Works";
+}
+
+/** Sensible starting category for a bill based on its recurring billType, used to default the
+ * new ATO Category field when a bill type is chosen/extracted — the two fields are otherwise
+ * independent (billType drives auto-matching/annual-cost tracking; category drives tax
+ * treatment), so this is a one-time default, not a sync. */
+export function billTypeToDefaultCategory(billType: BillType): ExpenseCategory {
+  switch (billType) {
+    case "Water":
+      return "Water Charges";
+    case "Council Rates":
+      return "Council Rates";
+    case "Strata":
+      return "Strata Levies";
+    case "Insurance":
+      return "Insurance";
+    case "Electricity":
+      return "Electricity";
+    case "Gas":
+      return "Gas";
+    default:
+      return "Sundry Rental Expenses";
+  }
 }
 
 export function periodDays(freq: RentFrequency): number {

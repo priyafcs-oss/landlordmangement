@@ -1,4 +1,4 @@
-import type { Expense, PropertyBill } from "./types";
+import type { Expense, LedgerEntry, PropertyBill } from "./types";
 
 export interface BillMatchCandidate {
   propertyId?: string;
@@ -152,4 +152,35 @@ export function findDuplicateRecord(
   }
 
   return null;
+}
+
+export interface LedgerDuplicateCandidate {
+  tenantId: string;
+  amount: number;
+  date: string;
+}
+
+const LEDGER_DUPLICATE_WINDOW_DAYS = 3;
+
+/**
+ * Checks a rent-statement payment line about to be posted to a tenant's ledger against rows
+ * already there — the rent-statement review/approval flow (RentLedgerProposalCard) has no
+ * server-side guardrail and, unlike Add Bill/Add Transaction, previously had no duplicate check
+ * at all, so re-approving the same statement (or two overlapping statements) silently doubled up
+ * rent payments. Same tenant + matching amount (±2%) + date within a few days is treated as the
+ * same real-world payment; tighter than the bill/expense window since rent payments recur weekly.
+ */
+export function findDuplicateLedgerEntry(
+  ledger: LedgerEntry[],
+  candidate: LedgerDuplicateCandidate,
+): LedgerEntry | null {
+  return (
+    ledger.find(
+      (e) =>
+        e.tenantId === candidate.tenantId &&
+        e.type === "Rent Payment" &&
+        amountMatches(e.credit, candidate.amount) &&
+        symmetricDateWithinWindow(e.date, candidate.date, LEDGER_DUPLICATE_WINDOW_DAYS),
+    ) ?? null
+  );
 }
