@@ -43,11 +43,13 @@ import {
   ArrowRight,
   Search,
   Calculator,
+  Eye,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
+import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, type FeeCheckResult } from "@/lib/feeVerification";
 import type {
   Property,
   Tenant,
@@ -68,6 +70,7 @@ import type {
   ContactPerson,
   Provider,
   ProviderRole,
+  FeeFrequency,
   DepreciationItem,
   DepreciationReportProposalPayload,
   UnclassifiedProposalPayload,
@@ -91,6 +94,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { FileSignature } from "lucide-react";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -596,6 +600,18 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const includedExpenses = expenseLines.reduce((s, e, i) => (expensesIncluded[i] ? s + e.amount : s), 0);
   const computedNet = includedIncome - includedExpenses;
 
+  const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+  const matchedTenant = state.tenants.find((t) => t.id === tenantId);
+  const feeChecks: FeeCheckResult[] =
+    agent && hasFeeTerms(agent)
+      ? verifyAgentFees({
+          provider: agent,
+          rentCollected: includedIncome,
+          lines: expenseLines.filter((_, i) => expensesIncluded[i]),
+          tenantRent: matchedTenant ? { amount: matchedTenant.rentAmount, frequency: matchedTenant.rentFrequency } : undefined,
+        })
+      : [];
+
   const confirm = () => {
     if (!tenantId) return toast.error("Select a tenant first");
     payload.transactions.forEach((tx, i) => {
@@ -623,6 +639,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         date: e.date,
         propertyId: propertyId || undefined,
         taxCategory: "Immediate Deduction",
+        category: "Property Agent Fees",
+        // The AI's raw free-text classification (e.g. "management_fees") — itemName alone is
+        // usually just the agency's name, so this is the only signal fee verification has to work
+        // with once this line becomes a plain Expense row (see classifyFeeLine in feeVerification.ts).
+        notes: e.category || undefined,
         hasWarranty: false,
         rechargeToTenant: false,
         status: "approved",
@@ -791,6 +812,17 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           )}
         </div>
 
+        {feeChecks.length > 0 && (
+          <div className="space-y-1 rounded border p-2">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              Fee check — against {agent!.name}'s management agreement
+            </div>
+            {feeChecks.map((c) => (
+              <FeeCheckRow key={c.type} result={c} />
+            ))}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" onClick={confirm}>
             Confirm &amp; Add Payments
@@ -800,6 +832,38 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           </Button>
         </div>
     </DocumentReviewCard>
+  );
+}
+
+/** Shared row renderer for one FeeCheckResult — used both inline during rent-statement review
+ * and in the standalone verification report/EOFY summary, so the colour/wording never drifts. */
+export function FeeCheckRow({ result }: { result: FeeCheckResult }) {
+  const { type, expected, actual, variance, status } = result;
+  const style =
+    status === "overcharge"
+      ? "border-destructive/40 bg-destructive/5 text-destructive"
+      : status === "not_charged"
+        ? "border-amber-300 bg-amber-50 text-amber-900"
+        : status === "unspecified"
+          ? "border-muted bg-muted/30 text-muted-foreground"
+          : status === "undercharge"
+            ? "border-sky-300 bg-sky-50 text-sky-900"
+            : "border-emerald-300 bg-emerald-50 text-emerald-900";
+  const message =
+    status === "match"
+      ? `${fmtCurrency(actual)} — matches the agreed ${fmtCurrency(expected ?? 0)}`
+      : status === "overcharge"
+        ? `${fmtCurrency(actual)} charged — ${fmtCurrency(variance ?? 0)} more than the agreed ${fmtCurrency(expected ?? 0)}`
+        : status === "undercharge"
+          ? `${fmtCurrency(actual)} charged — ${fmtCurrency(Math.abs(variance ?? 0))} less than the agreed ${fmtCurrency(expected ?? 0)}`
+          : status === "not_charged"
+            ? `Not itemised this time — expected around ${fmtCurrency(expected ?? 0)}`
+            : `${fmtCurrency(actual)} charged — no agreed rate on file for this fee`;
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-2 rounded border px-2 py-1 text-xs ${style}`}>
+      <span className="font-medium">{type}</span>
+      <span>{message}</span>
+    </div>
   );
 }
 
@@ -3652,6 +3716,24 @@ export function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
 
 const PROVIDER_ROLES: ProviderRole[] = ["Council", "Agent", "Insurer", "Trade", "Other"];
 
+interface AgencyAgreementExtractResult {
+  ok?: boolean;
+  error?: string;
+  management_fee_percent?: number | null;
+  letting_fee_amount?: number | null;
+  letting_fee_weeks_rent?: number | null;
+  admin_fee_amount?: number | null;
+  admin_fee_frequency?: string | null;
+  lease_renewal_fee_amount?: number | null;
+  inspection_fee_amount?: number | null;
+  agency_name?: string | null;
+  contract_start_date?: string | null;
+  contract_review_date?: string | null;
+  confidence?: number;
+}
+
+const FEE_FREQUENCIES: FeeFrequency[] = ["Per Statement", "Monthly", "Quarterly", "Annually"];
+
 function ProviderDialog({
   propertyId,
   provider,
@@ -3663,6 +3745,7 @@ function ProviderDialog({
 }) {
   const { addProvider, updateProvider } = useStore();
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
     name: provider?.name ?? "",
     role: provider?.role ?? ("Other" as ProviderRole),
@@ -3675,13 +3758,113 @@ function ProviderDialog({
     portalUrl: provider?.portalUrl ?? "",
     portalUsername: provider?.portalUsername ?? "",
     passwordNote: provider?.passwordNote ?? "",
+    contractFileName: provider?.contractFileName ?? "",
+    contractFileData: provider?.contractFileData ?? "",
+    managementFeePercent: provider?.managementFeePercent !== undefined ? String(provider.managementFeePercent) : "",
+    lettingFeeAmount: provider?.lettingFeeAmount !== undefined ? String(provider.lettingFeeAmount) : "",
+    lettingFeeWeeksRent: provider?.lettingFeeWeeksRent !== undefined ? String(provider.lettingFeeWeeksRent) : "",
+    adminFeeAmount: provider?.adminFeeAmount !== undefined ? String(provider.adminFeeAmount) : "",
+    adminFeeFrequency: provider?.adminFeeFrequency ?? "",
+    leaseRenewalFeeAmount: provider?.leaseRenewalFeeAmount !== undefined ? String(provider.leaseRenewalFeeAmount) : "",
+    inspectionFeeAmount: provider?.inspectionFeeAmount !== undefined ? String(provider.inspectionFeeAmount) : "",
+    contractStartDate: provider?.contractStartDate ?? "",
+    contractReviewDate: provider?.contractReviewDate ?? "",
+    contractNotes: provider?.contractNotes ?? "",
   });
+  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
+
+  const extractContract = async (file: File) => {
+    if (file.size > MAX_AI_UPLOAD_BYTES) {
+      return toast.error(
+        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+      );
+    }
+    setBusy(true);
+    setExtractSummary(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Couldn't read file"));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(",")[1] ?? "";
+      setForm((f) => ({ ...f, contractFileName: file.name, contractFileData: base64 }));
+
+      const { data, error } = await supabase.functions.invoke<AgencyAgreementExtractResult>("extract-agency-agreement", {
+        body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
+      });
+      if (error) throw error;
+      if (!data?.ok) {
+        toast.error(data?.error || "Couldn't read this document");
+        return;
+      }
+
+      let fieldsFound = 0;
+      setForm((f) => {
+        const next = { ...f };
+        if (data.agency_name && !f.name.trim()) {
+          next.name = data.agency_name;
+          fieldsFound++;
+        }
+        if (data.management_fee_percent !== undefined && data.management_fee_percent !== null) {
+          next.managementFeePercent = String(data.management_fee_percent);
+          fieldsFound++;
+        }
+        if (data.letting_fee_amount !== undefined && data.letting_fee_amount !== null) {
+          next.lettingFeeAmount = String(data.letting_fee_amount);
+          fieldsFound++;
+        }
+        if (data.letting_fee_weeks_rent !== undefined && data.letting_fee_weeks_rent !== null) {
+          next.lettingFeeWeeksRent = String(data.letting_fee_weeks_rent);
+          fieldsFound++;
+        }
+        if (data.admin_fee_amount !== undefined && data.admin_fee_amount !== null) {
+          next.adminFeeAmount = String(data.admin_fee_amount);
+          fieldsFound++;
+        }
+        if (data.admin_fee_frequency) {
+          next.adminFeeFrequency = data.admin_fee_frequency;
+          fieldsFound++;
+        }
+        if (data.lease_renewal_fee_amount !== undefined && data.lease_renewal_fee_amount !== null) {
+          next.leaseRenewalFeeAmount = String(data.lease_renewal_fee_amount);
+          fieldsFound++;
+        }
+        if (data.inspection_fee_amount !== undefined && data.inspection_fee_amount !== null) {
+          next.inspectionFeeAmount = String(data.inspection_fee_amount);
+          fieldsFound++;
+        }
+        if (data.contract_start_date) {
+          next.contractStartDate = data.contract_start_date;
+          fieldsFound++;
+        }
+        if (data.contract_review_date) {
+          next.contractReviewDate = data.contract_review_date;
+          fieldsFound++;
+        }
+        return next;
+      });
+
+      if (fieldsFound === 0) {
+        toast.warning("Couldn't find fee terms in this file — the fields below are ready for manual entry");
+      } else {
+        setExtractSummary({ fields: fieldsFound, confidence: data.confidence ?? 0 });
+        toast.success("Extracted — review the fee terms before saving");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Extraction failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = () => {
     if (!form.name.trim()) {
       toast.error("Name is required");
       return;
     }
+    const num = (s: string) => (s.trim() ? parseFloat(s) : undefined);
     const payload = {
       name: form.name.trim(),
       role: form.role,
@@ -3694,6 +3877,18 @@ function ProviderDialog({
       portalUrl: form.portalUrl.trim() || undefined,
       portalUsername: form.portalUsername.trim() || undefined,
       passwordNote: form.passwordNote.trim() || undefined,
+      contractFileName: form.contractFileName || undefined,
+      contractFileData: form.contractFileData || undefined,
+      managementFeePercent: num(form.managementFeePercent),
+      lettingFeeAmount: num(form.lettingFeeAmount),
+      lettingFeeWeeksRent: num(form.lettingFeeWeeksRent),
+      adminFeeAmount: num(form.adminFeeAmount),
+      adminFeeFrequency: (form.adminFeeFrequency || undefined) as FeeFrequency | undefined,
+      leaseRenewalFeeAmount: num(form.leaseRenewalFeeAmount),
+      inspectionFeeAmount: num(form.inspectionFeeAmount),
+      contractStartDate: form.contractStartDate || undefined,
+      contractReviewDate: form.contractReviewDate || undefined,
+      contractNotes: form.contractNotes.trim() || undefined,
     };
     if (provider) {
       updateProvider(provider.id, payload);
@@ -3708,7 +3903,7 @@ function ProviderDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{provider ? "Edit contact" : "Add contact"}</DialogTitle>
         </DialogHeader>
@@ -3764,6 +3959,134 @@ function ProviderDialog({
             </Field>
           </div>
         </div>
+
+        {form.role === "Agent" && (
+          <div className="col-span-2 space-y-3 rounded-md border p-3">
+            <div className="text-xs font-medium">Management agreement</div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="file"
+                accept="application/pdf,image/*"
+                className="h-8 text-xs"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void extractContract(f);
+                }}
+              />
+              {busy && <span className="text-xs text-muted-foreground">Reading…</span>}
+            </div>
+            {form.contractFileName && (
+              <div className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1 text-xs">
+                <span className="truncate">{form.contractFileName}</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 shrink-0 gap-1 text-xs"
+                  onClick={() => openBillDocument(form.contractFileName, form.contractFileData)}
+                >
+                  <Eye className="h-3 w-3" /> View
+                </Button>
+              </div>
+            )}
+            {extractSummary && (
+              <div className="flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+                <CheckCircle2 className="h-3 w-3 shrink-0" />
+                Found {extractSummary.fields} fee term{extractSummary.fields === 1 ? "" : "s"} — review before saving.
+                {extractSummary.confidence < 0.85 && " Low confidence — double-check every field."}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Management fee (%)">
+                <Input
+                  type="number"
+                  value={form.managementFeePercent}
+                  onChange={(e) => setForm((f) => ({ ...f, managementFeePercent: e.target.value }))}
+                  placeholder="e.g. 6.6"
+                />
+              </Field>
+              <Field label="Letting fee ($ flat)">
+                <Input
+                  type="number"
+                  value={form.lettingFeeAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, lettingFeeAmount: e.target.value }))}
+                />
+              </Field>
+              <Field label="— or letting fee (weeks' rent)">
+                <Input
+                  type="number"
+                  value={form.lettingFeeWeeksRent}
+                  onChange={(e) => setForm((f) => ({ ...f, lettingFeeWeeksRent: e.target.value }))}
+                  placeholder="e.g. 1"
+                />
+              </Field>
+              <Field label="Admin / statement fee ($)">
+                <Input
+                  type="number"
+                  value={form.adminFeeAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, adminFeeAmount: e.target.value }))}
+                />
+              </Field>
+              <Field label="Admin fee frequency">
+                <Select
+                  value={form.adminFeeFrequency}
+                  onValueChange={(v) => setForm((f) => ({ ...f, adminFeeFrequency: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FEE_FREQUENCIES.map((f) => (
+                      <SelectItem key={f} value={f}>
+                        {f}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Lease renewal fee ($)">
+                <Input
+                  type="number"
+                  value={form.leaseRenewalFeeAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, leaseRenewalFeeAmount: e.target.value }))}
+                />
+              </Field>
+              <Field label="Inspection fee ($)">
+                <Input
+                  type="number"
+                  value={form.inspectionFeeAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, inspectionFeeAmount: e.target.value }))}
+                />
+              </Field>
+              <Field label="Agreement start date">
+                <Input
+                  type="date"
+                  value={form.contractStartDate}
+                  onChange={(e) => setForm((f) => ({ ...f, contractStartDate: e.target.value }))}
+                />
+              </Field>
+              <Field label="Next review/renewal date">
+                <Input
+                  type="date"
+                  value={form.contractReviewDate}
+                  onChange={(e) => setForm((f) => ({ ...f, contractReviewDate: e.target.value }))}
+                />
+              </Field>
+              <div className="col-span-2">
+                <Field label="Agreement notes">
+                  <Textarea
+                    value={form.contractNotes}
+                    onChange={(e) => setForm((f) => ({ ...f, contractNotes: e.target.value }))}
+                    rows={2}
+                    placeholder="Any other terms worth remembering — exclusivity period, marketing fee, etc."
+                  />
+                </Field>
+              </div>
+            </div>
+          </div>
+        )}
+
         <DialogFooter>
           <Button onClick={save}>Save</Button>
         </DialogFooter>
@@ -3798,6 +4121,23 @@ function ProviderRow({ provider }: { provider: Provider }) {
             {provider.passwordNote && <> • Note: <span className="font-mono">{provider.passwordNote}</span></>}
           </div>
         )}
+        {provider.role === "Agent" && hasFeeTerms(provider) && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
+            {provider.managementFeePercent !== undefined && <span>Mgmt fee {provider.managementFeePercent}%</span>}
+            {provider.lettingFeeAmount !== undefined && <span>Letting {fmtCurrency(provider.lettingFeeAmount)}</span>}
+            {provider.lettingFeeWeeksRent !== undefined && <span>Letting {provider.lettingFeeWeeksRent} wk rent</span>}
+            {provider.adminFeeAmount !== undefined && <span>Admin {fmtCurrency(provider.adminFeeAmount)}</span>}
+            {provider.contractFileData && (
+              <button
+                type="button"
+                onClick={() => openBillDocument(provider.contractFileName, provider.contractFileData)}
+                className="inline-flex items-center gap-1 text-primary underline"
+              >
+                <FileText className="h-3 w-3" /> Agreement
+              </button>
+            )}
+          </div>
+        )}
         {provider.notes && <div className="mt-1 whitespace-pre-wrap">{provider.notes}</div>}
       </div>
       <div className="flex shrink-0 gap-1">
@@ -3820,6 +4160,111 @@ function ProviderRow({ provider }: { provider: Provider }) {
           <Trash2 className="h-3 w-3" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * On-demand fee-verification report for one property — aggregates every rent payment and every
+ * posted "Property Agent Fees" expense in a chosen financial year and checks the totals against
+ * the property's Agent provider's management-agreement terms. Same comparison engine
+ * (verifyAgentFees) as the inline per-statement check in RentLedgerProposalCard, just run over a
+ * whole year of posted records instead of one statement still in review.
+ */
+export function PropertyFeeVerificationTab({ propertyId }: { propertyId: string }) {
+  const { state } = useStore();
+  const currentFY = ausFinancialYear(todayISO());
+  const [fy, setFy] = useState(currentFY);
+  const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+
+  const fys = (() => {
+    const years: string[] = [];
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
+    return years;
+  })();
+
+  if (!agent) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        No managing agent on file for this property yet — add one under Providers with role "Agent" to enable fee
+        verification.
+      </div>
+    );
+  }
+  if (!hasFeeTerms(agent)) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        {agent.name} has no management-agreement fee terms on file yet — open their contact under Providers and
+        upload the signed agreement (or enter the fees manually) to enable verification.
+      </div>
+    );
+  }
+
+  const { start, end } = fyRange(fy);
+  const tenantIds = state.tenants.filter((t) => t.propertyId === propertyId).map((t) => t.id);
+  const rentCollected = state.ledger
+    .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
+    .reduce((s, e) => s + e.credit, 0);
+  const expensesInRange = state.expenses.filter((e) => e.propertyId === propertyId && e.date >= start && e.date <= end);
+  const results = verifyAgentFees({ provider: agent, rentCollected, lines: collectAgentFeeLines(expensesInRange) });
+  const totalExpected = results.reduce((s, r) => s + (r.expected ?? 0), 0);
+  const totalActual = results.reduce((s, r) => s + r.actual, 0);
+  const flagged = results.filter((r) => r.status === "overcharge" || r.status === "not_charged" || r.status === "unspecified");
+
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs text-muted-foreground">
+          Checks total rent collected and every posted agent-fee expense against {agent.name}'s management
+          agreement.
+        </div>
+        <Select value={fy} onValueChange={setFy}>
+          <SelectTrigger className="w-[130px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {fys.map((y) => (
+              <SelectItem key={y} value={y}>
+                FY {y}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded border p-3">
+          <div className="text-xs text-muted-foreground">Rent collected</div>
+          <div className="text-lg font-semibold">{fmtCurrency(rentCollected)}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-xs text-muted-foreground">Agent fees charged</div>
+          <div className="text-lg font-semibold">{fmtCurrency(totalActual)}</div>
+        </div>
+        <div className="rounded border p-3">
+          <div className="text-xs text-muted-foreground">Agreed (expected)</div>
+          <div className="text-lg font-semibold">{fmtCurrency(totalExpected)}</div>
+        </div>
+      </div>
+
+      {results.length === 0 ? (
+        <div className="rounded border p-3 text-xs text-muted-foreground">
+          No rent collected and no agent fees posted for FY {fy}.
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {results.map((r) => (
+            <FeeCheckRow key={r.type} result={r} />
+          ))}
+        </div>
+      )}
+
+      {flagged.length > 0 && (
+        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          {flagged.length} item{flagged.length === 1 ? "" : "s"} worth a closer look this year — see above.
+        </div>
+      )}
     </div>
   );
 }

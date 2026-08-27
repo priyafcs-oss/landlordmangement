@@ -1127,9 +1127,21 @@ export type Database = {
         Row: {
           abn: string | null
           address: string | null
+          adminFeeAmount: number | null
+          adminFeeFrequency: string | null
+          contractFileData: string | null
+          contractFileName: string | null
+          contractNotes: string | null
+          contractReviewDate: string | null
+          contractStartDate: string | null
           created_at: string
           email: string | null
           id: string
+          inspectionFeeAmount: number | null
+          leaseRenewalFeeAmount: number | null
+          lettingFeeAmount: number | null
+          lettingFeeWeeksRent: number | null
+          managementFeePercent: number | null
           name: string
           notes: string | null
           passwordNote: string | null
@@ -1143,9 +1155,21 @@ export type Database = {
         Insert: {
           abn?: string | null
           address?: string | null
+          adminFeeAmount?: number | null
+          adminFeeFrequency?: string | null
+          contractFileData?: string | null
+          contractFileName?: string | null
+          contractNotes?: string | null
+          contractReviewDate?: string | null
+          contractStartDate?: string | null
           created_at?: string
           email?: string | null
           id: string
+          inspectionFeeAmount?: number | null
+          leaseRenewalFeeAmount?: number | null
+          lettingFeeAmount?: number | null
+          lettingFeeWeeksRent?: number | null
+          managementFeePercent?: number | null
           name: string
           notes?: string | null
           passwordNote?: string | null
@@ -1159,9 +1183,21 @@ export type Database = {
         Update: {
           abn?: string | null
           address?: string | null
+          adminFeeAmount?: number | null
+          adminFeeFrequency?: string | null
+          contractFileData?: string | null
+          contractFileName?: string | null
+          contractNotes?: string | null
+          contractReviewDate?: string | null
+          contractStartDate?: string | null
           created_at?: string
           email?: string | null
           id?: string
+          inspectionFeeAmount?: number | null
+          leaseRenewalFeeAmount?: number | null
+          lettingFeeAmount?: number | null
+          lettingFeeWeeksRent?: number | null
+          managementFeePercent?: number | null
           name?: string
           notes?: string | null
           passwordNote?: string | null

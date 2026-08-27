@@ -448,6 +448,8 @@ export interface MaintenanceRequest {
 
 export type ProviderRole = "Council" | "Agent" | "Insurer" | "Trade" | "Other";
 
+export type FeeFrequency = "Per Statement" | "Monthly" | "Quarterly" | "Annually";
+
 /** A vendor/contact linked to a property — council, managing agent, insurer, tradesperson, etc. */
 export interface Provider {
   id: string;
@@ -463,6 +465,28 @@ export interface Provider {
   portalUrl?: string;
   portalUsername?: string;
   passwordNote?: string;
+  /** The signed Property Management Agreement — only meaningful when role === "Agent". Kept
+   * alongside the fee terms read off it so a rent statement's agent deductions can be checked
+   * against what was actually agreed, the same pairing pattern as every other extracted document
+   * in this app (source file + the fields read off it). */
+  contractFileName?: string;
+  contractFileData?: string;
+  /** Ongoing management fee, as a % of rent collected each period. */
+  managementFeePercent?: number;
+  /** One-off fee when a new tenant is placed — either a flat amount, or expressed as a number of
+   * weeks' rent (only one is normally set; if both are, the flat amount wins). */
+  lettingFeeAmount?: number;
+  lettingFeeWeeksRent?: number;
+  /** Flat fee charged alongside the % management fee, separate from it. */
+  adminFeeAmount?: number;
+  adminFeeFrequency?: FeeFrequency;
+  leaseRenewalFeeAmount?: number;
+  /** Fee charged per routine/entry/exit inspection, if billed separately. */
+  inspectionFeeAmount?: number;
+  contractStartDate?: string;
+  /** When the agreement is next up for renewal/review, if stated. */
+  contractReviewDate?: string;
+  contractNotes?: string;
 }
 
 export type EntityType = "Individual" | "Joint" | "Trust" | "SMSF" | "Company";

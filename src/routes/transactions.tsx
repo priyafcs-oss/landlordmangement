@@ -23,6 +23,8 @@ import type { AssetType, CategoryGroup } from "@/lib/types";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ExpenseDialog } from "@/components/ExpenseDialog";
+import { FeeCheckRow } from "@/components/PropertyShared";
+import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
 
 function pdfSafe(s: string): string {
@@ -474,6 +476,7 @@ function EofyReport() {
     total: number;
     net: number;
     scopeLabel: string;
+    feeChecksByProperty: { propertyLabel: string; agentName: string; results: FeeCheckResult[] }[];
   }>(null);
 
   const scopeProperties = () => {
@@ -505,11 +508,13 @@ function EofyReport() {
     let totalExp = 0;
     let interest = 0;
     const byCategory: Record<string, number> = {};
+    const feeChecksByProperty: { propertyLabel: string; agentName: string; results: FeeCheckResult[] }[] = [];
     for (const prop of properties) {
       const tenantIds = state.tenants.filter((t) => t.propertyId === prop.id).map((t) => t.id);
-      gross += state.ledger
+      const rentCollected = state.ledger
         .filter((e) => tenantIds.includes(e.tenantId) && e.date >= start && e.date <= end && e.type === "Rent Payment")
         .reduce((s, e) => s + e.credit, 0);
+      gross += rentCollected;
       const expenses = state.expenses.filter((e) => e.propertyId === prop.id && e.date >= start && e.date <= end);
       for (const e of expenses) {
         const group =
@@ -521,9 +526,17 @@ function EofyReport() {
       }
       const loan = state.loans.find((l) => l.propertyId === prop.id);
       if (loan) interest += (loan.totalBalance * loan.interestRate) / 100;
+
+      const agent = state.providers.find((p) => p.propertyId === prop.id && p.role === "Agent");
+      if (agent && hasFeeTerms(agent)) {
+        const results = verifyAgentFees({ provider: agent, rentCollected, lines: collectAgentFeeLines(expenses) });
+        if (results.length > 0) {
+          feeChecksByProperty.push({ propertyLabel: prop.alias || prop.address, agentName: agent.name, results });
+        }
+      }
     }
     const label = scopeLabel();
-    setReport({ gross, byCategory, interest, total: totalExp, net: gross - totalExp - interest, scopeLabel: label });
+    setReport({ gross, byCategory, interest, total: totalExp, net: gross - totalExp - interest, scopeLabel: label, feeChecksByProperty });
     addReportHistoryEntry({ fy, scopeLabel: label, generatedAt: todayISO() });
   };
 
@@ -659,6 +672,23 @@ function EofyReport() {
                   <div className="text-xs text-muted-foreground">No expenses in this period.</div>
                 )}
               </div>
+              {report.feeChecksByProperty.length > 0 && (
+                <div>
+                  <div className="mb-1 text-xs font-medium">Property manager fee verification</div>
+                  <div className="space-y-3">
+                    {report.feeChecksByProperty.map((f) => (
+                      <div key={f.propertyLabel} className="space-y-1">
+                        <div className="text-xs text-muted-foreground">
+                          {f.propertyLabel} — {f.agentName}
+                        </div>
+                        {f.results.map((r) => (
+                          <FeeCheckRow key={r.type} result={r} />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

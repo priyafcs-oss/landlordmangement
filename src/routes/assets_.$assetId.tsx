@@ -17,6 +17,7 @@ import {
   FileText,
   FolderOpen,
   ShieldCheck,
+  BadgeCheck,
   Users2,
   ImageIcon,
   Pencil,
@@ -32,6 +33,7 @@ import {
   PropertyPnLTab,
   PropertyComplianceTab,
   PropertyProvidersTab,
+  PropertyFeeVerificationTab,
   PropertyMediaTab,
   PropertyDialog,
 } from "@/components/PropertyShared";
@@ -58,6 +60,7 @@ type Section =
   | "pnl"
   | "compliance"
   | "providers"
+  | "feeVerification"
   | "media"
   | "documents";
 
@@ -74,6 +77,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "pnl", label: "P&L", icon: FileText, group: "Finance" },
   { section: "compliance", label: "Compliance", icon: ShieldCheck },
   { section: "providers", label: "Providers", icon: Users2 },
+  { section: "feeVerification", label: "Fee Verification", icon: BadgeCheck },
   { section: "media", label: "Media", icon: ImageIcon },
   { section: "documents", label: "Documents", icon: FolderOpen },
 ];
@@ -227,6 +231,7 @@ function PropertyAssetPage() {
         {section === "pnl" && <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
         {section === "compliance" && <PropertyComplianceTab prop={prop} />}
         {section === "providers" && <PropertyProvidersTab propertyId={prop.id} />}
+        {section === "feeVerification" && <PropertyFeeVerificationTab propertyId={prop.id} />}
         {section === "media" && <PropertyMediaTab prop={prop} />}
         {section === "documents" && <DocumentsContent propertyId={prop.id} />}
       </div>
