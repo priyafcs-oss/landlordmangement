@@ -15,6 +15,7 @@ import {
   Calculator,
   LineChart,
   FileText,
+  FolderOpen,
   ShieldCheck,
   Users2,
   ImageIcon,
@@ -35,6 +36,7 @@ import {
   PropertyDialog,
 } from "@/components/PropertyShared";
 import { LedgerTab } from "@/routes/transactions";
+import { DocumentsContent } from "@/routes/documents";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -56,7 +58,8 @@ type Section =
   | "pnl"
   | "compliance"
   | "providers"
-  | "media";
+  | "media"
+  | "documents";
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
   { section: "overview", label: "Overview", icon: LayoutDashboard },
@@ -72,6 +75,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "compliance", label: "Compliance", icon: ShieldCheck },
   { section: "providers", label: "Providers", icon: Users2 },
   { section: "media", label: "Media", icon: ImageIcon },
+  { section: "documents", label: "Documents", icon: FolderOpen },
 ];
 
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
@@ -224,6 +228,7 @@ function PropertyAssetPage() {
         {section === "compliance" && <PropertyComplianceTab prop={prop} />}
         {section === "providers" && <PropertyProvidersTab propertyId={prop.id} />}
         {section === "media" && <PropertyMediaTab prop={prop} />}
+        {section === "documents" && <DocumentsContent propertyId={prop.id} />}
       </div>
     </div>
   );

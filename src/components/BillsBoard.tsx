@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,8 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { CheckCircle2, MoreVertical, Receipt, Search } from "lucide-react";
-import { fmtCurrency, todayISO } from "@/lib/calculations";
-import type { AssetType, BillType, PropertyBill } from "@/lib/types";
+import { fmtCurrency, todayISO, CATEGORY_GROUPS } from "@/lib/calculations";
+import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
@@ -39,6 +39,7 @@ export function BillsBoard({
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [status, setStatus] = useState<(typeof STATUS_OPTIONS)[number]>("__all__");
   const [billType, setBillType] = useState<"__all__" | BillType>("__all__");
+  const [category, setCategory] = useState<"__all__" | ExpenseCategory>("__all__");
   const [query, setQuery] = useState("");
 
   const today = todayISO();
@@ -54,6 +55,7 @@ export function BillsBoard({
     .filter((b) => !showPropertyFilter || propertyId === "__all__" || b.propertyId === propertyId)
     .filter((b) => !showPropertyFilter || assetType === "__all__" || assetTypeOf(b) === assetType)
     .filter((b) => billType === "__all__" || b.billType === billType)
+    .filter((b) => category === "__all__" || b.category === category)
     .filter((b) => {
       if (status === "__all__") return true;
       if (status === "Overdue") return isOverdue(b);
@@ -142,6 +144,24 @@ export function BillsBoard({
               ))}
             </SelectContent>
           </Select>
+          <Select value={category} onValueChange={(v) => setCategory(v as typeof category)}>
+            <SelectTrigger className="w-[170px]">
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All categories</SelectItem>
+              {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
+                <SelectGroup key={group}>
+                  <SelectLabel>{group}</SelectLabel>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <Card>
@@ -158,6 +178,7 @@ export function BillsBoard({
                     <th className="px-3 py-2 font-medium">Due Date</th>
                     <th className="px-3 py-2 font-medium">Description</th>
                     <th className="px-3 py-2 font-medium">Provider</th>
+                    <th className="px-3 py-2 font-medium">Category</th>
                     <th className="px-3 py-2 font-medium">Source</th>
                     <th className="px-3 py-2 text-right font-medium">Amount</th>
                     <th className="w-10 px-2 py-2" />
@@ -186,6 +207,7 @@ export function BillsBoard({
                           />
                         </td>
                         <td className="px-3 py-2 text-xs">{b.providerName ?? "—"}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{b.category ?? "—"}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{b.source ?? "Manual"}</td>
                         <td className={"px-3 py-2 text-right font-medium " + (overdue ? "text-destructive" : "")}>
                           {fmtCurrency(b.amount)}

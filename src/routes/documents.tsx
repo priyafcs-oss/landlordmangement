@@ -27,6 +27,7 @@ interface DocumentEntry {
     | "Maintenance"
     | "Condition Report"
     | "Lease Agreement"
+    | "Tenant Document"
     | "Rent Statement"
     | "Property Document"
     | "Depreciation Report"
@@ -45,6 +46,20 @@ interface DocumentEntry {
   subject?: string;
   emailBody?: string;
 }
+
+/** Groups the flat entry list into labelled sections so a growing pile of paperwork stays
+ * scannable instead of one long undifferentiated feed — order here is the display order. */
+const DOCUMENT_GROUPS: { label: string; kinds: DocumentEntry["kind"][] }[] = [
+  { label: "Leases & Tenant Documents", kinds: ["Lease Agreement", "Tenant Document"] },
+  { label: "Rent Statements", kinds: ["Rent Statement"] },
+  { label: "Property & Compliance", kinds: ["Property Document"] },
+  { label: "Loans", kinds: ["Loan Document", "Loan Statement"] },
+  { label: "Depreciation & Cost Base", kinds: ["Depreciation Report"] },
+  { label: "Maintenance & Condition Reports", kinds: ["Maintenance", "Condition Report"] },
+  { label: "Bank Statements", kinds: ["Bank Statement"] },
+  { label: "Property Sale", kinds: ["Property Sale"] },
+  { label: "Unrecognised", kinds: ["Unrecognised"] },
+];
 
 function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["kind"] {
   switch (kind) {
@@ -112,14 +127,72 @@ function DocumentsPage() {
   );
 }
 
-/** Extracted so the Assets left-nav can embed the same content without the page-level heading. */
-export function DocumentsContent() {
+/** Extracted so the Assets left-nav and a property's own Documents section can embed the same
+ * content — passing `propertyId` locks the view to that one property (hides the property picker,
+ * same lockedPropertyId pattern as LedgerTab/BillsBoard) without the page-level heading. */
+export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state } = useStore();
-  const [propertyId, setPropertyId] = useState("__all__");
+  const [propertyFilter, setPropertyFilter] = useState("__all__");
   const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
   const [query, setQuery] = useState("");
+  const propertyId = lockedPropertyId ?? propertyFilter;
 
   const entries: DocumentEntry[] = [
+    // A tenant's signed lease, ID proof and bond transfer form are entered directly on the
+    // Tenant record (TenantDialog) rather than through the AI intake pipeline, so unlike every
+    // other kind below these never showed up here at all until now.
+    ...state.tenants.flatMap((t): DocumentEntry[] => {
+      const out: DocumentEntry[] = [];
+      if (t.leaseDocumentFileData) {
+        out.push({
+          id: `${t.id}-lease`,
+          kind: "Lease Agreement",
+          date: t.leaseStart ?? "",
+          propertyId: t.propertyId,
+          label: `${t.name} — lease agreement`,
+          fileName: t.leaseDocumentFileName,
+          fileData: t.leaseDocumentFileData,
+        });
+      }
+      if (t.idProofFileData) {
+        out.push({
+          id: `${t.id}-id`,
+          kind: "Tenant Document",
+          date: t.leaseStart ?? "",
+          propertyId: t.propertyId,
+          label: `${t.name} — ID proof`,
+          fileName: t.idProofFileName,
+          fileData: t.idProofFileData,
+        });
+      }
+      if (t.bondTransferFileData) {
+        out.push({
+          id: `${t.id}-bond`,
+          kind: "Tenant Document",
+          date: t.bondLodgementDate ?? t.leaseStart ?? "",
+          propertyId: t.propertyId,
+          label: `${t.name} — bond transfer form`,
+          fileName: t.bondTransferFileName,
+          fileData: t.bondTransferFileData,
+        });
+      }
+      return out;
+    }),
+    // Past leases archived at renewal time keep their own signed document.
+    ...state.leaseHistory
+      .filter((h) => h.leaseDocumentFileData)
+      .map((h) => {
+        const tenant = state.tenants.find((t) => t.id === h.tenantId);
+        return {
+          id: `${h.id}-lease`,
+          kind: "Lease Agreement" as const,
+          date: h.pastStartDate,
+          propertyId: tenant?.propertyId,
+          label: `${tenant?.name ?? "Former tenant"} — lease (${h.pastStartDate} to ${h.pastEndDate})`,
+          fileName: h.leaseDocumentFileName,
+          fileData: h.leaseDocumentFileData,
+        };
+      }),
     // Only expenses that are themselves reusable reference material — a maintenance job's
     // invoice, or anything carrying a warranty — not every routine one-off transaction.
     ...state.expenses
@@ -192,6 +265,7 @@ export function DocumentsContent() {
           <SelectContent>
             <SelectItem value="__all__">All types</SelectItem>
             <SelectItem value="Lease Agreement">Lease agreements</SelectItem>
+            <SelectItem value="Tenant Document">Tenant documents (ID, bond)</SelectItem>
             <SelectItem value="Rent Statement">Rent statements</SelectItem>
             <SelectItem value="Property Document">Property documents</SelectItem>
             <SelectItem value="Depreciation Report">Depreciation reports</SelectItem>
@@ -204,22 +278,24 @@ export function DocumentsContent() {
             <SelectItem value="Unrecognised">Unrecognised</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={propertyId} onValueChange={setPropertyId}>
-          <SelectTrigger className="w-[220px]">
-            <SelectValue placeholder="All properties" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All properties</SelectItem>
-            {state.properties.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.alias || p.address}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!lockedPropertyId && (
+          <Select value={propertyFilter} onValueChange={setPropertyFilter}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="All properties" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All properties</SelectItem>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.alias || p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-6">
         {filtered.length === 0 && (
           <Card>
             <CardContent className="p-6 text-center text-sm text-muted-foreground">
@@ -228,25 +304,39 @@ export function DocumentsContent() {
             </CardContent>
           </Card>
         )}
-        {filtered.map((d) => {
-          const property = state.properties.find((p) => p.id === d.propertyId);
+        {DOCUMENT_GROUPS.map((group) => {
+          const rows = filtered.filter((d) => group.kinds.includes(d.kind));
+          if (rows.length === 0) return null;
           return (
-            <Card key={`${d.kind}-${d.id}`}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{d.kind}</Badge>
-                    <span className="font-medium">{d.label}</span>
-                    {d.amount !== undefined && <span className="text-muted-foreground">{fmtCurrency(d.amount)}</span>}
-                    {d.status && <Badge variant="secondary">{d.status}</Badge>}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {d.date || "—"} {property && `• ${property.alias || property.address}`}
-                  </div>
-                </div>
-                <DocumentLinks fileName={d.fileName} fileData={d.fileData} subject={d.subject} emailBody={d.emailBody} />
-              </CardContent>
-            </Card>
+            <div key={group.label} className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {group.label}
+                <Badge variant="outline" className="font-normal">
+                  {rows.length}
+                </Badge>
+              </div>
+              {rows.map((d) => {
+                const property = state.properties.find((p) => p.id === d.propertyId);
+                return (
+                  <Card key={`${d.kind}-${d.id}`}>
+                    <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{d.kind}</Badge>
+                          <span className="font-medium">{d.label}</span>
+                          {d.amount !== undefined && <span className="text-muted-foreground">{fmtCurrency(d.amount)}</span>}
+                          {d.status && <Badge variant="secondary">{d.status}</Badge>}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {d.date || "—"} {!lockedPropertyId && property && `• ${property.alias || property.address}`}
+                        </div>
+                      </div>
+                      <DocumentLinks fileName={d.fileName} fileData={d.fileData} subject={d.subject} emailBody={d.emailBody} />
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           );
         })}
       </div>

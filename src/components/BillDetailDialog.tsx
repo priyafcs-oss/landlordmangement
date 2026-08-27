@@ -8,7 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -16,8 +18,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CheckCircle2, Trash2, Plus, Pencil, Mail } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency, todayISO, billTypeToChargeType } from "@/lib/calculations";
-import type { BillType, BillLineItem, PropertyBill } from "@/lib/types";
+import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS } from "@/lib/calculations";
+import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { base64ToBlob, mimeForFileName } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
@@ -104,6 +106,7 @@ export function BillDetailDialog({
     periodEnd: bill.periodEnd ?? "",
     notes: bill.notes ?? "",
     dueDate: bill.dueDate,
+    category: (bill.category ?? billTypeToDefaultCategory(bill.billType)) as ExpenseCategory,
   });
   const [lineItems, setLineItems] = useState<LineItemRow[]>(toLineItemRows(bill.lineItems));
 
@@ -119,6 +122,7 @@ export function BillDetailDialog({
       periodEnd: b.periodEnd ?? "",
       notes: b.notes ?? "",
       dueDate: b.dueDate,
+      category: (b.category ?? billTypeToDefaultCategory(b.billType)) as ExpenseCategory,
     });
     setLineItems(toLineItemRows(b.lineItems));
     setEditingSchedule(false);
@@ -161,6 +165,8 @@ export function BillDetailDialog({
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
       notes: form.notes || undefined,
+      category: form.category,
+      taxCategory: expenseCategoryToTaxCategory(form.category),
       lineItems: lineItems.filter((li) => parseFloat(li.amount) > 0).map((li) => {
         const amount = parseFloat(li.amount) || 0;
         const nowRecharging = li.rechargeToTenant && li.tenantId && !li.recharged;
@@ -368,6 +374,25 @@ export function BillDetailDialog({
                 </div>
                 <Field label="Reference #">
                   <Input value={form.referenceNumber} onChange={(e) => setForm((f) => ({ ...f, referenceNumber: e.target.value }))} />
+                </Field>
+                <Field label="Category">
+                  <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v as ExpenseCategory }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
+                        <SelectGroup key={group}>
+                          <SelectLabel>{group}</SelectLabel>
+                          {categories.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Issue date">
                   <Input type="date" value={form.issueDate} onChange={(e) => setForm((f) => ({ ...f, issueDate: e.target.value }))} />
