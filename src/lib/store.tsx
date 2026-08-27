@@ -57,6 +57,51 @@ const defaultProfile: LandlordProfile = {
   notifySms: false,
 };
 
+/** Bumped only if AppState's shape changes in a way old cached data couldn't safely fill in for. */
+const CACHE_KEY = "landlord-os-cache-v1";
+/** Above this length a string is almost certainly base64 file/photo data, not real field content
+ * (addresses, notes, descriptions) — stripped from the cached snapshot so a portfolio with a few
+ * PDFs/photos doesn't blow past localStorage's ~5-10MB per-origin quota. The full value (including
+ * every file) still arrives moments later from the real `refresh()` this cache only front-runs. */
+const MAX_CACHED_STRING_LENGTH = 2000;
+
+function stripLargeStrings(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripLargeStrings);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = stripLargeStrings(v);
+    return out;
+  }
+  if (typeof value === "string" && value.length > MAX_CACHED_STRING_LENGTH) return undefined;
+  return value;
+}
+
+/**
+ * Instant-paint cache: every route waited on the same `Promise.all` of ~22 tables before anything
+ * rendered, so even a page that only needs 3-4 of them (e.g. Rental Hub) sat behind the slowest
+ * one. Reading last session's snapshot synchronously on mount lets the UI paint immediately with
+ * "probably still correct" data while the real `refresh()` runs underneath and silently corrects
+ * it — first-ever load (empty cache) is unchanged, but every load after that is instant.
+ */
+function loadCache(): AppState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CACHE_KEY);
+    return raw ? (JSON.parse(raw) as AppState) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(state: AppState) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(stripLargeStrings(state)));
+  } catch {
+    // Quota exceeded or a serialization failure — caching is a pure optimization, never fatal.
+  }
+}
+
 const empty: AppState = {
   properties: [],
   tenants: [],
@@ -237,8 +282,8 @@ function snapshotLoanBalance(loanId: string, balance: number): LoanBalanceSnapsh
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AppState>(empty);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<AppState>(() => loadCache() ?? empty);
+  const [loading, setLoading] = useState(() => loadCache() === null);
 
   const refresh = async () => {
     const [
@@ -290,7 +335,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
       loadSettings(),
     ]);
-    setState({
+    const next: AppState = {
       properties,
       tenants,
       providers,
@@ -319,7 +364,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tenantInfoStatement:
         (settings?.tenantInfoStatement as AppState["tenantInfoStatement"] | undefined) ?? null,
       reportHistory: (settings?.reportHistory as ReportHistoryEntry[] | undefined) ?? [],
-    });
+    };
+    setState(next);
+    saveCache(next);
     setLoading(false);
   };
 
