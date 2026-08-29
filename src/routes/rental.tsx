@@ -64,6 +64,7 @@ import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
 import { MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { DocumentLink } from "@/components/DocumentLink";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
@@ -238,18 +239,18 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
         {(tenant.idProofFileName || tenant.bondTransferFileName || latestRentChange) && (
           <div className="flex flex-wrap items-center gap-1">
             {tenant.idProofFileName && tenant.idProofFileData && (
-              <a href={tenant.idProofFileData} download={tenant.idProofFileName}>
+              <DocumentLink fileName={tenant.idProofFileName} fileData={tenant.idProofFileData}>
                 <Badge variant="outline" className="gap-1">
                   <IdCard className="h-3 w-3" /> ID Proof
                 </Badge>
-              </a>
+              </DocumentLink>
             )}
             {tenant.bondTransferFileName && tenant.bondTransferFileData && (
-              <a href={tenant.bondTransferFileData} download={tenant.bondTransferFileName}>
+              <DocumentLink fileName={tenant.bondTransferFileName} fileData={tenant.bondTransferFileData}>
                 <Badge variant="outline" className="gap-1">
                   <FileText className="h-3 w-3" /> Bond Transfer
                 </Badge>
-              </a>
+              </DocumentLink>
             )}
             {latestRentChange && (
               <span className="text-xs text-muted-foreground">
@@ -317,11 +318,11 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
                     }
                   />
                   {hasLeaseDoc && (
-                    <a href={tenant.leaseDocumentFileData} download={tenant.leaseDocumentFileName}>
+                    <DocumentLink fileName={tenant.leaseDocumentFileName} fileData={tenant.leaseDocumentFileData}>
                       <Badge variant="outline" className="gap-1">
                         <FileText className="h-3 w-3" /> Lease PDF
                       </Badge>
-                    </a>
+                    </DocumentLink>
                   )}
                 </div>
               </div>

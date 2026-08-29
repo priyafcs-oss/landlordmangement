@@ -95,6 +95,7 @@ import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } f
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { DocumentLink } from "@/components/DocumentLink";
 import { FileSignature } from "lucide-react";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -2898,9 +2899,9 @@ export function PropertyDetailsTab({
             <div key={e.id} className="flex justify-between rounded border p-2 text-xs">
               <span>{e.itemName}</span>
               {e.invoiceFileData ? (
-                <a href={e.invoiceFileData} download={e.invoiceFileName} className="text-primary underline">
+                <DocumentLink fileName={e.invoiceFileName} fileData={e.invoiceFileData} className="text-primary underline">
                   {e.invoiceFileName}
-                </a>
+                </DocumentLink>
               ) : (
                 <span className="text-muted-foreground">{e.invoiceFileName}</span>
               )}
@@ -3837,13 +3838,9 @@ export function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
           {entry.pastFrequency}
         </span>
         {entry.leaseDocumentFileData && (
-          <a
-            href={entry.leaseDocumentFileData}
-            download={entry.leaseDocumentFileName || "lease.pdf"}
-            className="text-primary underline"
-          >
+          <DocumentLink fileName={entry.leaseDocumentFileName || "lease.pdf"} fileData={entry.leaseDocumentFileData} className="text-primary underline">
             View lease
-          </a>
+          </DocumentLink>
         )}
         <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => setEditing(true)}>
           <Pencil className="h-3 w-3" />

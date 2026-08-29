@@ -39,6 +39,7 @@ import { todayISO, daysUntil, inspectionDueStatus, addMonths, propertyInspection
 import { openGmailCompose } from "@/lib/emailPdf";
 import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Property, Tenant } from "@/lib/types";
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
+import { DocumentLink } from "@/components/DocumentLink";
 
 export const Route = createFileRoute("/inspections")({
   head: () => ({
@@ -764,9 +765,9 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
           <div className="text-sm font-medium">Report</div>
           <Input type="file" accept="application/pdf,image/*" onChange={(e) => handleReportFile(e.target.files?.[0])} />
           {fileFileName && fileData && (
-            <a href={fileData} download={fileFileName} className="inline-flex items-center gap-1 text-xs text-primary underline">
+            <DocumentLink fileName={fileFileName} fileData={fileData} className="inline-flex items-center gap-1 text-xs text-primary underline">
               <FileText className="h-3 w-3" /> {fileFileName}
-            </a>
+            </DocumentLink>
           )}
         </div>
 

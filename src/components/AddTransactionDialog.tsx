@@ -25,12 +25,12 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, CATEGORY_GROUPS, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
+import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
-import type { ExpenseCategory } from "@/lib/calculations";
+import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, ExpenseProposalPayload } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
@@ -74,7 +74,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 interface LineItemRow {
   key: string;
   description: string;
-  category: ExpenseCategory;
+  category: ExpenseCategory | IncomeCategory;
   direction: "Expense" | "Income";
   amount: string;
   gst: string;
@@ -92,6 +92,12 @@ const blankLineItem = (): LineItemRow => ({
   rechargeToTenant: false,
   tenantId: "",
 });
+
+/** Switching a line item's direction resets its category to a sensible default for that side —
+ * otherwise toggling Income->Expense (or back) could silently save an income-only or
+ * expense-only category value that makes no sense for the new direction. */
+const defaultCategoryFor = (direction: LineItemRow["direction"]): LineItemRow["category"] =>
+  direction === "Income" ? "Other Rental Income" : "Sundry Rental Expenses";
 
 interface ExtractResult {
   ok?: boolean;
@@ -362,8 +368,10 @@ export function AddTransactionDialog({
           date: form.date,
           propertyId,
           unitId: perPropertyDivisor === 1 && form.unitId && form.unitId !== SHARED_UNIT ? form.unitId : undefined,
-          taxCategory: expenseCategoryToTaxCategory(li.category),
+          taxCategory: li.direction === "Income" ? "Immediate Deduction" : expenseCategoryToTaxCategory(li.category),
           category: li.category,
+          providerName: form.payee.trim() || undefined,
+          gst: li.gst ? (parseFloat(li.gst) || 0) / perPropertyDivisor : undefined,
           direction: li.direction === "Income" ? "Income" : undefined,
           hasWarranty: false,
           rechargeToTenant: !!(li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1),
@@ -589,21 +597,30 @@ export function AddTransactionDialog({
                       <Input value={li.description} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))} />
                     </Field>
                     <Field label="Category">
-                      <Select value={li.category} onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as ExpenseCategory } : r)))}>
+                      <Select
+                        value={li.category}
+                        onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as LineItemRow["category"] } : r)))}
+                      >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
-                            <SelectGroup key={group}>
-                              <SelectLabel>{group}</SelectLabel>
-                              {categories.map((c) => (
+                          {li.direction === "Income"
+                            ? INCOME_CATEGORIES.map((c) => (
                                 <SelectItem key={c} value={c}>
                                   {c}
                                 </SelectItem>
+                              ))
+                            : Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
+                                <SelectGroup key={group}>
+                                  <SelectLabel>{group}</SelectLabel>
+                                  {categories.map((c) => (
+                                    <SelectItem key={c} value={c}>
+                                      {c}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
                               ))}
-                            </SelectGroup>
-                          ))}
                         </SelectContent>
                       </Select>
                     </Field>
@@ -617,7 +634,15 @@ export function AddTransactionDialog({
                       size="sm"
                       variant={li.direction === "Income" ? "outline" : "destructive"}
                       className="h-8"
-                      onClick={() => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, direction: r.direction === "Income" ? "Expense" : "Income" } : r)))}
+                      onClick={() =>
+                        setLineItems((rows) =>
+                          rows.map((r) => {
+                            if (r.key !== li.key) return r;
+                            const direction = r.direction === "Income" ? "Expense" : "Income";
+                            return { ...r, direction, category: defaultCategoryFor(direction) };
+                          }),
+                        )
+                      }
                     >
                       {li.direction}
                     </Button>

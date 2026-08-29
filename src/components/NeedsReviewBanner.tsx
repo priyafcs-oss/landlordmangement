@@ -9,6 +9,7 @@ import { Check, Copy, DollarSign, FileText, Mail, Pencil, Trash2, TriangleAlert 
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
 import { ExpenseDialog } from "@/components/ExpenseDialog";
+import { DocumentLink } from "@/components/DocumentLink";
 
 function DocumentViewLinks({
   fileName,
@@ -26,9 +27,9 @@ function DocumentViewLinks({
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs">
       {fileData && (
-        <a href={fileData} download={fileName || "document.pdf"} className="inline-flex items-center gap-1 text-primary underline">
+        <DocumentLink fileName={fileName} fileData={fileData} className="inline-flex items-center gap-1 text-primary underline">
           <FileText className="h-3 w-3" /> View PDF
-        </a>
+        </DocumentLink>
       )}
       {emailBody && (
         <>

@@ -53,6 +53,8 @@ export function ExpenseDialog({
           propertyId: expense.propertyId ?? state.properties[0]?.id ?? "",
           unitId: expense.unitId ?? SHARED_UNIT,
           category: (expense.category ?? "Sundry Rental Expenses") as ExpenseCategory,
+          providerName: expense.providerName ?? "",
+          gst: expense.gst !== undefined ? String(expense.gst) : "",
           hasWarranty: expense.hasWarranty,
           warrantyExpiry: expense.warrantyExpiry ?? "",
           rechargeToTenant: expense.rechargeToTenant,
@@ -67,6 +69,8 @@ export function ExpenseDialog({
           propertyId: state.properties[0]?.id ?? "",
           unitId: SHARED_UNIT,
           category: "Sundry Rental Expenses" as ExpenseCategory,
+          providerName: "",
+          gst: "",
           hasWarranty: false,
           warrantyExpiry: "",
           rechargeToTenant: false,
@@ -95,6 +99,8 @@ export function ExpenseDialog({
       propertyId: form.propertyId,
       unitId: form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       category: form.category,
+      providerName: form.providerName.trim() || undefined,
+      gst: form.gst ? parseFloat(form.gst) || 0 : undefined,
       taxCategory: expenseCategoryToTaxCategory(form.category),
       hasWarranty: form.hasWarranty,
       warrantyExpiry: form.hasWarranty ? form.warrantyExpiry : undefined,
@@ -146,6 +152,8 @@ export function ExpenseDialog({
       propertyId: state.properties[0]?.id ?? "",
       unitId: SHARED_UNIT,
       category: "Sundry Rental Expenses",
+      providerName: "",
+      gst: "",
       hasWarranty: false,
       warrantyExpiry: "",
       rechargeToTenant: false,
@@ -175,8 +183,14 @@ export function ExpenseDialog({
           <Field label="Item">
             <Input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} />
           </Field>
+          <Field label="Provider / payee">
+            <Input value={form.providerName} onChange={(e) => setForm({ ...form, providerName: e.target.value })} />
+          </Field>
           <Field label="Cost (AUD)">
             <Input type="number" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
+          </Field>
+          <Field label="GST (AUD)">
+            <Input type="number" value={form.gst} onChange={(e) => setForm({ ...form, gst: e.target.value })} />
           </Field>
           <Field label="Date">
             <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />

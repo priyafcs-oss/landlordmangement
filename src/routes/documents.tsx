@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { FileText, FolderOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange } from "@/lib/calculations";
+import { DocumentLink } from "@/components/DocumentLink";
 import type { AiIntakeProposal } from "@/lib/types";
 
 export const Route = createFileRoute("/documents")({
@@ -676,9 +677,9 @@ function DocumentNameCell({
 
   if (d.fileData) {
     return (
-      <a href={d.fileData} download={d.fileName || "document.pdf"} className="inline-flex items-center hover:underline">
+      <DocumentLink fileName={d.fileName} fileData={d.fileData} className="inline-flex items-center hover:underline">
         {inner}
-      </a>
+      </DocumentLink>
     );
   }
   if (d.emailBody) {

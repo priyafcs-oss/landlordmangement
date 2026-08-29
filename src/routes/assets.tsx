@@ -48,6 +48,7 @@ import { ForecastsContent } from "@/routes/forecasts";
 import { BuffersContent } from "@/routes/buffers";
 import { DocumentsContent } from "@/routes/documents";
 import { InboxContent } from "@/routes/inbox";
+import { DocumentLink } from "@/components/DocumentLink";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/assets")({
@@ -386,14 +387,14 @@ function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClos
             <TabsContent value="documents" className="space-y-2 text-sm">
               {docs.length === 0 && <div className="text-xs text-muted-foreground">No documents attached yet.</div>}
               {docs.map((t) => (
-                <a
+                <DocumentLink
                   key={t.id}
-                  href={t.invoiceFileData}
-                  download={t.invoiceFileName}
+                  fileName={t.invoiceFileName}
+                  fileData={t.invoiceFileData}
                   className="flex items-center gap-2 rounded border p-2 text-xs text-primary underline"
                 >
                   <FileText className="h-3.5 w-3.5" /> {t.invoiceFileName || t.itemName}
-                </a>
+                </DocumentLink>
               ))}
             </TabsContent>
 

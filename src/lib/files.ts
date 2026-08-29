@@ -32,8 +32,16 @@ export function isImageFileName(fileName?: string): boolean {
   return ext in IMAGE_EXT_MIME;
 }
 
+/**
+ * Different upload paths in this app inconsistently store either a full data URL
+ * (`data:application/pdf;base64,...`, e.g. ExpenseDialog/tenant document uploads) or the raw
+ * base64 payload alone with the prefix already stripped (e.g. AddBillDialog/AddTransactionDialog) —
+ * strip a "data:...;base64," prefix here if present so every caller works either way. Raw base64
+ * never legitimately contains a comma, so splitting on the first one is safe.
+ */
 export function base64ToBlob(base64: string, mime: string): Blob {
-  const byteChars = atob(base64);
+  const raw = base64.includes(",") ? base64.slice(base64.indexOf(",") + 1) : base64;
+  const byteChars = atob(raw);
   const byteNumbers = new Array(byteChars.length);
   for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
   return new Blob([new Uint8Array(byteNumbers)], { type: mime });

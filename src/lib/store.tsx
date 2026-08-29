@@ -41,6 +41,7 @@ import {
   saveSettings,
 } from "./db";
 import { paidUpToDateFromPayments, todayISO } from "./calculations";
+import { toast } from "sonner";
 
 const defaultAi: AiConfig = {
   enabled: true,
@@ -286,94 +287,114 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(() => loadCache() === null);
 
   const refresh = async () => {
-    const [
-      properties,
-      tenants,
-      providers,
-      entities,
-      assets,
-      goldDetails,
-      etfDetails,
-      depreciationItems,
-      valuationSnapshots,
-      loanBalanceSnapshots,
-      buffers,
-      ledger,
-      invoices,
-      loans,
-      expenses,
-      inspections,
-      rentChanges,
-      leaseHistory,
-      maintenanceRequests,
-      bills,
-      aiProposals,
-      emailInboxLog,
-      settings,
-    ] = await Promise.all([
-      selectAll<Property>(TABLES.properties),
-      selectAll<Tenant>(TABLES.tenants),
-      selectAll<Provider>(TABLES.providers),
-      selectAll<Entity>(TABLES.entities),
-      selectAll<Asset>(TABLES.assets),
-      selectAll<GoldDetails>(TABLES.goldDetails),
-      selectAll<EtfDetails>(TABLES.etfDetails),
-      selectAll<DepreciationItem>(TABLES.depreciationItems),
-      selectAll<ValuationSnapshot>(TABLES.valuationSnapshots),
-      selectAll<LoanBalanceSnapshot>(TABLES.loanBalanceSnapshots),
-      selectAll<CashBuffer>(TABLES.buffers),
-      selectAll<LedgerEntry>(TABLES.ledger),
-      selectAll<TenantInvoice>(TABLES.invoices),
-      selectAll<Loan>(TABLES.loans),
-      selectAll<Expense>(TABLES.expenses),
-      selectAll<Inspection>(TABLES.inspections),
-      selectAll<RentChange>(TABLES.rentChanges),
-      selectAll<LeaseHistory>(TABLES.leaseHistory),
-      selectAll<MaintenanceRequest>(TABLES.maintenanceRequests),
-      selectAll<PropertyBill>(TABLES.bills),
-      selectAll<AiIntakeProposal>(TABLES.aiProposals),
-      selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
-      loadSettings(),
-    ]);
-    // Units predating PropertyUnit.id (added for dwelling-scoped tenancies/expenses) load with no
-    // id — backfilled here so every consumer always sees a stable one; re-saving the property
-    // then persists it back to the DB, self-healing without requiring a manual edit first.
-    const propertiesWithUnitIds = properties.map((p) =>
-      p.units && p.units.length > 0 ? { ...p, units: p.units.map((u) => (u.id ? u : { ...u, id: uid("unit") })) } : p,
-    );
-    const next: AppState = {
-      properties: propertiesWithUnitIds,
-      tenants,
-      providers,
-      entities,
-      assets,
-      goldDetails,
-      etfDetails,
-      depreciationItems,
-      valuationSnapshots,
-      loanBalanceSnapshots,
-      buffers,
-      ledger,
-      invoices,
-      loans,
-      expenses,
-      inspections,
-      rentChanges,
-      leaseHistory,
-      maintenanceRequests,
-      bills,
-      aiProposals,
-      emailInboxLog,
-      aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
-      landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
-      leaseTemplate: (settings?.leaseTemplate as LeaseTemplateConfig | undefined) ?? null,
-      tenantInfoStatement:
-        (settings?.tenantInfoStatement as AppState["tenantInfoStatement"] | undefined) ?? null,
-      reportHistory: (settings?.reportHistory as ReportHistoryEntry[] | undefined) ?? [],
-    };
-    setState(next);
-    saveCache(next);
-    setLoading(false);
+    try {
+      const [
+        properties,
+        tenants,
+        providers,
+        entities,
+        assets,
+        goldDetails,
+        etfDetails,
+        depreciationItems,
+        valuationSnapshots,
+        loanBalanceSnapshots,
+        buffers,
+        ledger,
+        invoices,
+        loans,
+        expenses,
+        inspections,
+        rentChanges,
+        leaseHistory,
+        maintenanceRequests,
+        bills,
+        aiProposals,
+        emailInboxLog,
+        settings,
+      ] = await Promise.all([
+        selectAll<Property>(TABLES.properties),
+        selectAll<Tenant>(TABLES.tenants),
+        selectAll<Provider>(TABLES.providers),
+        selectAll<Entity>(TABLES.entities),
+        selectAll<Asset>(TABLES.assets),
+        selectAll<GoldDetails>(TABLES.goldDetails),
+        selectAll<EtfDetails>(TABLES.etfDetails),
+        selectAll<DepreciationItem>(TABLES.depreciationItems),
+        selectAll<ValuationSnapshot>(TABLES.valuationSnapshots),
+        selectAll<LoanBalanceSnapshot>(TABLES.loanBalanceSnapshots),
+        selectAll<CashBuffer>(TABLES.buffers),
+        selectAll<LedgerEntry>(TABLES.ledger),
+        selectAll<TenantInvoice>(TABLES.invoices),
+        selectAll<Loan>(TABLES.loans),
+        selectAll<Expense>(TABLES.expenses),
+        selectAll<Inspection>(TABLES.inspections),
+        selectAll<RentChange>(TABLES.rentChanges),
+        selectAll<LeaseHistory>(TABLES.leaseHistory),
+        selectAll<MaintenanceRequest>(TABLES.maintenanceRequests),
+        selectAll<PropertyBill>(TABLES.bills),
+        selectAll<AiIntakeProposal>(TABLES.aiProposals),
+        selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
+        loadSettings(),
+      ]);
+      // Units predating PropertyUnit.id (added for dwelling-scoped tenancies/expenses) load with
+      // no id — backfilled here AND written straight back to the DB so every consumer always sees
+      // the same stable id across reloads. Previously this backfill only lived in memory until the
+      // property was next manually re-saved, so a unitId picked on a bill/expense/tenant one
+      // session (e.g. "Granny flat" on a house + granny flat property) could silently stop
+      // matching after the next reload generated a fresh random id for the same unit.
+      const propertiesWithUnitIds = properties.map((p) => {
+        if (!p.units || p.units.length === 0) return p;
+        let changed = false;
+        const units = p.units.map((u) => {
+          if (u.id) return u;
+          changed = true;
+          return { ...u, id: uid("unit") };
+        });
+        if (changed) void updateRow(TABLES.properties, p.id, { units });
+        return changed ? { ...p, units } : p;
+      });
+      const next: AppState = {
+        properties: propertiesWithUnitIds,
+        tenants,
+        providers,
+        entities,
+        assets,
+        goldDetails,
+        etfDetails,
+        depreciationItems,
+        valuationSnapshots,
+        loanBalanceSnapshots,
+        buffers,
+        ledger,
+        invoices,
+        loans,
+        expenses,
+        inspections,
+        rentChanges,
+        leaseHistory,
+        maintenanceRequests,
+        bills,
+        aiProposals,
+        emailInboxLog,
+        aiConfig: { ...defaultAi, ...((settings?.aiConfig as AiConfig) ?? {}) },
+        landlordProfile: { ...defaultProfile, ...((settings?.landlordProfile as LandlordProfile) ?? {}) },
+        leaseTemplate: (settings?.leaseTemplate as LeaseTemplateConfig | undefined) ?? null,
+        tenantInfoStatement:
+          (settings?.tenantInfoStatement as AppState["tenantInfoStatement"] | undefined) ?? null,
+        reportHistory: (settings?.reportHistory as ReportHistoryEntry[] | undefined) ?? [],
+      };
+      setState(next);
+      saveCache(next);
+    } catch (e) {
+      // selectAll swallows per-table errors and returns [], so this only fires on something more
+      // fundamental (network down, Supabase misconfigured) — surfaced here since a silent failure
+      // previously just left the UI on stale/empty cached data with no indication anything was wrong.
+      console.error("[cloud] refresh failed", e);
+      toast.error("Couldn't load the latest data — check your connection and reload.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -440,16 +461,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void updateRow(TABLES.properties, id, p as Record<string, unknown>);
       set((s) => {
         const existing = s.properties.find((x) => x.id === id);
-        const properties = s.properties.map((x) => (x.id === id ? { ...x, ...p } : x));
         let assets = s.assets;
         let valuationSnapshots = s.valuationSnapshots;
+        let assetIdPatch: Partial<Property> = {};
         const touchesMirroredFields =
           p.alias !== undefined ||
           p.address !== undefined ||
           p.purchaseDate !== undefined ||
           p.purchasePrice !== undefined ||
           p.currentValue !== undefined;
-        if (existing?.assetId && touchesMirroredFields) {
+        if (existing && !existing.assetId) {
+          // A property that predates the Property<->Asset mirror (or whose mirror creation
+          // failed) never gets an Asset row from the branch below, since that only ever updates
+          // an existing mirror — it silently stays invisible on the Assets page forever. Create
+          // the missing mirror now, the same shape addProperty gives a brand-new property.
+          const updated = { ...existing, ...p };
+          const assetId = uid("asset");
+          const assetRow: Asset = {
+            id: assetId,
+            assetType: "Property",
+            name: updated.alias || updated.address,
+            purchaseDate: updated.purchaseDate,
+            purchaseCost: updated.purchasePrice,
+            currentValue: updated.currentValue,
+            status: "Active",
+            linkedPropertyId: id,
+          };
+          void upsertRow(TABLES.assets, assetRow as unknown as Record<string, unknown>);
+          void updateRow(TABLES.properties, id, { assetId });
+          assets = [...assets, assetRow];
+          assetIdPatch = { assetId };
+          valuationSnapshots = [...valuationSnapshots, snapshotValuation(assetId, assetRow.currentValue)];
+        } else if (existing?.assetId && touchesMirroredFields) {
           const updated = { ...existing, ...p };
           const assetPatch: Partial<Asset> = {
             name: updated.alias || updated.address,
@@ -463,6 +506,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             valuationSnapshots = [...valuationSnapshots, snapshotValuation(existing.assetId, p.currentValue)];
           }
         }
+        const properties = s.properties.map((x) => (x.id === id ? { ...x, ...p, ...assetIdPatch } : x));
         return { ...s, properties, assets, valuationSnapshots };
       });
     },

@@ -32,7 +32,35 @@ export const ANNUAL_COST_FIELD: Partial<Record<BillType, keyof Property>> = {
 
 /** Categories offered on a transaction's line items — broader than BillType since a one-off
  * transaction can be almost anything, not just a recurring utility/rates bill. */
-export { EXPENSE_CATEGORIES, CATEGORY_GROUPS, categoryGroupOf, type ExpenseCategory, type CategoryGroup } from "./types";
+export {
+  EXPENSE_CATEGORIES,
+  CATEGORY_GROUPS,
+  categoryGroupOf,
+  INCOME_CATEGORIES,
+  type ExpenseCategory,
+  type CategoryGroup,
+  type IncomeCategory,
+} from "./types";
+
+/** Short display label for a category's tax treatment — the same four groups categoryGroupOf
+ * resolves to, worded the way a landlord (not the ATO) would read them in a table column. An
+ * income-only category (not in CATEGORY_GROUPS) or a legacy unrecognised value both fall through
+ * to "—" rather than the misleading "Capital Cost" that expenseCategoryToTaxCategory's binary
+ * default would imply. */
+export function taxTreatmentLabel(category?: string | null): string {
+  switch (categoryGroupOf(category)) {
+    case "Running Expenses":
+      return "Immediate Deduction";
+    case "Depreciation":
+      return "Depreciation";
+    case "Cost Base (Capital)":
+      return "Capital Cost";
+    case "Non-Deductible":
+      return "Non-Deductible";
+    default:
+      return "—";
+  }
+}
 
 /** Only the "Running Expenses" group is an immediate deduction — Depreciation, Cost Base
  * (Capital), and Non-Deductible items all fall on the "Capital Works" side of this coarser

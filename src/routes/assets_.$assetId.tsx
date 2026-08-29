@@ -109,7 +109,11 @@ function PropertyAssetPage() {
   const [section, setSection] = useState<Section>("overview");
 
   const asset = state.assets.find((a) => a.id === assetId);
-  const prop = asset?.linkedPropertyId ? state.properties.find((p) => p.id === asset.linkedPropertyId) : undefined;
+  // Looked up both directions (Asset.linkedPropertyId -> Property.id, and Property.assetId ->
+  // Asset.id) rather than only the forward direction — the two are meant to be kept in sync by
+  // the store's addProperty/updateProperty, but a property saved before that mirror existed, or
+  // one whose mirror update silently no-op'd, can leave them pointing at each other only one way.
+  const prop = asset ? state.properties.find((p) => p.id === asset.linkedPropertyId || p.assetId === asset.id) : undefined;
 
   // On first paint (SSR, or the moment before the client's initial Supabase fetch resolves),
   // state.assets/state.properties are still empty — without this check every property page

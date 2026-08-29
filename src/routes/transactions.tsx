@@ -17,11 +17,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, ChevronDown, ChevronUp } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
 import type { AssetType, CategoryGroup } from "@/lib/types";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
+import { DocumentLink } from "@/components/DocumentLink";
+import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ExpenseDialog } from "@/components/ExpenseDialog";
 import { FeeCheckRow } from "@/components/PropertyShared";
@@ -74,8 +76,14 @@ interface TxRow {
   propertyId?: string;
   assetId?: string;
   amount: number; // positive = income, negative = outgoing
+  /** GST component of `amount`, when known — expense rows only (rent has no GST). */
+  gst?: number;
   source?: "Manual" | "Email" | "Upload";
   needsAttention?: boolean;
+  /** Who this transaction was paid to (expenses, always populated) or received from (rent —
+   * the collecting agent when paid via a rent statement, otherwise the tenant paying directly;
+   * left blank if neither is known). */
+  providerName?: string;
   /** Set only for expense-backed rows — the only ones editable/deletable from this table.
    * Rent-payment ledger rows have their own edit/delete flow on the tenant's own ledger, which
    * also reverses the paid-up-to-date shift correctly; this table doesn't duplicate that. */
@@ -108,10 +116,35 @@ function formatMonthLabel(key: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
+type TxSortField = "date" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount";
+
+function txSortValue(r: TxRow, field: TxSortField, propertyLabel: string): string | number {
+  switch (field) {
+    case "date":
+      return r.date;
+    case "description":
+      return r.description;
+    case "provider":
+      return r.providerName ?? "";
+    case "property":
+      return propertyLabel;
+    case "tenant":
+      return r.tenantName ?? "";
+    case "category":
+      return r.category;
+    case "taxTreatment":
+      return taxTreatmentLabel(r.category);
+    case "source":
+      return r.source ?? "";
+    case "amount":
+      return r.amount;
+  }
+}
+
 export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state } = useStore();
   const [fy, setFy] = useState("all");
-  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy" | "provider" | "category">("none");
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
@@ -120,6 +153,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
   const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false });
+  const [sort, setSort] = useState<SortState<TxSortField> | null>(null);
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const fyLabel = fy === "all" ? "All time" : `FY ${fy}`;
 
@@ -152,6 +186,12 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   // Every bill that's ever marked Paid is guaranteed a paired Expense (markBillPaid creates one
   // the first time, the email-intake path pairs one at creation) — so state.expenses alone already
   // covers paid bills; adding state.bills here too would double-count them.
+  /** Rent collected via an uploaded agent statement shows the agent as the provider (that's who
+   * actually handled the money); rent recorded any other way is assumed paid directly by the
+   * tenant. Left blank rather than guessing when neither is on file. */
+  const agentNameFor = (propertyId?: string) =>
+    propertyId ? state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent")?.name : undefined;
+
   const allRows: TxRow[] = [
     ...state.ledger
       .filter((e) => e.credit > 0)
@@ -165,6 +205,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           propertyId: tenant?.propertyId,
           amount: e.credit,
           source: e.source === "rent_statement" ? ("Upload" as const) : ("Manual" as const),
+          providerName: e.source === "rent_statement" ? agentNameFor(tenant?.propertyId) : tenant?.name,
           tenantId: e.tenantId,
           tenantName: tenant?.name,
           unitId: tenant?.unitId,
@@ -182,7 +223,9 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         propertyId: e.propertyId,
         assetId: e.assetId,
         amount: e.direction === "Income" ? e.cost : -e.cost,
+        gst: e.gst,
         source: e.source === "email_auto" ? ("Email" as const) : e.source === "upload" ? ("Upload" as const) : ("Manual" as const),
+        providerName: e.providerName,
         needsAttention: e.status === "needs_review",
         expenseId: e.id,
         tenantId: tenant?.id,
@@ -196,6 +239,10 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   ];
 
   const assetTypeOf = (r: TxRow) => state.assets.find((a) => a.id === r.assetId)?.assetType;
+  const propertyLabelOf = (r: TxRow) => {
+    const prop = state.properties.find((p) => p.id === r.propertyId);
+    return prop?.alias || prop?.address || state.assets.find((a) => a.id === r.assetId)?.name || "";
+  };
   const anyTypeFilter = typeFilter.income || typeFilter.expense;
   const anySourceFilter = sourceFilter.manual || sourceFilter.email || sourceFilter.upload;
 
@@ -205,7 +252,11 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
     .filter((r) => tenantId === "__all__" || r.tenantId === tenantId)
     .filter((r) => unitId === "__all__" || r.unitId === unitId)
-    .filter((r) => !query || `${r.description} ${r.category} ${r.tenantName ?? ""}`.toLowerCase().includes(query.toLowerCase()))
+    .filter(
+      (r) =>
+        !query ||
+        `${r.description} ${r.category} ${r.tenantName ?? ""} ${r.providerName ?? ""}`.toLowerCase().includes(query.toLowerCase()),
+    )
     .filter((r) => !needsAttentionOnly || r.needsAttention)
     .filter((r) => !anyTypeFilter || (typeFilter.income && r.amount > 0) || (typeFilter.expense && r.amount < 0))
     .filter(
@@ -215,10 +266,17 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         (sourceFilter.email && r.source === "Email") ||
         (sourceFilter.upload && r.source === "Upload"),
     )
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort((a, b) => {
+      if (!sort) return a.date < b.date ? 1 : -1;
+      const av = txSortValue(a, sort.field, propertyLabelOf(a));
+      const bv = txSortValue(b, sort.field, propertyLabelOf(b));
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
 
   const totalIncome = filtered.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
   const totalExpenses = filtered.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0);
+  const totalGst = filtered.reduce((s, r) => s + (r.gst ?? 0), 0);
   const byCategory = filtered
     .filter((r) => r.amount < 0)
     .reduce<Record<string, number>>((acc, r) => {
@@ -237,20 +295,40 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     if (groupBy === "none") return null;
     const map = new Map<string, TxRow[]>();
     for (const r of filtered) {
-      const key = groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date);
+      const key =
+        groupBy === "month"
+          ? r.date.slice(0, 7)
+          : groupBy === "fy"
+            ? ausFinancialYear(r.date)
+            : groupBy === "provider"
+              ? r.providerName || "No provider"
+              : r.category;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
-    // Most recent group first, matching the flat (ungrouped) list's own sort order.
-    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+    // Date-keyed groups (month/FY) read newest-first, matching the flat list's own sort order;
+    // provider/category groups have no inherent chronology, so those read alphabetically instead.
+    const dateKeyed = groupBy === "month" || groupBy === "fy";
+    return [...map.entries()].sort((a, b) => (dateKeyed ? (a[0] < b[0] ? 1 : -1) : a[0].localeCompare(b[0])));
   }, [filtered, groupBy]);
 
   const exportCsv = () => {
-    const header = ["Date", "Description", "Category", "Tenant", "Source", "Asset", "Amount"];
+    const header = ["Date", "Description", "Provider", "Property", "Tenant", "Category", "Tax Treatment", "Source", "Amount", "GST"];
     const rows = filtered.map((r) => {
       const prop = state.properties.find((p) => p.id === r.propertyId);
       const asset = state.assets.find((a) => a.id === r.assetId);
-      return [r.date, r.description, r.category, r.tenantName ?? "", r.source ?? "", prop?.alias || prop?.address || asset?.name || "", r.amount];
+      return [
+        r.date,
+        r.description,
+        r.providerName ?? "",
+        prop?.alias || prop?.address || asset?.name || "",
+        r.tenantName ?? "",
+        r.category,
+        taxTreatmentLabel(r.category),
+        r.source ?? "",
+        r.amount,
+        r.gst ?? "",
+      ];
     });
     downloadCsv(`transactions-${fy}.csv`, header, rows);
     toast.success("Transactions CSV downloaded");
@@ -285,6 +363,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               <SelectItem value="none">No grouping</SelectItem>
               <SelectItem value="month">By month</SelectItem>
               <SelectItem value="fy">By financial year</SelectItem>
+              <SelectItem value="provider">By provider</SelectItem>
+              <SelectItem value="category">By category</SelectItem>
             </SelectContent>
           </Select>
           {!lockedPropertyId && (
@@ -389,7 +469,12 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         <div className="lg:col-span-2">
           <Card>
             {groupBy === "none" || !groups ? (
-              <TxTable rows={filtered} lockedPropertyId={lockedPropertyId} />
+              <TxTable
+                rows={filtered}
+                lockedPropertyId={lockedPropertyId}
+                sort={sort}
+                onSort={(f) => setSort((s) => toggleSort(s, f))}
+              />
             ) : (
               <div className="space-y-2 p-2">
                 {groups.length === 0 && (
@@ -398,20 +483,36 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                 {groups.map(([key, groupRows]) => (
                   <TxGroupSection
                     key={key}
-                    label={groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
+                    label={groupBy === "month" ? formatMonthLabel(key) : groupBy === "fy" ? `FY ${key}` : key}
                     rows={groupRows}
                     lockedPropertyId={lockedPropertyId}
+                    sort={sort}
+                    onSort={(f) => setSort((s) => toggleSort(s, f))}
                   />
                 ))}
               </div>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t px-3 py-2 text-xs text-muted-foreground">
               <span>
                 {filtered.length} of {(fy === "all" ? allRows : allRows.filter((r) => r.date >= start && r.date <= end)).length} transactions
               </span>
-              <span>
-                Income <span className="text-emerald-600">{fmtCurrency(totalIncome)}</span> · Expenses{" "}
-                <span className="text-destructive">{fmtCurrency(Math.abs(totalExpenses))}</span>
+              <span className="flex flex-wrap items-center gap-x-3">
+                <span>
+                  Income <span className="font-medium text-emerald-600">{fmtCurrency(totalIncome)}</span>
+                </span>
+                <span>
+                  Expenses <span className="font-medium text-destructive">{fmtCurrency(Math.abs(totalExpenses))}</span>
+                </span>
+                <span>
+                  GST <span className="font-medium">{fmtCurrency(totalGst)}</span>
+                </span>
+                <span>
+                  Net{" "}
+                  <span className={"font-semibold " + (totalIncome + totalExpenses < 0 ? "text-destructive" : "text-emerald-600")}>
+                    {totalIncome + totalExpenses < 0 ? "−" : "+"}
+                    {fmtCurrency(Math.abs(totalIncome + totalExpenses))}
+                  </span>
+                </span>
               </span>
             </div>
           </Card>
@@ -431,9 +532,16 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
                 <span className="text-muted-foreground">Expenses</span>
                 <span className="font-medium text-destructive">{fmtCurrency(Math.abs(totalExpenses))}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">GST</span>
+                <span className="font-medium">{fmtCurrency(totalGst)}</span>
+              </div>
               <div className="mt-2 flex justify-between border-t pt-2">
                 <span className="font-medium">Net</span>
-                <span className="font-semibold">{fmtCurrency(totalIncome + totalExpenses)}</span>
+                <span className={"font-semibold " + (totalIncome + totalExpenses < 0 ? "text-destructive" : "text-emerald-600")}>
+                  {totalIncome + totalExpenses < 0 ? "−" : "+"}
+                  {fmtCurrency(Math.abs(totalIncome + totalExpenses))}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -480,7 +588,17 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   );
 }
 
-function TxTable({ rows, lockedPropertyId }: { rows: TxRow[]; lockedPropertyId?: string }) {
+function TxTable({
+  rows,
+  lockedPropertyId,
+  sort,
+  onSort,
+}: {
+  rows: TxRow[];
+  lockedPropertyId?: string;
+  sort?: SortState<TxSortField> | null;
+  onSort?: (field: TxSortField) => void;
+}) {
   const { state, deleteExpense } = useStore();
   if (rows.length === 0) {
     return (
@@ -490,17 +608,21 @@ function TxTable({ rows, lockedPropertyId }: { rows: TxRow[]; lockedPropertyId?:
       </div>
     );
   }
+  const noSort = () => {};
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">Date</th>
-            <th className="px-3 py-2 font-medium">Description</th>
-            <th className="px-3 py-2 font-medium">Category</th>
-            <th className="px-3 py-2 font-medium">Tenant</th>
-            <th className="px-3 py-2 font-medium">Source</th>
-            <th className="px-3 py-2 text-right font-medium">Amount</th>
+            <SortableTh field="date" label="Date" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <SortableTh field="description" label="Description" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <SortableTh field="provider" label="Provider" sort={sort ?? null} onSort={onSort ?? noSort} />
+            {!lockedPropertyId && <SortableTh field="property" label="Property" sort={sort ?? null} onSort={onSort ?? noSort} />}
+            <SortableTh field="tenant" label="Tenant" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <SortableTh field="category" label="Category" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <SortableTh field="taxTreatment" label="Tax Treatment" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <SortableTh field="source" label="Source" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <SortableTh field="amount" label="Amount" align="right" sort={sort ?? null} onSort={onSort ?? noSort} />
             <th className="w-16 px-2 py-2" />
           </tr>
         </thead>
@@ -508,7 +630,7 @@ function TxTable({ rows, lockedPropertyId }: { rows: TxRow[]; lockedPropertyId?:
           {rows.map((r) => {
             const prop = state.properties.find((p) => p.id === r.propertyId);
             const asset = state.assets.find((a) => a.id === r.assetId);
-            const label = lockedPropertyId ? undefined : prop?.alias || prop?.address || asset?.name;
+            const propertyLabel = prop?.alias || prop?.address || asset?.name;
             const expense = r.expenseId ? state.expenses.find((e) => e.id === r.expenseId) : undefined;
             return (
               <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
@@ -518,20 +640,18 @@ function TxTable({ rows, lockedPropertyId }: { rows: TxRow[]; lockedPropertyId?:
                     {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
                     {r.description}
                   </div>
-                  {label && <div className="text-xs text-muted-foreground">{label}</div>}
                 </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{r.providerName ?? "—"}</td>
+                {!lockedPropertyId && <td className="px-3 py-2 text-xs text-muted-foreground">{propertyLabel ?? "—"}</td>}
                 <td className="px-3 py-2 text-xs text-muted-foreground">{r.tenantName ?? "—"}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{taxTreatmentLabel(r.category)}</td>
                 <td className="px-3 py-2 text-xs">
                   {r.sourceFileData ? (
-                    <a
-                      href={r.sourceFileData}
-                      download={r.sourceFileName || "document.pdf"}
-                      className="inline-flex items-center gap-1 text-primary underline"
-                    >
+                    <DocumentLink fileName={r.sourceFileName} fileData={r.sourceFileData} className="inline-flex items-center gap-1 text-primary underline">
                       <FileText className="h-3 w-3 shrink-0" />
                       <span className="max-w-[140px] truncate">{r.sourceFileName || "Document"}</span>
-                    </a>
+                    </DocumentLink>
                   ) : (
                     <span className="text-muted-foreground">{r.source ?? "—"}</span>
                   )}
@@ -580,10 +700,14 @@ function TxGroupSection({
   label,
   rows,
   lockedPropertyId,
+  sort,
+  onSort,
 }: {
   label: string;
   rows: TxRow[];
   lockedPropertyId?: string;
+  sort?: SortState<TxSortField> | null;
+  onSort?: (field: TxSortField) => void;
 }) {
   const [open, setOpen] = useState(false);
   const income = rows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
@@ -603,7 +727,7 @@ function TxGroupSection({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="border-t">
-        <TxTable rows={rows} lockedPropertyId={lockedPropertyId} />
+        <TxTable rows={rows} lockedPropertyId={lockedPropertyId} sort={sort} onSort={onSort} />
       </CollapsibleContent>
     </Collapsible>
   );

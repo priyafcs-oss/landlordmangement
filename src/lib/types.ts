@@ -51,6 +51,13 @@ export const CATEGORY_GROUPS = {
 export type CategoryGroup = keyof typeof CATEGORY_GROUPS;
 export type ExpenseCategory = (typeof CATEGORY_GROUPS)[CategoryGroup][number];
 export const EXPENSE_CATEGORIES = Object.values(CATEGORY_GROUPS).flat() as ExpenseCategory[];
+
+/** Categories for an Expense row with direction: "Income" — a separate list from ExpenseCategory
+ * since none of the ATO expense/deduction taxonomy above applies to money coming in. "Other Rental
+ * Income" is the catch-all for anything recharged/reimbursed by a tenant outside the rent itself
+ * (e.g. a water-usage reimbursement) that isn't worth its own category. */
+export const INCOME_CATEGORIES = ["Gross Rent", "Other Rental Income", "Bond Claimed", "Sale Proceeds (Capital)"] as const;
+export type IncomeCategory = (typeof INCOME_CATEGORIES)[number];
 /** Which group a category belongs to — undefined for a legacy/unrecognised value (e.g. an
  * expense saved before this taxonomy existed). */
 export function categoryGroupOf(category?: string | null): CategoryGroup | undefined {
@@ -363,8 +370,18 @@ export interface Expense {
   direction?: "Income" | "Expense";
   taxCategory: "Immediate Deduction" | "Capital Works";
   /** The spending category picked at entry time (e.g. "Repairs & Maintenance") — kept alongside
-   * taxCategory so Documents can tell a maintenance invoice apart from a management fee. */
-  category?: ExpenseCategory;
+   * taxCategory so Documents can tell a maintenance invoice apart from a management fee. An
+   * IncomeCategory value only appears when direction === "Income" (taxCategory is meaningless for
+   * those rows and left at its default). */
+  category?: ExpenseCategory | IncomeCategory;
+  /** Vendor/payee this transaction was paid to (expenses) or received from (income) — e.g. the
+   * tradesperson on a repair, the agent/tenant a rent line came from. Free text, separate from the
+   * Provider directory (a transaction doesn't have to match a saved Provider record). */
+  providerName?: string;
+  /** GST component of `cost`, when known — entered per-line-item on manual transactions. Absent
+   * (not zero) for rows where GST was never captured, so a Transactions GST total can tell "no GST
+   * on this line" apart from "GST unknown/not entered". */
+  gst?: number;
   invoiceFileName?: string;
   invoiceFileData?: string;
   hasWarranty: boolean;
