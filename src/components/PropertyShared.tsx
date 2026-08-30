@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,7 +50,7 @@ import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
-import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, type FeeCheckResult } from "@/lib/feeVerification";
+import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import type {
   Property,
   Tenant,
@@ -4490,13 +4490,7 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? agents[0];
   const [reviewProposalId, setReviewProposalId] = useState<string | null>(null);
 
-  const statements = [...state.aiProposals.filter((p) => p.propertyId === propertyId && p.kind === "rent_ledger")].sort(
-    (a, b) => {
-      const ap = (a.payload as RentLedgerProposalPayload).periodStart ?? a.documentDate ?? a.created_at ?? "";
-      const bp = (b.payload as RentLedgerProposalPayload).periodStart ?? b.documentDate ?? b.created_at ?? "";
-      return bp.localeCompare(ap);
-    },
-  );
+  const statements = state.aiProposals.filter((p) => p.propertyId === propertyId && p.kind === "rent_ledger");
 
   return (
     <div className="space-y-5 text-sm">
@@ -4529,57 +4523,6 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
         )}
       </div>
 
-      <div className="border-t pt-4">
-        <div className="mb-2 text-sm font-medium">Agent statements</div>
-        {statements.length === 0 ? (
-          <div className="text-xs text-muted-foreground">
-            No rent statements uploaded for this property yet — forward or upload one and it'll show up here.
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {statements.map((p) => {
-              const payload = p.payload as RentLedgerProposalPayload;
-              return (
-                <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">
-                      {payload.periodStart || "—"} → {payload.periodEnd || "—"}
-                    </span>
-                    {payload.tenantName && <span className="text-muted-foreground">{payload.tenantName}</span>}
-                    {payload.netToOwner !== undefined && (
-                      <span className="text-muted-foreground">Net {fmtCurrency(payload.netToOwner)}</span>
-                    )}
-                    <Badge
-                      variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"}
-                      className="text-[10px]"
-                    >
-                      {p.status}
-                    </Badge>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {p.sourceFileData && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 gap-1 text-xs"
-                        onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}
-                      >
-                        <Eye className="h-3 w-3" /> View
-                      </Button>
-                    )}
-                    {p.status === "pending" && (
-                      <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => setReviewProposalId(p.id)}>
-                        Review
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {agents.length > 0 && (
         <div className="border-t pt-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -4604,12 +4547,153 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
         </div>
       )}
 
+      <div className="border-t pt-4">
+        <AgentStatementsSection statements={statements} onReview={setReviewProposalId} />
+      </div>
+
       <ProposalReviewDialog
         proposalId={reviewProposalId}
         onOpenChange={(v) => {
           if (!v) setReviewProposalId(null);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Every rent statement ("agent statement") uploaded/emailed for this property, with the same
+ * search/FY/group-by filters as the portfolio-wide Documents page — kept here too since a
+ * statement's own fee-verification relevance makes it worth finding without leaving Tenancy.
+ */
+function AgentStatementsSection({ statements, onReview }: { statements: AiIntakeProposal[]; onReview: (proposalId: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [fy, setFy] = useState("all");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+
+  const fys = (() => {
+    const years: string[] = [];
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
+    return years;
+  })();
+
+  const periodOf = (p: AiIntakeProposal) =>
+    (p.payload as RentLedgerProposalPayload).periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
+
+  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
+  const filtered = statements.filter((p) => {
+    const date = periodOf(p);
+    if (fy !== "all" && !(date >= start && date <= end)) return false;
+    if (query) {
+      const payload = p.payload as RentLedgerProposalPayload;
+      const haystack = `${payload.tenantName ?? ""} ${payload.periodStart ?? ""} ${payload.periodEnd ?? ""} ${p.sourceFileName ?? ""}`.toLowerCase();
+      if (!haystack.includes(query.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  const groups = useMemo(() => {
+    if (groupBy === "none") return null;
+    const map = new Map<string, AiIntakeProposal[]>();
+    for (const p of filtered) {
+      const date = periodOf(p);
+      const key = !date ? "unknown" : groupBy === "month" ? date.slice(0, 7) : ausFinancialYear(date);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(p);
+    }
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [filtered, groupBy]);
+
+  const StatementRow = (p: AiIntakeProposal) => {
+    const payload = p.payload as RentLedgerProposalPayload;
+    return (
+      <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">
+            {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+          </span>
+          {payload.tenantName && <span className="text-muted-foreground">{payload.tenantName}</span>}
+          {payload.netToOwner !== undefined && <span className="text-muted-foreground">Net {fmtCurrency(payload.netToOwner)}</span>}
+          <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="text-[10px]">
+            {p.status}
+          </Badge>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {p.sourceFileData && (
+            <Button size="sm" variant="ghost" className="h-6 gap-1 text-xs" onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}>
+              <Eye className="h-3 w-3" /> View
+            </Button>
+          )}
+          {p.status === "pending" && (
+            <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => onReview(p.id)}>
+              Review
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="mb-2 text-sm font-medium">Agent statements</div>
+      {statements.length === 0 ? (
+        <div className="text-xs text-muted-foreground">
+          No rent statements uploaded for this property yet — forward or upload one and it'll show up here.
+        </div>
+      ) : (
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Search statements…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-7 w-[180px] text-xs"
+            />
+            <Select value={fy} onValueChange={setFy}>
+              <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                {fys.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    FY {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <SelectTrigger className="h-7 w-[150px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No grouping</SelectItem>
+                <SelectItem value="month">By month</SelectItem>
+                <SelectItem value="fy">By financial year</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No statements match these filters.</div>
+          ) : groupBy === "none" || !groups ? (
+            <div className="space-y-1">{filtered.map((p) => StatementRow(p))}</div>
+          ) : (
+            <div className="space-y-3">
+              {groups.map(([key, rows]) => (
+                <div key={key}>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
+                  </div>
+                  <div className="space-y-1">{rows.map((p) => StatementRow(p))}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -4621,10 +4705,11 @@ function feeVerificationMonthLabel(key: string): string {
 
 /**
  * On-demand fee-verification report for one property — a month-by-month breakdown of rent
- * collected against every posted "Property Agent Fees" expense within a chosen financial year (or
- * all time), each month checked against the given Provider's management-agreement terms, summed
- * to an FY total at the bottom. Same comparison engine (verifyAgentFees) as the inline
- * per-statement check in RentLedgerProposalCard, just run once per month instead of once per
+ * collected against every posted expense paid to this agent (see isAgentFeeExpense — category
+ * "Property Agent Fees"/"Letting Fees", or simply payee = the agent's name) within a chosen
+ * financial year (or all time), each month checked against the given Provider's
+ * management-agreement terms, summed to an FY total at the bottom. Same comparison engine
+ * (verifyAgentFees) as the inline per-statement check in RentLedgerProposalCard, just run once per month instead of once per
  * statement still in review.
  */
 export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: string; agent: Provider }) {
@@ -4655,7 +4740,7 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
     (e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end,
   );
   const expensesInRange = state.expenses.filter(
-    (e) => e.propertyId === propertyId && e.category === "Property Agent Fees" && e.date >= start && e.date <= end,
+    (e) => e.propertyId === propertyId && e.date >= start && e.date <= end && isAgentFeeExpense(e, agent.name),
   );
 
   const monthKeys = [...new Set([...rentInRange.map((e) => e.date.slice(0, 7)), ...expensesInRange.map((e) => e.date.slice(0, 7))])].sort();

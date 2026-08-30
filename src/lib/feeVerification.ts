@@ -135,14 +135,25 @@ export function verifyAgentFees(params: {
 /**
  * Turns a set of already-posted Expense rows back into FeeLine input — used for verifying a
  * whole past period (the on-demand report, EOFY) rather than a single statement still in review.
- * Relies on RentLedgerProposalCard.confirm having tagged every agent deduction with
- * category: "Property Agent Fees" and notes: the AI's raw fee-type text at posting time — before
- * that, itemName alone (usually just the agency's name) has no fee-type signal to classify on.
+ * Takes whatever set of expenses the caller has already decided are agent-fee lines (see
+ * isAgentFeeExpense below) — doesn't re-filter by category itself, so a manually-entered expense
+ * that was categorised as something other than "Property Agent Fees" (e.g. left at the default,
+ * or picked "Letting Fees" instead) still gets counted as long as the caller included it.
+ * Classification passes both the Expense's own category ("Letting Fees" is a strong signal on its
+ * own) and `notes` (the AI's raw free-text fee-type at posting time, e.g. "management_fees") —
+ * before that, itemName alone (often just the agency's name) may have no fee-type keyword at all.
  */
 export function collectAgentFeeLines(expenses: Expense[]): FeeLine[] {
-  return expenses
-    .filter((e) => e.category === "Property Agent Fees")
-    .map((e) => ({ vendor: e.itemName, category: e.notes, amount: e.cost }));
+  return expenses.map((e) => ({ vendor: e.itemName, category: [e.category, e.notes].filter(Boolean).join(" "), amount: e.cost }));
+}
+
+/** An expense counts toward agent-fee verification when it's either tagged with the dedicated
+ * "Property Agent Fees"/"Letting Fees" category, OR paid to whoever the property's managing agent
+ * is (by name) — covers a manually-entered fee that was left under a different/default category,
+ * which the category-only check used to silently exclude from every total. */
+export function isAgentFeeExpense(expense: Pick<Expense, "category" | "providerName">, agentName: string): boolean {
+  if (expense.category === "Property Agent Fees" || expense.category === "Letting Fees") return true;
+  return !!expense.providerName && expense.providerName.trim().toLowerCase() === agentName.trim().toLowerCase();
 }
 
 /** Whether a Provider has recorded enough of its agreement to make verification worthwhile at
