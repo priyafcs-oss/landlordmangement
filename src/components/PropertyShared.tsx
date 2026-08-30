@@ -2901,41 +2901,6 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   );
 }
 
-export function PropertyComplianceTab({ prop }: { prop: Property }) {
-  return (
-    <div className="space-y-4 text-sm">
-      <div>
-        <div className="mb-2 text-xs font-medium text-muted-foreground">Strata</div>
-        <div className="grid grid-cols-2 gap-3">
-          <Stat
-            label="Levy"
-            value={prop.strataLevyAmount ? `${fmtCurrency(prop.strataLevyAmount)} / ${prop.strataLevyFrequency ?? "—"}` : "—"}
-          />
-        </div>
-      </div>
-      <div>
-        <div className="mb-2 text-xs font-medium text-muted-foreground">Insurance</div>
-        <div className="grid grid-cols-2 gap-3">
-          <Stat label="Insurer" value={prop.insurerName || "—"} />
-          <Stat label="Policy number" value={prop.insurancePolicyNumber || "—"} />
-          <Stat label="Premium" value={prop.insurancePremium ? fmtCurrency(prop.insurancePremium) : "—"} />
-          <Stat label="Sum insured" value={prop.insuranceSumInsured ? fmtCurrency(prop.insuranceSumInsured) : "—"} />
-          <Stat label="Renewal date" value={prop.insuranceRenewalDate || "—"} />
-        </div>
-      </div>
-      <div>
-        <div className="mb-2 text-xs font-medium text-muted-foreground">Compliance</div>
-        <div className="grid grid-cols-2 gap-3">
-          <Stat label="Smoke alarm check due" value={prop.smokeAlarmCheckDueDate || "—"} />
-          <Stat label="Electrical safety cert expiry" value={prop.electricalSafetyCertExpiry || "—"} />
-          <Stat label="Gas safety cert expiry" value={prop.gasSafetyCertExpiry || "—"} />
-          {prop.hasSwimmingPool && <Stat label="Pool safety cert expiry" value={prop.poolSafetyCertExpiry || "—"} />}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function PropertyDetailsTab({
   prop,
   expenses,
@@ -4026,14 +3991,18 @@ interface AgencyAgreementExtractResult {
 
 const FEE_FREQUENCIES: FeeFrequency[] = ["Per Statement", "Monthly", "Quarterly", "Annually"];
 
-function ProviderDialog({
+export function ProviderDialog({
   propertyId,
   provider,
   children,
+  defaultRole,
 }: {
   propertyId: string;
   provider?: Provider;
   children: React.ReactNode;
+  /** Pre-selects the role on a brand-new contact (e.g. "Agent" from the Tenancy tab's "Add
+   * managing agent" button) instead of always defaulting to "Other". Ignored when editing. */
+  defaultRole?: ProviderRole;
 }) {
   const { addProvider, updateProvider, state } = useStore();
   const [open, setOpen] = useState(false);
@@ -4041,7 +4010,7 @@ function ProviderDialog({
   const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
   const [form, setForm] = useState({
     name: provider?.name ?? "",
-    role: provider?.role ?? ("Other" as ProviderRole),
+    role: provider?.role ?? defaultRole ?? ("Other" as ProviderRole),
     unitId: provider?.unitId ?? SHARED_UNIT,
     email: provider?.email ?? "",
     phone: provider?.phone ?? "",
@@ -4434,7 +4403,7 @@ function ProviderDialog({
   );
 }
 
-function ProviderRow({ provider }: { provider: Provider }) {
+export function ProviderRow({ provider }: { provider: Provider }) {
   const { deleteProvider } = useStore();
   const details = [provider.email, provider.phone, provider.website].filter(Boolean).join(" · ");
   return (
@@ -4501,6 +4470,60 @@ function ProviderRow({ provider }: { provider: Provider }) {
           <Trash2 className="h-3 w-3" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The property's managing-agent relationship, front and centre — the signed agreement upload,
+ * the agency's contact details and every fee term read off it (all of what ProviderRow already
+ * shows for an Agent-role Provider), plus the fee-verification report right underneath since it's
+ * checking the same agreement. Previously this only lived nested inside the generic Providers
+ * contact list, which a landlord adding a managing agent had no obvious reason to go looking in.
+ */
+export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
+  const { state } = useStore();
+  const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+
+  return (
+    <div className="space-y-5 text-sm">
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-medium">Managing agent</div>
+            <div className="text-xs text-muted-foreground">
+              Upload the signed management agreement to auto-fill the agency's contact details and fee terms.
+            </div>
+          </div>
+          <ProviderDialog propertyId={propertyId} provider={agent} defaultRole="Agent">
+            <Button size="sm" variant="outline" className="shrink-0 gap-1">
+              {agent ? (
+                <>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </>
+              ) : (
+                <>
+                  <Plus className="h-3.5 w-3.5" /> Add managing agent
+                </>
+              )}
+            </Button>
+          </ProviderDialog>
+        </div>
+        {agent ? (
+          <ProviderRow provider={agent} />
+        ) : (
+          <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+            No managing agent on file for this property yet.
+          </div>
+        )}
+      </div>
+
+      {agent && (
+        <div className="border-t pt-4">
+          <div className="mb-2 text-sm font-medium">Fee verification</div>
+          <PropertyFeeVerificationTab propertyId={propertyId} />
+        </div>
+      )}
     </div>
   );
 }

@@ -24,6 +24,10 @@ export const TABLES = {
   valuationSnapshots: "valuation_snapshots",
   loanBalanceSnapshots: "loan_balance_snapshots",
   buffers: "buffers",
+  insurancePolicies: "insurance_policies",
+  maintenanceItems: "maintenance_items",
+  complianceCertificates: "compliance_certificates",
+  propertyNotes: "property_notes",
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";

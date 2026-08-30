@@ -1012,6 +1012,10 @@ export interface AppState {
   rentChanges: RentChange[];
   leaseHistory: LeaseHistory[];
   maintenanceRequests: MaintenanceRequest[];
+  insurancePolicies: InsurancePolicy[];
+  maintenanceItems: MaintenanceItem[];
+  complianceCertificates: ComplianceCertificate[];
+  propertyNotes: PropertyNote[];
   aiConfig: AiConfig;
   landlordProfile: LandlordProfile;
   bills: PropertyBill[];
@@ -1021,6 +1025,122 @@ export interface AppState {
   /** The official Tenant Information Statement PDF, appended after the filled agreement on generation. */
   tenantInfoStatement: { fileName: string; fileData: string; uploadedAt: string } | null;
   reportHistory: ReportHistoryEntry[];
+}
+
+export type InsuranceCoverType = "Landlord" | "Building" | "Contents" | "Public Liability" | "Strata" | "Professional Indemnity";
+export type InsuranceDocumentType = "Policy Schedule / Renewal" | "Certificate of Currency" | "Product Disclosure / Supporting Document";
+
+/** One insurance policy on a property — a property can hold more than one at once (e.g. landlord
+ * insurance + a separate strata policy), and a renewal replaces a prior one rather than editing it
+ * in place, so the history of premiums/cover over time is kept. */
+export interface InsurancePolicy {
+  id: string;
+  created_at?: string;
+  propertyId: string;
+  unitId?: string;
+  insurer: string;
+  coverTypes: InsuranceCoverType[];
+  policyNumber?: string;
+  coverStart?: string;
+  coverEnd?: string;
+  premium?: number;
+  premiumFrequency?: "Annual" | "Monthly" | "Quarterly";
+  sumInsured?: number;
+  excess?: number;
+  coverageSummary?: string;
+  documentType?: InsuranceDocumentType;
+  /** The prior policy this one renews/replaces, if any — lets the renewal chain for one policy be followed back through time. */
+  replacesPolicyId?: string;
+  isSeparatePolicy?: boolean;
+  fileName?: string;
+  fileData?: string;
+}
+
+export type MaintenanceItemType = "Repair" | "Major Work";
+export type MaintenancePriority = "Low" | "Normal" | "High" | "Urgent";
+export type MaintenanceProjectType = "Renovation" | "Major Works" | "New Build" | "Granny Flat" | "Repair Project" | "Other";
+export type MaintenanceStatus = "New" | "Scheduled" | "In Progress" | "Completed" | "On Hold" | "Cancelled";
+
+/** A landlord-tracked job on a property — either a small Repair (a single trade visit) or a
+ * Major Work (a multi-stage project with its own budget/schedule). Distinct from
+ * MaintenanceRequest, which is the tenant/public-facing intake form; this is the landlord's own
+ * work tracker, created directly rather than converted from a submitted request. */
+export interface MaintenanceItem {
+  id: string;
+  created_at?: string;
+  propertyId: string;
+  unitId?: string;
+  itemType: MaintenanceItemType;
+  title: string;
+  description?: string;
+  /** Repair only. */
+  priority?: MaintenancePriority;
+  tradeCategory?: string;
+  /** Major Work only. */
+  projectType?: MaintenanceProjectType;
+  status: MaintenanceStatus;
+  scheduledDate?: string;
+  startDate?: string;
+  completedDate?: string;
+  /** Repair: the actual/out-of-pocket cost. Major Work: use `budget` instead. */
+  cost?: number;
+  /** Major Work: the estimated cost/budget. */
+  budget?: number;
+  progressNotes?: string;
+  contractorName?: string;
+  contractorEmail?: string;
+  contractorPhone?: string;
+  photos: { name: string; data: string }[];
+  sourceFileName?: string;
+  sourceFileData?: string;
+}
+
+export const COMPLIANCE_CERT_TYPES = [
+  "Smoke Alarm",
+  "Electrical Safety (RCD)",
+  "Gas Safety",
+  "Pool Safety / Barrier",
+  "Energy Efficiency",
+  "Asbestos",
+  "Termite",
+  "Building Compliance",
+  "Fire Safety",
+  "Lift Certification",
+  "Backflow Prevention",
+  "Essential Services",
+] as const;
+export type ComplianceCertType = (typeof COMPLIANCE_CERT_TYPES)[number];
+
+/** One compliance certificate/inspection result on a property — a property accumulates one row
+ * per check performed over time (this year's smoke alarm check, last year's), rather than a
+ * single "next due date" field per cert type. */
+export interface ComplianceCertificate {
+  id: string;
+  created_at?: string;
+  propertyId: string;
+  certType: ComplianceCertType | string;
+  issuer?: string;
+  referenceNumber?: string;
+  notes?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  fileName?: string;
+  fileData?: string;
+}
+
+/** A free-form note against a property — reminders, context, decisions — with light structure
+ * (category/tags/reminder date) so a long-running property builds up a searchable history. */
+export interface PropertyNote {
+  id: string;
+  created_at?: string;
+  propertyId: string;
+  unitId?: string;
+  title: string;
+  category?: string;
+  tags: string[];
+  reminderDate?: string;
+  content?: string;
+  attachments: { name: string; data: string }[];
 }
 
 export const INSPECTION_TEMPLATES: Record<Inspection["type"], string[]> = {

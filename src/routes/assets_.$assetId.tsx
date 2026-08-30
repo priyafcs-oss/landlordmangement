@@ -21,6 +21,10 @@ import {
   Users2,
   ImageIcon,
   Pencil,
+  Wrench,
+  StickyNote,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   PropertyOverviewTab,
@@ -31,13 +35,13 @@ import {
   PropertyCostBaseTab,
   DepreciationTab,
   PropertyPnLTab,
-  PropertyComplianceTab,
+  PropertyTenancyTab,
   PropertyProvidersTab,
-  PropertyFeeVerificationTab,
   PropertyMediaTab,
   PropertyDialog,
   DeletePropertyDialog,
 } from "@/components/PropertyShared";
+import { PropertyInsuranceTab, PropertyMaintenanceTab, PropertyCertificatesTab, PropertyNotesTab } from "@/components/PropertyExtraTabs";
 import { LedgerTab } from "@/routes/transactions";
 import { DocumentsContent } from "@/routes/documents";
 
@@ -59,28 +63,34 @@ type Section =
   | "costbase"
   | "depreciation"
   | "pnl"
-  | "compliance"
   | "providers"
-  | "feeVerification"
-  | "media"
-  | "documents";
+  | "tenancy"
+  | "insurance"
+  | "maintenance"
+  | "compliance"
+  | "documents"
+  | "photos"
+  | "notes";
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
   { section: "overview", label: "Overview", icon: LayoutDashboard },
   { section: "details", label: "Property Details", icon: Building2 },
   { section: "purchase", label: "Purchase & Settlement", icon: ShoppingCart },
   { section: "performance", label: "Performance", icon: TrendingUp },
+  { section: "providers", label: "Providers", icon: Users2 },
   { section: "transactions", label: "Transactions", icon: Receipt, group: "Finance" },
   { section: "bills", label: "Bills", icon: Receipt, group: "Finance" },
   { section: "loans", label: "Loans", icon: Landmark, group: "Finance" },
   { section: "costbase", label: "Cost Base", icon: Calculator, group: "Finance" },
   { section: "depreciation", label: "Depreciation", icon: LineChart, group: "Finance" },
   { section: "pnl", label: "P&L", icon: FileText, group: "Finance" },
-  { section: "compliance", label: "Compliance", icon: ShieldCheck },
-  { section: "providers", label: "Providers", icon: Users2 },
-  { section: "feeVerification", label: "Fee Verification", icon: BadgeCheck },
-  { section: "media", label: "Media", icon: ImageIcon },
-  { section: "documents", label: "Documents", icon: FolderOpen },
+  { section: "tenancy", label: "Tenancy", icon: BadgeCheck, group: "Property" },
+  { section: "insurance", label: "Insurance", icon: ShieldCheck, group: "Property" },
+  { section: "maintenance", label: "Maintenance", icon: Wrench, group: "Property" },
+  { section: "compliance", label: "Compliance", icon: ShieldCheck, group: "Property" },
+  { section: "documents", label: "Documents", icon: FolderOpen, group: "Property" },
+  { section: "photos", label: "Photos", icon: ImageIcon, group: "Property" },
+  { section: "notes", label: "Notes", icon: StickyNote, group: "Property" },
 ];
 
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
@@ -109,6 +119,14 @@ function PropertyAssetPage() {
   const { state, loading } = useStore();
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>("overview");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (group: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
 
   const asset = state.assets.find((a) => a.id === assetId);
   // Looked up both directions (Asset.linkedPropertyId -> Property.id, and Property.assetId ->
@@ -192,30 +210,40 @@ function PropertyAssetPage() {
           </div>
         </div>
         <nav className="space-y-3">
-          {groups.map((g, i) => (
-            <div key={i}>
-              {g.group && (
-                <div className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {g.group}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {g.items.map((item) => (
+          {groups.map((g, i) => {
+            const collapsed = g.group ? collapsedGroups.has(g.group) : false;
+            return (
+              <div key={i}>
+                {g.group ? (
                   <button
-                    key={item.section}
                     type="button"
-                    onClick={() => setSection(item.section)}
-                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
-                      section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
-                    }`}
+                    onClick={() => toggleGroup(g.group!)}
+                    className="mb-1 flex w-full items-center gap-1 rounded px-2 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
                   >
-                    <item.icon className="h-3.5 w-3.5 shrink-0" />
-                    {item.label}
+                    {collapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+                    {g.group}
                   </button>
-                ))}
+                ) : null}
+                {!collapsed && (
+                  <div className="space-y-0.5">
+                    {g.items.map((item) => (
+                      <button
+                        key={item.section}
+                        type="button"
+                        onClick={() => setSection(item.section)}
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
+                          section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
+                        }`}
+                      >
+                        <item.icon className="h-3.5 w-3.5 shrink-0" />
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="mt-4 border-t pt-3 text-xs text-muted-foreground">
           Portfolio-wide:{" "}
@@ -244,11 +272,14 @@ function PropertyAssetPage() {
         {section === "costbase" && <PropertyCostBaseTab prop={prop} expenses={expenses} depreciationItems={depreciationItems} />}
         {section === "depreciation" && <DepreciationTab assetId={asset.id} />}
         {section === "pnl" && <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
-        {section === "compliance" && <PropertyComplianceTab prop={prop} />}
         {section === "providers" && <PropertyProvidersTab propertyId={prop.id} />}
-        {section === "feeVerification" && <PropertyFeeVerificationTab propertyId={prop.id} />}
-        {section === "media" && <PropertyMediaTab prop={prop} />}
+        {section === "tenancy" && <PropertyTenancyTab propertyId={prop.id} />}
+        {section === "insurance" && <PropertyInsuranceTab prop={prop} />}
+        {section === "maintenance" && <PropertyMaintenanceTab prop={prop} />}
+        {section === "compliance" && <PropertyCertificatesTab prop={prop} />}
         {section === "documents" && <DocumentsContent propertyId={prop.id} />}
+        {section === "photos" && <PropertyMediaTab prop={prop} />}
+        {section === "notes" && <PropertyNotesTab prop={prop} />}
       </div>
     </div>
   );

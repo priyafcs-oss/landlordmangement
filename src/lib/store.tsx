@@ -28,6 +28,10 @@ import type {
   ValuationSnapshot,
   LoanBalanceSnapshot,
   CashBuffer,
+  InsurancePolicy,
+  MaintenanceItem,
+  ComplianceCertificate,
+  PropertyNote,
 } from "./types";
 import {
   TABLES,
@@ -123,6 +127,10 @@ const empty: AppState = {
   rentChanges: [],
   leaseHistory: [],
   maintenanceRequests: [],
+  insurancePolicies: [],
+  maintenanceItems: [],
+  complianceCertificates: [],
+  propertyNotes: [],
   aiConfig: defaultAi,
   landlordProfile: defaultProfile,
   bills: [],
@@ -233,6 +241,22 @@ interface StoreCtx {
   updateBuffer: (id: string, b: Partial<CashBuffer>) => void;
   deleteBuffer: (id: string) => void;
 
+  addInsurancePolicy: (p: Omit<InsurancePolicy, "id">) => void;
+  updateInsurancePolicy: (id: string, p: Partial<InsurancePolicy>) => void;
+  deleteInsurancePolicy: (id: string) => void;
+
+  addMaintenanceItem: (m: Omit<MaintenanceItem, "id">) => void;
+  updateMaintenanceItem: (id: string, m: Partial<MaintenanceItem>) => void;
+  deleteMaintenanceItem: (id: string) => void;
+
+  addComplianceCertificate: (c: Omit<ComplianceCertificate, "id">) => void;
+  updateComplianceCertificate: (id: string, c: Partial<ComplianceCertificate>) => void;
+  deleteComplianceCertificate: (id: string) => void;
+
+  addPropertyNote: (n: Omit<PropertyNote, "id">) => void;
+  updatePropertyNote: (id: string, n: Partial<PropertyNote>) => void;
+  deletePropertyNote: (id: string) => void;
+
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
@@ -317,6 +341,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         rentChanges,
         leaseHistory,
         maintenanceRequests,
+        insurancePolicies,
+        maintenanceItems,
+        complianceCertificates,
+        propertyNotes,
         bills,
         aiProposals,
         emailInboxLog,
@@ -341,6 +369,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         selectAll<RentChange>(TABLES.rentChanges),
         selectAll<LeaseHistory>(TABLES.leaseHistory),
         selectAll<MaintenanceRequest>(TABLES.maintenanceRequests),
+        selectAll<InsurancePolicy>(TABLES.insurancePolicies),
+        selectAll<MaintenanceItem>(TABLES.maintenanceItems),
+        selectAll<ComplianceCertificate>(TABLES.complianceCertificates),
+        selectAll<PropertyNote>(TABLES.propertyNotes),
         selectAll<PropertyBill>(TABLES.bills),
         selectAll<AiIntakeProposal>(TABLES.aiProposals),
         selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
@@ -383,6 +415,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         rentChanges,
         leaseHistory,
         maintenanceRequests,
+        insurancePolicies,
+        maintenanceItems,
+        complianceCertificates,
+        propertyNotes,
         bills,
         aiProposals,
         emailInboxLog,
@@ -534,6 +570,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteWhere(TABLES.bills, "propertyId", id);
       void deleteWhere(TABLES.providers, "propertyId", id);
       void deleteWhere(TABLES.aiProposals, "propertyId", id);
+      void deleteWhere(TABLES.insurancePolicies, "propertyId", id);
+      void deleteWhere(TABLES.maintenanceItems, "propertyId", id);
+      void deleteWhere(TABLES.complianceCertificates, "propertyId", id);
+      void deleteWhere(TABLES.propertyNotes, "propertyId", id);
       if (assetId) {
         void deleteWhere(TABLES.depreciationItems, "assetId", assetId);
         void deleteWhere(TABLES.valuationSnapshots, "assetId", assetId);
@@ -569,6 +609,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         bills: s.bills.filter((b) => b.propertyId !== id),
         providers: s.providers.filter((p) => p.propertyId !== id),
         aiProposals: s.aiProposals.filter((p) => p.propertyId !== id),
+        insurancePolicies: s.insurancePolicies.filter((p) => p.propertyId !== id),
+        maintenanceItems: s.maintenanceItems.filter((m) => m.propertyId !== id),
+        complianceCertificates: s.complianceCertificates.filter((c) => c.propertyId !== id),
+        propertyNotes: s.propertyNotes.filter((n) => n.propertyId !== id),
       }));
     },
 
@@ -1002,6 +1046,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteBuffer: (id) => {
       void deleteRow(TABLES.buffers, id);
       set((s) => ({ ...s, buffers: s.buffers.filter((b) => b.id !== id) }));
+    },
+
+    addInsurancePolicy: (p) => {
+      const row: InsurancePolicy = { ...p, id: uid("ins") };
+      void upsertRow(TABLES.insurancePolicies, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, insurancePolicies: [...s.insurancePolicies, row] }));
+    },
+    updateInsurancePolicy: (id, patch) => {
+      void updateRow(TABLES.insurancePolicies, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, insurancePolicies: s.insurancePolicies.map((p) => (p.id === id ? { ...p, ...patch } : p)) }));
+    },
+    deleteInsurancePolicy: (id) => {
+      void deleteRow(TABLES.insurancePolicies, id);
+      set((s) => ({ ...s, insurancePolicies: s.insurancePolicies.filter((p) => p.id !== id) }));
+    },
+
+    addMaintenanceItem: (m) => {
+      const row: MaintenanceItem = { ...m, id: uid("mi") };
+      void upsertRow(TABLES.maintenanceItems, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, maintenanceItems: [...s.maintenanceItems, row] }));
+    },
+    updateMaintenanceItem: (id, patch) => {
+      void updateRow(TABLES.maintenanceItems, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, maintenanceItems: s.maintenanceItems.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
+    },
+    deleteMaintenanceItem: (id) => {
+      void deleteRow(TABLES.maintenanceItems, id);
+      set((s) => ({ ...s, maintenanceItems: s.maintenanceItems.filter((m) => m.id !== id) }));
+    },
+
+    addComplianceCertificate: (c) => {
+      const row: ComplianceCertificate = { ...c, id: uid("cc") };
+      void upsertRow(TABLES.complianceCertificates, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, complianceCertificates: [...s.complianceCertificates, row] }));
+    },
+    updateComplianceCertificate: (id, patch) => {
+      void updateRow(TABLES.complianceCertificates, id, patch as Record<string, unknown>);
+      set((s) => ({
+        ...s,
+        complianceCertificates: s.complianceCertificates.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      }));
+    },
+    deleteComplianceCertificate: (id) => {
+      void deleteRow(TABLES.complianceCertificates, id);
+      set((s) => ({ ...s, complianceCertificates: s.complianceCertificates.filter((c) => c.id !== id) }));
+    },
+
+    addPropertyNote: (n) => {
+      const row: PropertyNote = { ...n, id: uid("note") };
+      void upsertRow(TABLES.propertyNotes, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, propertyNotes: [...s.propertyNotes, row] }));
+    },
+    updatePropertyNote: (id, patch) => {
+      void updateRow(TABLES.propertyNotes, id, patch as Record<string, unknown>);
+      set((s) => ({ ...s, propertyNotes: s.propertyNotes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }));
+    },
+    deletePropertyNote: (id) => {
+      void deleteRow(TABLES.propertyNotes, id);
+      set((s) => ({ ...s, propertyNotes: s.propertyNotes.filter((n) => n.id !== id) }));
     },
 
     addMaintenanceRequest: async (m) => {
