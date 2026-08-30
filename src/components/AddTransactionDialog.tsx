@@ -80,6 +80,8 @@ interface LineItemRow {
   gst: string;
   rechargeToTenant: boolean;
   tenantId: string;
+  hasWarranty: boolean;
+  warrantyExpiry: string;
 }
 
 const blankLineItem = (): LineItemRow => ({
@@ -91,6 +93,8 @@ const blankLineItem = (): LineItemRow => ({
   gst: "",
   rechargeToTenant: false,
   tenantId: "",
+  hasWarranty: false,
+  warrantyExpiry: "",
 });
 
 /** Switching a line item's direction resets its category to a sensible default for that side —
@@ -130,7 +134,7 @@ export function AddTransactionDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 } = {}) {
-  const { state, addExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal } = useStore();
+  const { state, addExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal, findOrCreateProvider } = useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
@@ -234,6 +238,8 @@ export function AddTransactionDialog({
         amount: payload.cost ? String(payload.cost) : "",
         rechargeToTenant: !!payload.rechargeToTenant,
         tenantId: payload.tenantId ?? "",
+        hasWarranty: !!payload.hasWarranty,
+        warrantyExpiry: payload.warrantyExpiry ?? "",
       },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -319,6 +325,7 @@ export function AddTransactionDialog({
     let flaggedCount = 0;
 
     for (const propertyId of properties) {
+      if (form.payee.trim()) findOrCreateProvider(form.payee.trim(), propertyId);
       for (const li of validItems) {
         const fullAmount = parseFloat(li.amount) || 0;
         const amount = fullAmount / perPropertyDivisor;
@@ -341,7 +348,8 @@ export function AddTransactionDialog({
               cost: amount,
               date: form.date,
               taxCategory: expenseCategoryToTaxCategory(li.category),
-              hasWarranty: false,
+              hasWarranty: li.hasWarranty,
+              warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
               rechargeToTenant: li.rechargeToTenant || undefined,
               tenantId: li.rechargeToTenant ? li.tenantId : undefined,
             },
@@ -373,7 +381,8 @@ export function AddTransactionDialog({
           providerName: form.payee.trim() || undefined,
           gst: li.gst ? (parseFloat(li.gst) || 0) / perPropertyDivisor : undefined,
           direction: li.direction === "Income" ? "Income" : undefined,
-          hasWarranty: false,
+          hasWarranty: li.hasWarranty,
+          warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
           rechargeToTenant: !!(li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1),
           tenantId: li.rechargeToTenant && perPropertyDivisor === 1 ? li.tenantId : undefined,
           recharged: li.rechargeToTenant && perPropertyDivisor === 1 ? true : undefined,
@@ -651,7 +660,7 @@ export function AddTransactionDialog({
                     </Button>
                   </div>
                   {li.direction === "Expense" && !splitting && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Checkbox
                         checked={li.rechargeToTenant}
                         onCheckedChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, rechargeToTenant: v === true } : r)))}
@@ -670,6 +679,20 @@ export function AddTransactionDialog({
                             ))}
                           </SelectContent>
                         </Select>
+                      )}
+                      <Checkbox
+                        checked={li.hasWarranty}
+                        onCheckedChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, hasWarranty: v === true } : r)))}
+                      />
+                      <Label className="cursor-pointer text-xs font-normal text-muted-foreground">Has warranty</Label>
+                      {li.hasWarranty && (
+                        <Input
+                          type="date"
+                          value={li.warrantyExpiry}
+                          onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, warrantyExpiry: e.target.value } : r)))}
+                          className="h-7 w-[150px] text-xs"
+                          title="Warranty expiry"
+                        />
                       )}
                     </div>
                   )}

@@ -142,7 +142,12 @@ interface StoreCtx {
 
   addProperty: (p: Omit<Property, "id">) => string;
   updateProperty: (id: string, p: Partial<Property>) => void;
-  deleteProperty: (id: string) => void;
+  /** `keepRentalHub: true` wipes every financial/paperwork record for this property (bills,
+   * transactions, loans, providers, depreciation, inspections, maintenance, AI proposals) but
+   * leaves the property, its tenants and their rent-received history (ledger, invoices, rent
+   * changes, lease history) in place — for "start a fresh document upload without losing who's
+   * paid what". Omitted/false deletes the property itself and everything tied to it. */
+  deleteProperty: (id: string, options?: { keepRentalHub?: boolean }) => void;
 
   addTenant: (t: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string }) => string;
   updateTenant: (id: string, t: Partial<Tenant>) => void;
@@ -202,6 +207,10 @@ interface StoreCtx {
    * synchronously (the id is generated locally before the fire-and-forget DB write), so callers
    * can use the result immediately — e.g. as a new property's entityId in the same save. */
   findOrCreateEntity: (name: string, type: Entity["type"]) => string;
+  /** Case-insensitive match-or-create against the Provider directory, scoped to one property —
+   * used wherever a payee/provider name is typed on a Transaction or Expense so it lands in the
+   * Providers list the same way a Bill's provider always has. */
+  findOrCreateProvider: (name: string, propertyId?: string) => string;
 
   /** Generic asset CRUD — used for Gold/ETF (and anything added later). Property manages its own
    * mirrored asset row automatically via addProperty/updateProperty/deleteProperty. */
@@ -510,33 +519,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { ...s, properties, assets, valuationSnapshots };
       });
     },
-    deleteProperty: (id) => {
-      const tenantIds = state.tenants.filter((t) => t.propertyId === id).map((t) => t.id);
+    deleteProperty: (id, options) => {
+      const keepRentalHub = options?.keepRentalHub ?? false;
       const assetId = state.properties.find((x) => x.id === id)?.assetId;
-      void deleteRow(TABLES.properties, id);
-      if (assetId) void deleteRow(TABLES.assets, assetId);
-      void deleteWhere(TABLES.tenants, "propertyId", id);
+      const tenantIds = state.tenants.filter((t) => t.propertyId === id).map((t) => t.id);
+      const loanIds = state.loans.filter((l) => l.propertyId === id).map((l) => l.id);
+
+      // Financial/paperwork trail — always purged, in both modes.
       void deleteWhere(TABLES.loans, "propertyId", id);
+      void deleteWhereIn(TABLES.loanBalanceSnapshots, "loanId", loanIds);
       void deleteWhere(TABLES.expenses, "propertyId", id);
       void deleteWhere(TABLES.inspections, "propertyId", id);
+      void deleteWhere(TABLES.maintenanceRequests, "propertyId", id);
       void deleteWhere(TABLES.bills, "propertyId", id);
       void deleteWhere(TABLES.providers, "propertyId", id);
-      if (assetId) void deleteWhere(TABLES.depreciationItems, "assetId", assetId);
-      void deleteWhereIn(TABLES.ledger, "tenantId", tenantIds);
-      void deleteWhereIn(TABLES.invoices, "tenantId", tenantIds);
+      void deleteWhere(TABLES.aiProposals, "propertyId", id);
+      if (assetId) {
+        void deleteWhere(TABLES.depreciationItems, "assetId", assetId);
+        void deleteWhere(TABLES.valuationSnapshots, "assetId", assetId);
+      }
+
+      // The property itself, and its tenants' rent-received history — kept when keepRentalHub.
+      if (!keepRentalHub) {
+        void deleteRow(TABLES.properties, id);
+        if (assetId) void deleteRow(TABLES.assets, assetId);
+        void deleteWhere(TABLES.tenants, "propertyId", id);
+        void deleteWhereIn(TABLES.ledger, "tenantId", tenantIds);
+        void deleteWhereIn(TABLES.invoices, "tenantId", tenantIds);
+        void deleteWhereIn(TABLES.rentChanges, "tenantId", tenantIds);
+        void deleteWhereIn(TABLES.leaseHistory, "tenantId", tenantIds);
+      }
+
       set((s) => ({
         ...s,
-        properties: s.properties.filter((x) => x.id !== id),
-        assets: s.assets.filter((a) => a.id !== assetId),
+        properties: keepRentalHub ? s.properties : s.properties.filter((x) => x.id !== id),
+        assets: keepRentalHub ? s.assets : s.assets.filter((a) => a.id !== assetId),
+        tenants: keepRentalHub ? s.tenants : s.tenants.filter((t) => t.propertyId !== id),
+        ledger: keepRentalHub ? s.ledger : s.ledger.filter((e) => !tenantIds.includes(e.tenantId)),
+        invoices: keepRentalHub ? s.invoices : s.invoices.filter((i) => !tenantIds.includes(i.tenantId)),
+        rentChanges: keepRentalHub ? s.rentChanges : s.rentChanges.filter((r) => !tenantIds.includes(r.tenantId)),
+        leaseHistory: keepRentalHub ? s.leaseHistory : s.leaseHistory.filter((h) => !tenantIds.includes(h.tenantId)),
         depreciationItems: s.depreciationItems.filter((d) => d.assetId !== assetId),
-        tenants: s.tenants.filter((t) => t.propertyId !== id),
+        valuationSnapshots: s.valuationSnapshots.filter((v) => v.assetId !== assetId),
+        loanBalanceSnapshots: s.loanBalanceSnapshots.filter((ls) => !loanIds.includes(ls.loanId)),
         loans: s.loans.filter((l) => l.propertyId !== id),
         expenses: s.expenses.filter((e) => e.propertyId !== id),
         inspections: s.inspections.filter((i) => i.propertyId !== id),
+        maintenanceRequests: s.maintenanceRequests.filter((m) => m.propertyId !== id),
         bills: s.bills.filter((b) => b.propertyId !== id),
         providers: s.providers.filter((p) => p.propertyId !== id),
-        ledger: s.ledger.filter((e) => !tenantIds.includes(e.tenantId)),
-        invoices: s.invoices.filter((i) => !tenantIds.includes(i.tenantId)),
+        aiProposals: s.aiProposals.filter((p) => p.propertyId !== id),
       }));
     },
 
@@ -864,6 +896,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: Entity = { id: uid("ent"), name: trimmed, type, owners };
       void upsertRow(TABLES.entities, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, entities: [...s.entities, row] }));
+      return row.id;
+    },
+
+    /** A payee typed on a Transaction/Expense (or bill) is matched case-insensitively against the
+     * Provider directory scoped to the same property, so "Miracle Vibes Cleaning" typed twice
+     * reuses one Provider row instead of silently never appearing in the directory — the gap that
+     * previously meant only bills added via Add Bill ever created a Provider. */
+    findOrCreateProvider: (name, propertyId) => {
+      const trimmed = name.trim();
+      const existing = state.providers.find(
+        (p) => p.propertyId === propertyId && p.name.trim().toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (existing) return existing.id;
+      const row: Provider = { id: uid("prov"), propertyId, name: trimmed, role: "Other" };
+      void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, providers: [...s.providers, row] }));
       return row.id;
     },
 

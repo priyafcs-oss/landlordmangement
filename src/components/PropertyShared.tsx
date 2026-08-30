@@ -15,6 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,6 +79,7 @@ import type {
   LoanStatementProposalPayload,
   BankStatementProposalPayload,
   PropertySaleProposalPayload,
+  AgencyAgreementProposalPayload,
   Loan,
   Expense,
   PropertyUnit,
@@ -167,6 +169,8 @@ export function ProposalCard({ proposal, onDismiss }: { proposal: AiIntakePropos
       return <BankStatementProposalCard proposal={proposal} onDismiss={onDismiss} />;
     case "property_sale":
       return <PropertySaleProposalCard proposal={proposal} onDismiss={onDismiss} />;
+    case "agency_agreement":
+      return <AgencyAgreementProposalCard proposal={proposal} onDismiss={onDismiss} />;
     default:
       return <RentLedgerProposalCard proposal={proposal} onDismiss={onDismiss} />;
   }
@@ -1590,6 +1594,113 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           </Button>
           <Button size="sm" variant="outline" onClick={reclassifyAsPurchase}>
             Actually, I'm the buyer
+          </Button>
+          <Button size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+    </DocumentReviewCard>
+  );
+}
+
+/** A signed Property Management Agreement, uploaded/emailed in rather than added via the agent
+ * Provider's own "Upload & extract" — applies the same extracted fee terms onto that property's
+ * Agent Provider record (updating one if it already exists, filling in blanks only, otherwise
+ * creating one from the agency name) so both entry points land in the same place. */
+function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { state, addProvider, updateProvider, markProposalApplied } = useStore();
+  const payload = proposal.payload as AgencyAgreementProposalPayload;
+  const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+
+  const confirm = () => {
+    const property = state.properties.find((p) => p.id === propertyId);
+    if (!property) return toast.error("Select a property first");
+
+    const existingAgent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+    const fields = {
+      managementFeePercent: payload.managementFeePercent,
+      lettingFeeAmount: payload.lettingFeeAmount,
+      lettingFeeWeeksRent: payload.lettingFeeWeeksRent,
+      adminFeeAmount: payload.adminFeeAmount,
+      adminFeeFrequency: payload.adminFeeFrequency,
+      leaseRenewalFeeAmount: payload.leaseRenewalFeeAmount,
+      inspectionFeeAmount: payload.inspectionFeeAmount,
+      advertisingFeeAmount: payload.advertisingFeeAmount,
+      noticePeriodDays: payload.noticePeriodDays,
+      contractStartDate: payload.contractStartDate,
+      contractReviewDate: payload.contractReviewDate,
+      contractFileName: proposal.sourceFileName,
+      contractFileData: proposal.sourceFileData,
+    };
+    if (existingAgent) {
+      // Never overwrites a value already on file — same "fill blanks only" rule the manual
+      // extract-and-review form follows.
+      const patch: Partial<Provider> = {};
+      for (const [key, value] of Object.entries(fields) as [keyof typeof fields, unknown][]) {
+        if (value !== undefined && (existingAgent as unknown as Record<string, unknown>)[key] === undefined) {
+          (patch as Record<string, unknown>)[key] = value;
+        }
+      }
+      updateProvider(existingAgent.id, patch);
+    } else {
+      addProvider({ propertyId, name: payload.agencyName || "Managing agent", role: "Agent", ...fields });
+    }
+    markProposalApplied(proposal.id);
+    toast.success(existingAgent ? "Management agreement applied to existing agent" : "Managing agent added");
+  };
+
+  return (
+    <DocumentReviewCard proposal={proposal}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">Management agreement</Badge>
+          <span className="font-medium">{payload.agencyName || "Unknown agency"}</span>
+        </div>
+
+        {!proposal.propertyId && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-destructive">
+              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+            </span>
+            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
+          <div>
+            <div className="text-muted-foreground">Management fee</div>
+            <div className="font-medium">{payload.managementFeePercent !== undefined ? `${payload.managementFeePercent}%` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Letting fee</div>
+            <div className="font-medium">
+              {payload.lettingFeeAmount !== undefined
+                ? fmtCurrency(payload.lettingFeeAmount)
+                : payload.lettingFeeWeeksRent !== undefined
+                  ? `${payload.lettingFeeWeeksRent} wk rent`
+                  : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Admin fee</div>
+            <div className="font-medium">{payload.adminFeeAmount !== undefined ? fmtCurrency(payload.adminFeeAmount) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Advertising fee</div>
+            <div className="font-medium">{payload.advertisingFeeAmount !== undefined ? fmtCurrency(payload.advertisingFeeAmount) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Notice period</div>
+            <div className="font-medium">{payload.noticePeriodDays !== undefined ? `${payload.noticePeriodDays} days` : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Start date</div>
+            <div className="font-medium">{payload.contractStartDate || "—"}</div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" disabled={!propertyId} onClick={confirm}>
+            Save to managing agent
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
@@ -3905,6 +4016,8 @@ interface AgencyAgreementExtractResult {
   admin_fee_frequency?: string | null;
   lease_renewal_fee_amount?: number | null;
   inspection_fee_amount?: number | null;
+  advertising_fee_amount?: number | null;
+  notice_period_days?: number | null;
   agency_name?: string | null;
   contract_start_date?: string | null;
   contract_review_date?: string | null;
@@ -3948,6 +4061,8 @@ function ProviderDialog({
     adminFeeFrequency: provider?.adminFeeFrequency ?? "",
     leaseRenewalFeeAmount: provider?.leaseRenewalFeeAmount !== undefined ? String(provider.leaseRenewalFeeAmount) : "",
     inspectionFeeAmount: provider?.inspectionFeeAmount !== undefined ? String(provider.inspectionFeeAmount) : "",
+    advertisingFeeAmount: provider?.advertisingFeeAmount !== undefined ? String(provider.advertisingFeeAmount) : "",
+    noticePeriodDays: provider?.noticePeriodDays !== undefined ? String(provider.noticePeriodDays) : "",
     contractStartDate: provider?.contractStartDate ?? "",
     contractReviewDate: provider?.contractReviewDate ?? "",
     contractNotes: provider?.contractNotes ?? "",
@@ -4016,6 +4131,14 @@ function ProviderDialog({
           next.inspectionFeeAmount = String(data.inspection_fee_amount);
           fieldsFound++;
         }
+        if (data.advertising_fee_amount !== undefined && data.advertising_fee_amount !== null) {
+          next.advertisingFeeAmount = String(data.advertising_fee_amount);
+          fieldsFound++;
+        }
+        if (data.notice_period_days !== undefined && data.notice_period_days !== null) {
+          next.noticePeriodDays = String(data.notice_period_days);
+          fieldsFound++;
+        }
         if (data.contract_start_date) {
           next.contractStartDate = data.contract_start_date;
           fieldsFound++;
@@ -4068,6 +4191,8 @@ function ProviderDialog({
       adminFeeFrequency: (form.adminFeeFrequency || undefined) as FeeFrequency | undefined,
       leaseRenewalFeeAmount: num(form.leaseRenewalFeeAmount),
       inspectionFeeAmount: num(form.inspectionFeeAmount),
+      advertisingFeeAmount: num(form.advertisingFeeAmount),
+      noticePeriodDays: num(form.noticePeriodDays),
       contractStartDate: form.contractStartDate || undefined,
       contractReviewDate: form.contractReviewDate || undefined,
       contractNotes: form.contractNotes.trim() || undefined,
@@ -4258,6 +4383,21 @@ function ProviderDialog({
                   onChange={(e) => setForm((f) => ({ ...f, inspectionFeeAmount: e.target.value }))}
                 />
               </Field>
+              <Field label="Advertising / marketing fee ($)">
+                <Input
+                  type="number"
+                  value={form.advertisingFeeAmount}
+                  onChange={(e) => setForm((f) => ({ ...f, advertisingFeeAmount: e.target.value }))}
+                />
+              </Field>
+              <Field label="Notice period (days)">
+                <Input
+                  type="number"
+                  value={form.noticePeriodDays}
+                  onChange={(e) => setForm((f) => ({ ...f, noticePeriodDays: e.target.value }))}
+                  placeholder="e.g. 30 or 60"
+                />
+              </Field>
               <Field label="Agreement start date">
                 <Input
                   type="date"
@@ -4326,6 +4466,8 @@ function ProviderRow({ provider }: { provider: Provider }) {
             {provider.lettingFeeAmount !== undefined && <span>Letting {fmtCurrency(provider.lettingFeeAmount)}</span>}
             {provider.lettingFeeWeeksRent !== undefined && <span>Letting {provider.lettingFeeWeeksRent} wk rent</span>}
             {provider.adminFeeAmount !== undefined && <span>Admin {fmtCurrency(provider.adminFeeAmount)}</span>}
+            {provider.advertisingFeeAmount !== undefined && <span>Advertising {fmtCurrency(provider.advertisingFeeAmount)}</span>}
+            {provider.noticePeriodDays !== undefined && <span>Notice {provider.noticePeriodDays} days</span>}
             {provider.contractFileData && (
               <button
                 type="button"
@@ -4553,6 +4695,110 @@ export function DeleteTenantDialog({ tenant, trigger }: { tenant: Tenant; trigge
             }}
           >
             Delete tenant
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Deleting a property is destructive and irreversible (no FK cascade backs it — every table is
+ * cleared by hand in the store), so this offers a choice rather than a single "are you sure":
+ * wipe the property entirely, or keep the tenant/rent-received trail (Rental Hub) and purge only
+ * the paperwork — bills, transactions, loans, providers, depreciation, inspections, maintenance —
+ * so a landlord can start a clean document upload without losing who paid what. */
+export function DeletePropertyDialog({ property, trigger, onDeleted }: { property: Property; trigger?: React.ReactNode; onDeleted?: (keptProperty: boolean) => void }) {
+  const { state, deleteProperty } = useStore();
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"all" | "keepRentalHub">("all");
+  const [confirmText, setConfirmText] = useState("");
+
+  const label = property.alias || property.address;
+  const tenantIds = state.tenants.filter((t) => t.propertyId === property.id).map((t) => t.id);
+  const tenantCount = tenantIds.length;
+  const ledgerCount = state.ledger.filter((e) => tenantIds.includes(e.tenantId)).length;
+  const billCount = state.bills.filter((b) => b.propertyId === property.id).length;
+  const expenseCount = state.expenses.filter((e) => e.propertyId === property.id).length;
+  const loanCount = state.loans.filter((l) => l.propertyId === property.id).length;
+  const providerCount = state.providers.filter((p) => p.propertyId === property.id).length;
+  const inspectionCount = state.inspections.filter((i) => i.propertyId === property.id).length;
+  const maintenanceCount = state.maintenanceRequests.filter((m) => m.propertyId === property.id).length;
+
+  const canDelete = confirmText.trim() === label;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setMode("all");
+          setConfirmText("");
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" title="Delete property" className="h-6 w-6 shrink-0">
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete {label}?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
+            <div className="font-medium text-destructive">This cannot be undone.</div>
+            <div className="mt-1 text-muted-foreground">
+              This property has {billCount} bill(s), {expenseCount} transaction(s), {loanCount} loan(s),{" "}
+              {providerCount} provider(s), {inspectionCount} inspection(s), {maintenanceCount} maintenance request(s),{" "}
+              {tenantCount} tenant(s) and {ledgerCount} rent ledger entr{ledgerCount === 1 ? "y" : "ies"}.
+            </div>
+          </div>
+
+          <RadioGroup value={mode} onValueChange={(v) => setMode(v as typeof mode)} className="gap-2">
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3">
+              <RadioGroupItem value="all" id="delete-all" className="mt-0.5" />
+              <div>
+                <div className="font-medium">Delete everything</div>
+                <div className="text-xs text-muted-foreground">
+                  Removes the property itself and every record tied to it — tenants, rent history, bills,
+                  transactions, loans, providers, depreciation, inspections, maintenance. You can then re-add the
+                  property fresh.
+                </div>
+              </div>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border p-3">
+              <RadioGroupItem value="keepRentalHub" id="delete-keep-rental" className="mt-0.5" />
+              <div>
+                <div className="font-medium">Keep tenant rent-received history, delete everything else</div>
+                <div className="text-xs text-muted-foreground">
+                  Keeps the property, its tenants and their rent-received/lease history (Rental Hub) intact. Wipes
+                  bills, transactions, loans, providers, depreciation, inspections and maintenance requests — a
+                  clean slate for a fresh document upload against the same property.
+                </div>
+              </div>
+            </label>
+          </RadioGroup>
+
+          <Field label={`Type "${label}" to confirm`}>
+            <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoComplete="off" />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="destructive"
+            disabled={!canDelete}
+            onClick={() => {
+              deleteProperty(property.id, { keepRentalHub: mode === "keepRentalHub" });
+              setOpen(false);
+              toast.success(mode === "keepRentalHub" ? "Property paperwork cleared — rent history kept" : "Property deleted");
+              onDeleted?.(mode === "keepRentalHub");
+            }}
+          >
+            {mode === "keepRentalHub" ? "Clear paperwork, keep rent history" : "Delete property"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -10,6 +10,7 @@ import { parseLoanDocument } from "./parse-loan-document.ts";
 import { parseLoanStatement } from "./parse-loan-statement.ts";
 import { parseBankStatement } from "./parse-bank-statement.ts";
 import { parsePropertySale } from "./parse-property-sale.ts";
+import { stageAgencyAgreementProposal } from "./parse-agency-agreement.ts";
 import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./types.ts";
 
 export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean; documentType?: string };
@@ -69,6 +70,8 @@ export async function routeInboundDocument(
       return tagged(parseBankStatement(supabase, input, emailMessageId));
     case "property_sale":
       return tagged(parsePropertySale(supabase, input, emailMessageId));
+    case "agency_agreement":
+      return tagged(stageAgencyAgreementProposal(supabase, input, emailMessageId));
     default:
       if (!input.pdfBase64) {
         console.log(`[parse-inbound-bill] classified as "other" (confidence ${classification.confidence}), no attachment, skipping`);

@@ -137,13 +137,14 @@ export function collectAgentFeeLines(expenses: Expense[]): FeeLine[] {
 
 /** Whether a Provider has recorded enough of its agreement to make verification worthwhile at
  * all — used to decide whether to show the fee-check UI in the first place. */
-export function hasFeeTerms(provider: Pick<Provider, "managementFeePercent" | "lettingFeeAmount" | "lettingFeeWeeksRent" | "adminFeeAmount" | "leaseRenewalFeeAmount" | "inspectionFeeAmount">): boolean {
+export function hasFeeTerms(provider: Pick<Provider, "managementFeePercent" | "lettingFeeAmount" | "lettingFeeWeeksRent" | "adminFeeAmount" | "leaseRenewalFeeAmount" | "inspectionFeeAmount" | "advertisingFeeAmount">): boolean {
   return (
     provider.managementFeePercent !== undefined ||
     provider.lettingFeeAmount !== undefined ||
     provider.lettingFeeWeeksRent !== undefined ||
     provider.adminFeeAmount !== undefined ||
     provider.leaseRenewalFeeAmount !== undefined ||
-    provider.inspectionFeeAmount !== undefined
+    provider.inspectionFeeAmount !== undefined ||
+    provider.advertisingFeeAmount !== undefined
   );
 }

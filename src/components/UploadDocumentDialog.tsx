@@ -97,13 +97,13 @@ export function UploadDocumentDialog() {
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Upload a bill, rent statement, lease or property document</DialogTitle>
+            <DialogTitle>Upload a bill, rent statement, lease, management agreement or property document</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
               Same AI reader as the email inbox — a PDF or photo of a council/water bill, agent rent statement, lease
-              agreement, settlement statement, insurance certificate or strata notice. It's matched to a property and
-              staged for your review the same way an emailed document would be.
+              agreement, signed management/agency agreement, settlement statement, insurance certificate or strata
+              notice. It's matched to a property and staged for your review the same way an emailed document would be.
             </p>
             <Input type="file" accept="application/pdf,image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             <p className="text-xs text-muted-foreground">

@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
-import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoreVertical, Receipt, Search } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search } from "lucide-react";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { toast } from "sonner";
@@ -58,6 +58,26 @@ export function BillsBoard({
   const [sort, setSort] = useState<SortState<SortField> | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<"none" | "provider" | "category">("none");
+  // Hidden by default so the table gets the full width — the insights sidebar is a nice-to-have,
+  // not what a landlord scanning bills is looking at first.
+  const [showInsights, setShowInsights] = useState(() => {
+    try {
+      return localStorage.getItem("billsInsightsVisible") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleInsights = () => {
+    setShowInsights((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("billsInsightsVisible", next ? "1" : "0");
+      } catch {
+        // best-effort persistence only
+      }
+      return next;
+    });
+  };
 
   const today = todayISO();
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
@@ -160,8 +180,8 @@ export function BillsBoard({
   const gaugeCircumference = 2 * Math.PI * 40;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="space-y-3 lg:col-span-2">
+    <div className={showInsights ? "grid gap-4 lg:grid-cols-3" : "grid gap-4"}>
+      <div className={showInsights ? "space-y-3 lg:col-span-2" : "space-y-3"}>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -247,6 +267,10 @@ export function BillsBoard({
               <SelectItem value="category">By category</SelectItem>
             </SelectContent>
           </Select>
+          <Button size="sm" variant="outline" className="ml-auto gap-1" onClick={toggleInsights}>
+            {showInsights ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
+            {showInsights ? "Hide insights" : "Show insights"}
+          </Button>
         </div>
 
         <Card>
@@ -274,6 +298,7 @@ export function BillsBoard({
         </Card>
       </div>
 
+      {showInsights && (
       <div className="space-y-4">
         <Card>
           <CardHeader>
@@ -356,6 +381,7 @@ export function BillsBoard({
           </CardContent>
         </Card>
       </div>
+      )}
     </div>
   );
 }

@@ -175,9 +175,6 @@ async function upsertProviderFromBill(
   billType: BillType,
   parsed: ParsedBillFields,
 ): Promise<void> {
-  const hasAnyContactInfo = parsed.vendor_email || parsed.vendor_phone || parsed.vendor_website || parsed.vendor_abn;
-  if (!hasAnyContactInfo) return;
-
   const { data: existing } = await supabase
     .from("providers")
     .select("id, email, phone, website, abn, address")

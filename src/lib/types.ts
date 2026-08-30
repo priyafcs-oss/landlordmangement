@@ -531,6 +531,12 @@ export interface Provider {
   leaseRenewalFeeAmount?: number;
   /** Fee charged per routine/entry/exit inspection, if billed separately. */
   inspectionFeeAmount?: number;
+  /** Marketing/advertising fee charged when a property is listed for a new tenant — flat amount,
+   * separate from the letting fee itself. */
+  advertisingFeeAmount?: number;
+  /** Notice period (in days) either side must give to end the agreement, as stated in the
+   * agreement's termination clause. */
+  noticePeriodDays?: number;
   contractStartDate?: string;
   /** When the agreement is next up for renewal/review, if stated. */
   contractReviewDate?: string;
@@ -906,7 +912,8 @@ export interface AiIntakeProposal {
     | "loan_document"
     | "loan_statement"
     | "bank_statement"
-    | "property_sale";
+    | "property_sale"
+    | "agency_agreement";
   status: "pending" | "applied" | "dismissed";
   propertyId?: string;
   matchedTenantId?: string;
@@ -934,8 +941,29 @@ export interface AiIntakeProposal {
     | LoanDocumentProposalPayload
     | LoanStatementProposalPayload
     | BankStatementProposalPayload
-    | PropertySaleProposalPayload;
+    | PropertySaleProposalPayload
+    | AgencyAgreementProposalPayload;
   reviewReason?: string | null;
+}
+
+/** Extracted terms from a signed Property Management Agreement (PMA), staged for review before
+ * being applied onto the property's Agent Provider record — same shape as ProviderDialog's own
+ * "Upload & extract" fields (src/components/PropertyShared.tsx), just arriving via the inbox or
+ * a direct document upload instead. */
+export interface AgencyAgreementProposalPayload {
+  agencyName?: string;
+  managementFeePercent?: number;
+  lettingFeeAmount?: number;
+  lettingFeeWeeksRent?: number;
+  adminFeeAmount?: number;
+  adminFeeFrequency?: FeeFrequency;
+  leaseRenewalFeeAmount?: number;
+  inspectionFeeAmount?: number;
+  advertisingFeeAmount?: number;
+  noticePeriodDays?: number;
+  contractStartDate?: string;
+  contractReviewDate?: string;
+  confidence: number;
 }
 
 /** One past EOFY report generation, kept for quick reference — not the report itself, just a pointer to when/what. */

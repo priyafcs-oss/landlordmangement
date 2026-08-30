@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
@@ -154,6 +154,26 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
   const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false });
   const [sort, setSort] = useState<SortState<TxSortField> | null>(null);
+  // Hidden by default so the table gets the full width — a landlord scanning transactions cares
+  // about the rows, not the summary cards; the toggle remembers whoever last showed/hid it.
+  const [showSummary, setShowSummary] = useState(() => {
+    try {
+      return localStorage.getItem("txSummaryVisible") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSummary = () => {
+    setShowSummary((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("txSummaryVisible", next ? "1" : "0");
+      } catch {
+        // best-effort persistence only
+      }
+      return next;
+    });
+  };
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const fyLabel = fy === "all" ? "All time" : `FY ${fy}`;
 
@@ -459,14 +479,18 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           <Button size="sm" variant="outline" className="gap-1" onClick={exportCsv}>
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
+          <Button size="sm" variant="outline" className="gap-1" onClick={toggleSummary}>
+            {showSummary ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
+            {showSummary ? "Hide summary" : "Show summary"}
+          </Button>
           <AddTransactionDialog propertyId={lockedPropertyId} />
         </div>
       </div>
 
       <NeedsReviewBanner />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      <div className={showSummary ? "grid gap-4 lg:grid-cols-3" : "grid gap-4"}>
+        <div className={showSummary ? "lg:col-span-2" : ""}>
           <Card>
             {groupBy === "none" || !groups ? (
               <TxTable
@@ -518,6 +542,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           </Card>
         </div>
 
+        {showSummary && (
         <div className="space-y-4">
           <Card>
             <CardHeader>
@@ -583,6 +608,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
             </CardContent>
           </Card>
         </div>
+        )}
       </div>
     </div>
   );

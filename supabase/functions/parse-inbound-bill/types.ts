@@ -67,6 +67,7 @@ export type DocumentType =
   | "loan_statement"
   | "bank_statement"
   | "property_sale"
+  | "agency_agreement"
   | "other";
 
 export interface ClassificationResult {

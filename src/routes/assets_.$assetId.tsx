@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import {
   PropertyFeeVerificationTab,
   PropertyMediaTab,
   PropertyDialog,
+  DeletePropertyDialog,
 } from "@/components/PropertyShared";
 import { LedgerTab } from "@/routes/transactions";
 import { DocumentsContent } from "@/routes/documents";
@@ -106,6 +107,7 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
 function PropertyAssetPage() {
   const { assetId } = Route.useParams();
   const { state, loading } = useStore();
+  const navigate = useNavigate();
   const [section, setSection] = useState<Section>("overview");
 
   const asset = state.assets.find((a) => a.id === assetId);
@@ -170,15 +172,24 @@ function PropertyAssetPage() {
             <div className="font-semibold leading-tight">{prop.alias || prop.address}</div>
             {prop.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
           </div>
-          <PropertyDialog
-            property={prop}
-            onDone={() => {}}
-            trigger={
-              <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0">
-                <Pencil className="h-3 w-3" />
-              </Button>
-            }
-          />
+          <div className="flex shrink-0 items-center gap-1">
+            <PropertyDialog
+              property={prop}
+              onDone={() => {}}
+              trigger={
+                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0">
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              }
+            />
+            <DeletePropertyDialog
+              property={prop}
+              onDeleted={(keptProperty) => {
+                if (keptProperty) setSection("overview");
+                else void navigate({ to: "/assets" });
+              }}
+            />
+          </div>
         </div>
         <nav className="space-y-3">
           {groups.map((g, i) => (

@@ -41,7 +41,7 @@ export function ExpenseDialog({
   expense?: Expense;
   trigger?: React.ReactNode;
 } = {}) {
-  const { state, addExpense, updateExpense, addInvoice } = useStore();
+  const { state, addExpense, updateExpense, addInvoice, findOrCreateProvider } = useStore();
   const [open, setOpen] = useState(false);
   const isEdit = !!expense;
   const [form, setForm] = useState(() =>
@@ -109,6 +109,8 @@ export function ExpenseDialog({
       invoiceFileName: form.invoiceFileName || undefined,
       invoiceFileData: form.invoiceFileData || undefined,
     };
+
+    if (payload.providerName) findOrCreateProvider(payload.providerName, form.propertyId);
 
     if (isEdit && expense) {
       updateExpense(expense.id, payload);

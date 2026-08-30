@@ -11,6 +11,7 @@ const CLASSIFY_PROMPT_BASE = `You are triaging an email forwarded to a landlord'
 - "loan_statement": an ONGOING periodic statement from a lender on an EXISTING loan/mortgage, showing interest charged, repayments made, and the closing balance over a period.
 - "bank_statement": a landlord's own personal or business bank/transaction account statement (not a managing agent's rent statement) listing a list of transactions over a period.
 - "property_sale": a Contract of Sale where the LANDLORD is the seller/vendor (disposing of the property), a real estate agent's commission invoice for a sale, or a settlement statement on sale showing proceeds and selling costs. Distinguish from a purchase Contract of Sale (where the landlord is the buyer) — that's "property_document" instead.
+- "agency_agreement": a signed Property Management Agreement (PMA) / agency agreement / exclusive management authority between the landlord and a real estate agency, setting out the agency's management fee, letting fee, admin fee and other ongoing terms for managing the property. Do NOT use this for a rent statement (that's "rent_statement") — this is the CONTRACT itself, not a periodic statement.
 - "other": anything else (e.g. an ownership/income statement report, marketing, a general enquiry, or anything that doesn't fit the above).
 
 Respond with your best-guess document_type and a 0-1 confidence.`;
@@ -46,6 +47,7 @@ const CLASSIFY_SCHEMA = {
         "loan_statement",
         "bank_statement",
         "property_sale",
+        "agency_agreement",
         "other",
       ],
     },

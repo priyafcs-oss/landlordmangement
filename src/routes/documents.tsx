@@ -132,6 +132,8 @@ function proposalDocumentKind(kind: AiIntakeProposal["kind"]): DocumentEntry["ki
       return "Bank Statement";
     case "property_sale":
       return "Property Sale";
+    case "agency_agreement":
+      return "Management Agreement";
     default:
       return "Rent Statement";
   }
@@ -158,6 +160,8 @@ function proposalDocumentLabel(p: AiIntakeProposal): string {
       return (p.payload as { bankName?: string }).bankName ?? "Bank statement";
     case "property_sale":
       return "Property sale";
+    case "agency_agreement":
+      return (p.payload as { agencyName?: string }).agencyName ?? "Management agreement";
     default:
       return (p.payload as { tenantName?: string }).tenantName ?? "Rent statement";
   }
