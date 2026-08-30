@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -4483,63 +4483,155 @@ export function ProviderRow({ provider }: { provider: Provider }) {
  */
 export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
-  const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+  const agents = [...state.providers.filter((p) => p.propertyId === propertyId && p.role === "Agent")].sort((a, b) =>
+    (b.contractStartDate ?? b.created_at ?? "").localeCompare(a.contractStartDate ?? a.created_at ?? ""),
+  );
+  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? agents[0];
+  const [reviewProposalId, setReviewProposalId] = useState<string | null>(null);
+
+  const statements = [...state.aiProposals.filter((p) => p.propertyId === propertyId && p.kind === "rent_ledger")].sort(
+    (a, b) => {
+      const ap = (a.payload as RentLedgerProposalPayload).periodStart ?? a.documentDate ?? a.created_at ?? "";
+      const bp = (b.payload as RentLedgerProposalPayload).periodStart ?? b.documentDate ?? b.created_at ?? "";
+      return bp.localeCompare(ap);
+    },
+  );
 
   return (
     <div className="space-y-5 text-sm">
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div>
-            <div className="text-sm font-medium">Managing agent</div>
+            <div className="text-sm font-medium">Managing agent{agents.length > 1 ? "s" : ""}</div>
             <div className="text-xs text-muted-foreground">
-              Upload the signed management agreement to auto-fill the agency's contact details and fee terms.
+              Upload the signed management agreement to auto-fill the agency's contact details and fee terms. Add a
+              new one when you switch agents — a past agent's contract and fee terms stay on file rather than being
+              overwritten.
             </div>
           </div>
-          <ProviderDialog propertyId={propertyId} provider={agent} defaultRole="Agent">
+          <ProviderDialog propertyId={propertyId} defaultRole="Agent">
             <Button size="sm" variant="outline" className="shrink-0 gap-1">
-              {agent ? (
-                <>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </>
-              ) : (
-                <>
-                  <Plus className="h-3.5 w-3.5" /> Add managing agent
-                </>
-              )}
+              <Plus className="h-3.5 w-3.5" /> Add managing agent
             </Button>
           </ProviderDialog>
         </div>
-        {agent ? (
-          <ProviderRow provider={agent} />
-        ) : (
+        {agents.length === 0 ? (
           <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
             No managing agent on file for this property yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {agents.map((a) => (
+              <ProviderRow key={a.id} provider={a} />
+            ))}
           </div>
         )}
       </div>
 
-      {agent && (
+      <div className="border-t pt-4">
+        <div className="mb-2 text-sm font-medium">Agent statements</div>
+        {statements.length === 0 ? (
+          <div className="text-xs text-muted-foreground">
+            No rent statements uploaded for this property yet — forward or upload one and it'll show up here.
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {statements.map((p) => {
+              const payload = p.payload as RentLedgerProposalPayload;
+              return (
+                <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">
+                      {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+                    </span>
+                    {payload.tenantName && <span className="text-muted-foreground">{payload.tenantName}</span>}
+                    {payload.netToOwner !== undefined && (
+                      <span className="text-muted-foreground">Net {fmtCurrency(payload.netToOwner)}</span>
+                    )}
+                    <Badge
+                      variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"}
+                      className="text-[10px]"
+                    >
+                      {p.status}
+                    </Badge>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {p.sourceFileData && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 text-xs"
+                        onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}
+                      >
+                        <Eye className="h-3 w-3" /> View
+                      </Button>
+                    )}
+                    {p.status === "pending" && (
+                      <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => setReviewProposalId(p.id)}>
+                        Review
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {agents.length > 0 && (
         <div className="border-t pt-4">
-          <div className="mb-2 text-sm font-medium">Fee verification</div>
-          <PropertyFeeVerificationTab propertyId={propertyId} />
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">Fee verification</div>
+            {agents.length > 1 && selectedAgent && (
+              <Select value={selectedAgent.id} onValueChange={setSelectedAgentId}>
+                <SelectTrigger className="h-7 w-[220px] text-xs">
+                  <SelectValue placeholder="Verify against…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {agents.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                      {a.contractStartDate ? ` (from ${a.contractStartDate})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          {selectedAgent && <PropertyFeeVerificationTab propertyId={propertyId} agent={selectedAgent} />}
         </div>
       )}
+
+      <ProposalReviewDialog
+        proposalId={reviewProposalId}
+        onOpenChange={(v) => {
+          if (!v) setReviewProposalId(null);
+        }}
+      />
     </div>
   );
 }
 
+function feeVerificationMonthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "short", year: "numeric" });
+}
+
 /**
- * On-demand fee-verification report for one property — aggregates every rent payment and every
- * posted "Property Agent Fees" expense in a chosen financial year and checks the totals against
- * the property's Agent provider's management-agreement terms. Same comparison engine
- * (verifyAgentFees) as the inline per-statement check in RentLedgerProposalCard, just run over a
- * whole year of posted records instead of one statement still in review.
+ * On-demand fee-verification report for one property — a month-by-month breakdown of rent
+ * collected against every posted "Property Agent Fees" expense within a chosen financial year (or
+ * all time), each month checked against the given Provider's management-agreement terms, summed
+ * to an FY total at the bottom. Same comparison engine (verifyAgentFees) as the inline
+ * per-statement check in RentLedgerProposalCard, just run once per month instead of once per
+ * statement still in review.
  */
-export function PropertyFeeVerificationTab({ propertyId }: { propertyId: string }) {
+export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: string; agent: Provider }) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const [fy, setFy] = useState(currentFY);
-  const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
 
   const fys = (() => {
     const years: string[] = [];
@@ -4548,46 +4640,67 @@ export function PropertyFeeVerificationTab({ propertyId }: { propertyId: string 
     return years;
   })();
 
-  if (!agent) {
-    return (
-      <div className="text-sm text-muted-foreground">
-        No managing agent on file for this property yet — add one under Providers with role "Agent" to enable fee
-        verification.
-      </div>
-    );
-  }
   if (!hasFeeTerms(agent)) {
     return (
       <div className="text-sm text-muted-foreground">
-        {agent.name} has no management-agreement fee terms on file yet — open their contact under Providers and
-        upload the signed agreement (or enter the fees manually) to enable verification.
+        {agent.name} has no management-agreement fee terms on file yet — upload the signed agreement above (or enter
+        the fees manually) to enable verification.
       </div>
     );
   }
 
-  const { start, end } = fyRange(fy);
+  const { start, end } = fy === "all" ? { start: "0000-01-01", end: "9999-12-31" } : fyRange(fy);
   const tenantIds = state.tenants.filter((t) => t.propertyId === propertyId).map((t) => t.id);
-  const rentCollected = state.ledger
-    .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
-    .reduce((s, e) => s + e.credit, 0);
-  const expensesInRange = state.expenses.filter((e) => e.propertyId === propertyId && e.date >= start && e.date <= end);
-  const results = verifyAgentFees({ provider: agent, rentCollected, lines: collectAgentFeeLines(expensesInRange) });
-  const totalExpected = results.reduce((s, r) => s + (r.expected ?? 0), 0);
-  const totalActual = results.reduce((s, r) => s + r.actual, 0);
-  const flagged = results.filter((r) => r.status === "overcharge" || r.status === "not_charged" || r.status === "unspecified");
+  const rentInRange = state.ledger.filter(
+    (e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end,
+  );
+  const expensesInRange = state.expenses.filter(
+    (e) => e.propertyId === propertyId && e.category === "Property Agent Fees" && e.date >= start && e.date <= end,
+  );
+
+  const monthKeys = [...new Set([...rentInRange.map((e) => e.date.slice(0, 7)), ...expensesInRange.map((e) => e.date.slice(0, 7))])].sort();
+
+  const monthRows = monthKeys.map((key) => {
+    const rentCollected = rentInRange.filter((e) => e.date.slice(0, 7) === key).reduce((s, e) => s + e.credit, 0);
+    const lines = collectAgentFeeLines(expensesInRange.filter((e) => e.date.slice(0, 7) === key));
+    const results = verifyAgentFees({ provider: agent, rentCollected, lines });
+    return {
+      key,
+      rentCollected,
+      results,
+      totalActual: results.reduce((s, r) => s + r.actual, 0),
+      totalExpected: results.reduce((s, r) => s + (r.expected ?? 0), 0),
+    };
+  });
+
+  const totalRent = monthRows.reduce((s, m) => s + m.rentCollected, 0);
+  const totalActual = monthRows.reduce((s, m) => s + m.totalActual, 0);
+  const totalExpected = monthRows.reduce((s, m) => s + m.totalExpected, 0);
+  const flaggedMonths = monthRows.filter((m) =>
+    m.results.some((r) => r.status === "overcharge" || r.status === "not_charged" || r.status === "unspecified"),
+  );
+
+  const toggleMonth = (key: string) =>
+    setExpandedMonths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   return (
     <div className="space-y-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground">
-          Checks total rent collected and every posted agent-fee expense against {agent.name}'s management
-          agreement.
+          Checks rent collected and every posted agent-fee expense, period by period, against {agent.name}'s
+          management agreement.
         </div>
         <Select value={fy} onValueChange={setFy}>
           <SelectTrigger className="w-[130px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all">All time</SelectItem>
             {fys.map((y) => (
               <SelectItem key={y} value={y}>
                 FY {y}
@@ -4600,7 +4713,7 @@ export function PropertyFeeVerificationTab({ propertyId }: { propertyId: string 
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded border p-3">
           <div className="text-xs text-muted-foreground">Rent collected</div>
-          <div className="text-lg font-semibold">{fmtCurrency(rentCollected)}</div>
+          <div className="text-lg font-semibold">{fmtCurrency(totalRent)}</div>
         </div>
         <div className="rounded border p-3">
           <div className="text-xs text-muted-foreground">Agent fees charged</div>
@@ -4612,21 +4725,72 @@ export function PropertyFeeVerificationTab({ propertyId }: { propertyId: string 
         </div>
       </div>
 
-      {results.length === 0 ? (
+      {monthRows.length === 0 ? (
         <div className="rounded border p-3 text-xs text-muted-foreground">
-          No rent collected and no agent fees posted for FY {fy}.
+          No rent collected and no agent fees posted for {fy === "all" ? "this property" : `FY ${fy}`}.
         </div>
       ) : (
-        <div className="space-y-1">
-          {results.map((r) => (
-            <FeeCheckRow key={r.type} result={r} />
-          ))}
+        <div className="overflow-hidden rounded border">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                <th className="px-2 py-1.5 font-medium">Period</th>
+                <th className="px-2 py-1.5 text-right font-medium">Rent collected</th>
+                <th className="px-2 py-1.5 text-right font-medium">Fees charged</th>
+                <th className="px-2 py-1.5 text-right font-medium">Agreed</th>
+                <th className="w-8 px-2 py-1.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {monthRows.map((m) => {
+                const open = expandedMonths.has(m.key);
+                const hasFlag = m.results.some(
+                  (r) => r.status === "overcharge" || r.status === "not_charged" || r.status === "unspecified",
+                );
+                return (
+                  <Fragment key={m.key}>
+                    <tr className="cursor-pointer border-b last:border-0 hover:bg-muted/30" onClick={() => toggleMonth(m.key)}>
+                      <td className="px-2 py-1.5 font-medium">
+                        {feeVerificationMonthLabel(m.key)}
+                        {hasFlag && <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />}
+                      </td>
+                      <td className="px-2 py-1.5 text-right">{fmtCurrency(m.rentCollected)}</td>
+                      <td className="px-2 py-1.5 text-right">{fmtCurrency(m.totalActual)}</td>
+                      <td className="px-2 py-1.5 text-right text-muted-foreground">{fmtCurrency(m.totalExpected)}</td>
+                      <td className="px-2 py-1.5 text-center">{open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}</td>
+                    </tr>
+                    {open && (
+                      <tr className="border-b last:border-0 bg-muted/10">
+                        <td colSpan={5} className="space-y-1 px-2 py-2">
+                          {m.results.length === 0 ? (
+                            <div className="text-muted-foreground">No agent activity this period.</div>
+                          ) : (
+                            m.results.map((r) => <FeeCheckRow key={r.type} result={r} />)
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t bg-muted/30 font-medium">
+                <td className="px-2 py-1.5">{fy === "all" ? "All time" : `FY ${fy}`} total</td>
+                <td className="px-2 py-1.5 text-right">{fmtCurrency(totalRent)}</td>
+                <td className="px-2 py-1.5 text-right">{fmtCurrency(totalActual)}</td>
+                <td className="px-2 py-1.5 text-right text-muted-foreground">{fmtCurrency(totalExpected)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
 
-      {flagged.length > 0 && (
+      {flaggedMonths.length > 0 && (
         <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
-          {flagged.length} item{flagged.length === 1 ? "" : "s"} worth a closer look this year — see above.
+          {flaggedMonths.length} month{flaggedMonths.length === 1 ? "" : "s"} worth a closer look — expand the row(s)
+          marked <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 align-middle" /> above.
         </div>
       )}
     </div>

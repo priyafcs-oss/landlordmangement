@@ -85,16 +85,26 @@ export function verifyAgentFees(params: {
 
   const actualByType = new Map<FeeCheckType, number>();
   for (const line of lines) {
-    const type = classifyFeeLine(`${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`);
-    if (!type) continue;
+    // A line with no recognisable keyword in its vendor/category/description (an agency's own
+    // name, a bare "Agency Fee"/"Commission" with no further detail) still overwhelmingly means
+    // the recurring management fee — the only fee type charged on virtually every statement —
+    // rather than something to silently drop from the total. Falls back to Management Fee instead
+    // of vanishing, which previously made the whole line invisible to verification even though it
+    // was a real, correctly-posted deduction.
+    const type = classifyFeeLine(`${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`) ?? "Management Fee";
     actualByType.set(type, (actualByType.get(type) ?? 0) + line.amount);
   }
 
   const results: FeeCheckResult[] = [];
 
-  if (provider.managementFeePercent !== undefined && rentCollected > 0) {
-    const expected = rentCollected * (provider.managementFeePercent / 100);
-    results.push(buildResult("Management Fee", expected, actualByType.get("Management Fee") ?? 0, true));
+  const mgmtActual = actualByType.get("Management Fee") ?? 0;
+  if (provider.managementFeePercent !== undefined && (rentCollected > 0 || mgmtActual > 0)) {
+    // No rent recorded in this bucket (e.g. a monthly breakdown where the fee deduction landed in
+    // a different month than the rent it was deducted from) still surfaces the actual charge
+    // rather than silently dropping it — there's just nothing to compute an expected amount
+    // against, so it reads as "unspecified" instead of a computed variance.
+    const expected = rentCollected > 0 ? rentCollected * (provider.managementFeePercent / 100) : undefined;
+    results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0));
   }
 
   const lettingActual = actualByType.get("Letting Fee") ?? 0;
