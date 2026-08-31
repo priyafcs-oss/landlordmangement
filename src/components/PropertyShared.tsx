@@ -581,6 +581,17 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
  * "nothing picked yet" and is never itself a valid choice). */
 const SHARED_EXPENSE_TENANT = "__shared__";
 
+/** A rent statement's income section sometimes carries a line that isn't rent at all — most
+ * commonly a utility usage charge the agent invoiced and collected from the tenant alongside
+ * rent (e.g. "Inv:8827, WATER USAGE") — extracted into `transactions` since it's still money
+ * credited to the owner, even though the parsing prompt otherwise reserves that array for rent.
+ * Two things depend on telling them apart: the ledger type it's posted under ("Rent Payment" vs
+ * "Water Invoice" — see LedgerType), and the rent base a % management fee is calculated against,
+ * which should never include a recharge that was never actually rent. */
+function isRentTransaction(description: string): boolean {
+  return !/\bwater\b|\busage\b|\binv\s*[:#]/i.test(description);
+}
+
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
   const { state, addLedger, addExpense, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
@@ -652,11 +663,19 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const assignedIncludedTenantIds = [...new Set(payload.transactions.filter((_, i) => included[i]).map((_, i) => txTenantIds[i]).filter(Boolean))];
   const singleAssignedTenant =
     assignedIncludedTenantIds.length === 1 ? state.tenants.find((t) => t.id === assignedIncludedTenantIds[0]) : undefined;
+  // A % management fee is charged on rent only — a recharge like a water-usage invoice riding
+  // along in the same income section (see isRentTransaction) inflates the agreed amount if it's
+  // included here, even though includedIncome/computedNet above correctly count it for the
+  // statement's own net-to-owner reconciliation.
+  const rentOnlyIncome = payload.transactions.reduce(
+    (s, tx, i) => (included[i] && isRentTransaction(tx.description) ? s + tx.amount : s),
+    0,
+  );
   const feeChecks: FeeCheckResult[] =
     agent && hasFeeTerms(agent)
       ? verifyAgentFees({
           provider: agent,
-          rentCollected: includedIncome,
+          rentCollected: rentOnlyIncome,
           lines: expenseLines.filter((_, i) => expensesIncluded[i]),
           tenantRent: singleAssignedTenant ? { amount: singleAssignedTenant.rentAmount, frequency: singleAssignedTenant.rentFrequency } : undefined,
         })
@@ -671,7 +690,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       addLedger({
         tenantId: txTenantIds[i],
         date: tx.date,
-        type: "Rent Payment",
+        type: isRentTransaction(tx.description) ? "Rent Payment" : "Water Invoice",
         description: tx.description,
         debit: 0,
         credit: tx.amount,
@@ -826,6 +845,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                 <span className="w-24 shrink-0">{tx.date}</span>
                 <span className="w-20 shrink-0 font-medium">{fmtCurrency(tx.amount)}</span>
                 <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
+                {!isRentTransaction(tx.description) && (
+                  <span
+                    className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                    title="Recharge/invoice, not rent — posted as a Water Invoice and excluded from the management fee's rent base"
+                  >
+                    not rent
+                  </span>
+                )}
                 {multiTenant && (
                   <Select
                     value={txTenantIds[i]}
