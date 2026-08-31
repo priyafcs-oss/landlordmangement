@@ -96,7 +96,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { FileSignature } from "lucide-react";
 
@@ -798,26 +798,25 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     );
   };
 
+  // Re-runs extraction on this same document with the same rent-statement parser (see
+  // UnclassifiedProposalCard's identical use of this function) — useful when a line was
+  // misread or misclassified and might come out right on a second pass. Deletes this proposal
+  // row once the replacement is confirmed written, so there's never a stale duplicate left behind.
   const [reparsing, setReparsing] = useState(false);
   const reparse = async () => {
     if (!proposal.sourceFileData) return;
     setReparsing(true);
     try {
-      const raw = proposal.sourceFileData.includes(",")
-        ? proposal.sourceFileData.slice(proposal.sourceFileData.indexOf(",") + 1)
-        : proposal.sourceFileData;
-      const { data, error } = await supabase.functions.invoke<{ ok: boolean; proposalId?: string; skipped?: boolean; error?: string }>(
-        "upload-document",
-        { body: { fileBase64: raw, fileName: proposal.sourceFileName ?? "statement.pdf", mimeType: mimeForFileName(proposal.sourceFileName) } },
-      );
+      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>("reparse-document", {
+        body: { proposalId: proposal.id, documentType: "rent_statement" },
+      });
       if (error) throw error;
       if (!data?.ok) {
         toast.error(data?.error || "Re-parse failed");
         return;
       }
       await refresh();
-      toast.success("Re-parsed into a fresh statement to review — this one has been dismissed");
-      onDismiss();
+      toast.success("Re-parsed — check the review queue for the fresh version");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Re-parse failed");
     } finally {
