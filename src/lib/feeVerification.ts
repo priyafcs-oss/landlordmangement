@@ -18,6 +18,11 @@ export interface FeeCheckResult {
  * "management fee" wording varies by source. */
 export interface FeeLine {
   vendor?: string;
+  /** The Expense's own payee field, when this line came from a posted Expense — distinct from
+   * `vendor` (itemName), which is often just a free-text description rather than who was actually
+   * paid. Only set for the collectAgentFeeLines path; a fresh AI-parsed statement line has no
+   * separate payee, since `vendor` already IS who it was paid to. */
+  providerName?: string;
   category?: string;
   description?: string;
   amount: number;
@@ -49,7 +54,7 @@ function weeklyRentOf(rentAmount: number, frequency: RentFrequency): number {
 const TOLERANCE_RATE = 0.02;
 const MIN_TOLERANCE = 2;
 
-function buildResult(type: FeeCheckType, expected: number | undefined, actual: number, treatZeroAsMissing: boolean): FeeCheckResult {
+export function buildResult(type: FeeCheckType, expected: number | undefined, actual: number, treatZeroAsMissing: boolean): FeeCheckResult {
   if (expected === undefined) {
     return { type, expected: null, actual, variance: null, status: "unspecified" };
   }
@@ -74,7 +79,7 @@ function buildResult(type: FeeCheckType, expected: number | undefined, actual: n
 export function verifyAgentFees(params: {
   provider: Pick<
     Provider,
-    "managementFeePercent" | "lettingFeeAmount" | "lettingFeeWeeksRent" | "adminFeeAmount" | "leaseRenewalFeeAmount" | "inspectionFeeAmount"
+    "name" | "managementFeePercent" | "lettingFeeAmount" | "lettingFeeWeeksRent" | "adminFeeAmount" | "leaseRenewalFeeAmount" | "inspectionFeeAmount"
   >;
   rentCollected: number;
   lines: FeeLine[];
@@ -82,16 +87,23 @@ export function verifyAgentFees(params: {
   tenantRent?: { amount: number; frequency: RentFrequency };
 }): FeeCheckResult[] {
   const { provider, rentCollected, lines, tenantRent } = params;
+  const normalizedAgentName = provider.name.trim().toLowerCase();
 
   const actualByType = new Map<FeeCheckType, number>();
   for (const line of lines) {
-    // A line with no recognisable keyword in its vendor/category/description (an agency's own
-    // name, a bare "Agency Fee"/"Commission" with no further detail) still overwhelmingly means
-    // the recurring management fee — the only fee type charged on virtually every statement —
-    // rather than something to silently drop from the total. Falls back to Management Fee instead
-    // of vanishing, which previously made the whole line invisible to verification even though it
-    // was a real, correctly-posted deduction.
-    const type = classifyFeeLine(`${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`) ?? "Management Fee";
+    // A line with no recognisable fee keyword (a bare "Agency Fee"/"Commission" with no further
+    // detail) still overwhelmingly means the recurring management fee — the only fee type charged
+    // on virtually every statement — rather than something to silently drop from the total,
+    // PROVIDED the line was actually paid to the agent itself (its vendor/payee name matches), or
+    // is explicitly tagged with the dedicated fee category. Without that guard, a bill the agent
+    // merely paid on the owner's behalf (a tradesperson invoice deducted from the same statement,
+    // or a Repairs & Maintenance expense routed through the agent's trust account) would fall into
+    // this same catch-all and inflate the management fee total with costs that have nothing to do
+    // with it.
+    const isFeeCategory = /property agent fees|letting fees/i.test(line.category ?? "");
+    const payeeIsAgent = [line.vendor, line.providerName].some((v) => !!v && v.trim().toLowerCase() === normalizedAgentName);
+    const type = classifyFeeLine(`${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`) ?? (isFeeCategory || payeeIsAgent ? "Management Fee" : null);
+    if (!type) continue;
     actualByType.set(type, (actualByType.get(type) ?? 0) + line.amount);
   }
 
@@ -133,6 +145,34 @@ export function verifyAgentFees(params: {
 }
 
 /**
+ * Rolls a set of per-period FeeCheckResult[] (one array per month, from repeated verifyAgentFees
+ * calls) up into a single result per fee type for the whole span — e.g. an FY total, so "was the
+ * admin fee right this year" can be answered as one flag instead of twelve. Sums actual and
+ * expected across every period a type appeared in, then re-derives status with the same
+ * tolerance/not-charged rule buildResult already applies per period. Only Management Fee treats a
+ * zero actual against a positive expected as "not charged" — the same asymmetry verifyAgentFees
+ * applies per period, since a one-off fee (letting, renewal, inspection) simply not occurring in a
+ * given span is normal, not a missed charge.
+ */
+export function summarizeFeeChecksByType(periodResults: FeeCheckResult[][]): FeeCheckResult[] {
+  const byType = new Map<FeeCheckType, { actual: number; expected: number; hasExpected: boolean }>();
+  for (const results of periodResults) {
+    for (const r of results) {
+      const entry = byType.get(r.type) ?? { actual: 0, expected: 0, hasExpected: false };
+      entry.actual += r.actual;
+      if (r.expected !== null) {
+        entry.expected += r.expected;
+        entry.hasExpected = true;
+      }
+      byType.set(r.type, entry);
+    }
+  }
+  return [...byType.entries()].map(([type, e]) =>
+    buildResult(type, e.hasExpected ? e.expected : undefined, e.actual, type === "Management Fee"),
+  );
+}
+
+/**
  * Turns a set of already-posted Expense rows back into FeeLine input — used for verifying a
  * whole past period (the on-demand report, EOFY) rather than a single statement still in review.
  * Takes whatever set of expenses the caller has already decided are agent-fee lines (see
@@ -144,7 +184,12 @@ export function verifyAgentFees(params: {
  * before that, itemName alone (often just the agency's name) may have no fee-type keyword at all.
  */
 export function collectAgentFeeLines(expenses: Expense[]): FeeLine[] {
-  return expenses.map((e) => ({ vendor: e.itemName, category: [e.category, e.notes].filter(Boolean).join(" "), amount: e.cost }));
+  return expenses.map((e) => ({
+    vendor: e.itemName,
+    providerName: e.providerName,
+    category: [e.category, e.notes].filter(Boolean).join(" "),
+    amount: e.cost,
+  }));
 }
 
 /** An expense counts toward agent-fee verification when it's either tagged with the dedicated

@@ -27,7 +27,7 @@ import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh"
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ExpenseDialog } from "@/components/ExpenseDialog";
 import { FeeCheckRow } from "@/components/PropertyShared";
-import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, type FeeCheckResult } from "@/lib/feeVerification";
+import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
 
 function pdfSafe(s: string): string {
@@ -824,7 +824,11 @@ function EofyReport() {
 
       const agent = state.providers.find((p) => p.propertyId === prop.id && p.role === "Agent");
       if (agent && hasFeeTerms(agent)) {
-        const results = verifyAgentFees({ provider: agent, rentCollected, lines: collectAgentFeeLines(expenses) });
+        // Only expenses actually tied to the agent — its dedicated fee category, or paid to the
+        // agent by name — count toward fee verification; every other expense in the property's
+        // full FY list (repairs, insurance, rates, etc.) has nothing to do with the agreement.
+        const agentExpenses = expenses.filter((e) => isAgentFeeExpense(e, agent.name));
+        const results = verifyAgentFees({ provider: agent, rentCollected, lines: collectAgentFeeLines(agentExpenses) });
         if (results.length > 0) {
           feeChecksByProperty.push({ propertyLabel: prop.alias || prop.address, agentName: agent.name, results });
         }

@@ -50,7 +50,7 @@ import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
-import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
+import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, summarizeFeeChecksByType, type FeeCheckResult } from "@/lib/feeVerification";
 import type {
   Property,
   Tenant,
@@ -4764,6 +4764,10 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
   const flaggedMonths = monthRows.filter((m) =>
     m.results.some((r) => r.status === "overcharge" || r.status === "not_charged" || r.status === "unspecified"),
   );
+  // Same per-type comparison used for each month, rolled up to one flag per fee category for the
+  // whole selected span — answers "was the admin fee / inspection fee / etc. right this year"
+  // without having to expand every month and add it up by hand.
+  const categoryTotals = summarizeFeeChecksByType(monthRows.map((m) => m.results));
 
   const toggleMonth = (key: string) =>
     setExpandedMonths((prev) => {
@@ -4809,6 +4813,19 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
           <div className="text-lg font-semibold">{fmtCurrency(totalExpected)}</div>
         </div>
       </div>
+
+      {categoryTotals.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium">
+            By fee category — {fy === "all" ? "all time" : `FY ${fy}`} total vs. {agent.name}'s agreement
+          </div>
+          <div className="space-y-1">
+            {categoryTotals.map((r) => (
+              <FeeCheckRow key={r.type} result={r} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {monthRows.length === 0 ? (
         <div className="rounded border p-3 text-xs text-muted-foreground">
