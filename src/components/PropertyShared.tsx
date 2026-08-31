@@ -96,7 +96,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { openBillDocument, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { FileSignature } from "lucide-react";
 
@@ -593,10 +593,22 @@ function isRentTransaction(description: string): boolean {
 }
 
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addLedger, addExpense, markBillPaid, markProposalApplied } = useStore();
+  const { state, addLedger, addExpense, markBillPaid, markProposalApplied, refresh } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const expenseLines = payload.expenseLines ?? [];
+
+  // The AI extraction is a starting point, not gospel — a line can land in the wrong section
+  // (a tenant-paid recharge parsed as a deduction instead of income, or vice versa), have a wrong
+  // amount, or be missing entirely. These editable copies let the reviewer fix any of that before
+  // anything is posted; payload/expenseLines above stay untouched and are only used to seed the
+  // initial per-row state below (tenant assignment, included flags) keyed to the original order.
+  type TxRow = RentLedgerProposalPayload["transactions"][number];
+  type ExpRow = NonNullable<RentLedgerProposalPayload["expenseLines"]>[number];
+  const [txRows, setTxRows] = useState<TxRow[]>(() => payload.transactions.map((t) => ({ ...t })));
+  const [expRows, setExpRows] = useState<ExpRow[]>(() => expenseLines.map((e) => ({ ...e })));
+  const updateTxRow = (i: number, patch: Partial<TxRow>) => setTxRows((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const updateExpRow = (i: number, patch: Partial<ExpRow>) => setExpRows((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   const tenantsAtProperty = propertyId ? state.tenants.filter((t) => t.propertyId === propertyId) : state.tenants;
   // A changeover statement (outgoing + incoming tenant in the same period) needs each line
@@ -630,7 +642,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       return tId ? !findDuplicateLedgerEntry(state.ledger, { tenantId: tId, amount: tx.amount, date: tx.date }) : true;
     }),
   );
-  const ledgerDuplicates = payload.transactions.map((tx, i) =>
+  const ledgerDuplicates = txRows.map((tx, i) =>
     txTenantIds[i] ? findDuplicateLedgerEntry(state.ledger, { tenantId: txTenantIds[i], amount: tx.amount, date: tx.date }) : null,
   );
   const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() => expenseLines.map(() => true));
@@ -645,13 +657,59 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // An agent statement's deduction is often just reporting that a bill already sitting in
   // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
   // creating a second, disconnected Expense for the same real-world payment.
-  const billMatches = expenseLines.map((e) =>
+  const billMatches = expRows.map((e) =>
     findMatchingUnpaidBill(state.bills, { propertyId, vendorOrDescription: e.vendor, amount: e.amount, date: e.date }),
   );
   const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
 
-  const includedIncome = payload.transactions.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
-  const includedExpenses = expenseLines.reduce((s, e, i) => (expensesIncluded[i] ? s + e.amount : s), 0);
+  // A reviewer can add a missing line, delete a spurious one, or move one that the AI put in the
+  // wrong section entirely (e.g. a tenant-paid recharge parsed as a deduction instead of income —
+  // see the original bug report this was added for). Each helper keeps every index-parallel
+  // per-row array (included/tenant assignment/bill-match) in sync with the row list it belongs to.
+  const addTxRow = () => {
+    setTxRows((rows) => [...rows, { date: todayISO(), amount: 0, description: "" }]);
+    setIncluded((v) => [...v, true]);
+    setTxTenantIds((v) => [...v, defaultTenantFor(undefined)]);
+  };
+  const removeTxRow = (i: number) => {
+    setTxRows((rows) => rows.filter((_, j) => j !== i));
+    setIncluded((v) => v.filter((_, j) => j !== i));
+    setTxTenantIds((v) => v.filter((_, j) => j !== i));
+  };
+  const addExpRow = () => {
+    setExpRows((rows) => [...rows, { vendor: "", amount: 0, date: todayISO(), description: "", category: "" }]);
+    setExpensesIncluded((v) => [...v, true]);
+    setExpTenantIds((v) => [...v, soleTxTenant]);
+    setMatchAsBill((v) => [...v, false]);
+  };
+  const removeExpRow = (i: number) => {
+    setExpRows((rows) => rows.filter((_, j) => j !== i));
+    setExpensesIncluded((v) => v.filter((_, j) => j !== i));
+    setExpTenantIds((v) => v.filter((_, j) => j !== i));
+    setMatchAsBill((v) => v.filter((_, j) => j !== i));
+  };
+  /** The AI sometimes puts a line in the wrong section entirely — a tenant-paid recharge parsed
+   * as a deduction, or (more rarely) an agent charge parsed as income. Moving converts between
+   * the two row shapes: an expense's vendor becomes the income line's description (and vice
+   * versa), since that's the field actually shown/used for identifying the line either way. */
+  const moveExpToIncome = (i: number) => {
+    const e = expRows[i];
+    removeExpRow(i);
+    setTxRows((rows) => [...rows, { date: e.date, amount: e.amount, description: [e.vendor, e.description].filter(Boolean).join(" — ") }]);
+    setIncluded((v) => [...v, true]);
+    setTxTenantIds((v) => [...v, defaultTenantFor(undefined)]);
+  };
+  const moveTxToExpense = (i: number) => {
+    const t = txRows[i];
+    removeTxRow(i);
+    setExpRows((rows) => [...rows, { vendor: t.description, amount: t.amount, date: t.date, description: "", category: "" }]);
+    setExpensesIncluded((v) => [...v, true]);
+    setExpTenantIds((v) => [...v, soleTxTenant]);
+    setMatchAsBill((v) => [...v, false]);
+  };
+
+  const includedIncome = txRows.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
+  const includedExpenses = expRows.reduce((s, e, i) => (expensesIncluded[i] ? s + e.amount : s), 0);
   const computedNet = includedIncome - includedExpenses;
   // A statement can show a running balance the agent holds between periods — when it does, the
   // amount actually paid to the owner is this period's activity adjusted by that rollover, not
@@ -660,14 +718,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const reconciledNet = computedNet + (payload.openingBalance ?? 0) - (payload.closingBalance ?? 0);
 
   const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
-  const assignedIncludedTenantIds = [...new Set(payload.transactions.filter((_, i) => included[i]).map((_, i) => txTenantIds[i]).filter(Boolean))];
+  const assignedIncludedTenantIds = [...new Set(txRows.filter((_, i) => included[i]).map((_, i) => txTenantIds[i]).filter(Boolean))];
   const singleAssignedTenant =
     assignedIncludedTenantIds.length === 1 ? state.tenants.find((t) => t.id === assignedIncludedTenantIds[0]) : undefined;
   // A % management fee is charged on rent only — a recharge like a water-usage invoice riding
   // along in the same income section (see isRentTransaction) inflates the agreed amount if it's
   // included here, even though includedIncome/computedNet above correctly count it for the
   // statement's own net-to-owner reconciliation.
-  const rentOnlyIncome = payload.transactions.reduce(
+  const rentOnlyIncome = txRows.reduce(
     (s, tx, i) => (included[i] && isRentTransaction(tx.description) ? s + tx.amount : s),
     0,
   );
@@ -676,16 +734,16 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       ? verifyAgentFees({
           provider: agent,
           rentCollected: rentOnlyIncome,
-          lines: expenseLines.filter((_, i) => expensesIncluded[i]),
+          lines: expRows.filter((_, i) => expensesIncluded[i]),
           tenantRent: singleAssignedTenant ? { amount: singleAssignedTenant.rentAmount, frequency: singleAssignedTenant.rentFrequency } : undefined,
         })
       : [];
 
   const confirm = () => {
-    if (payload.transactions.some((_, i) => included[i] && !txTenantIds[i])) {
+    if (txRows.some((_, i) => included[i] && !txTenantIds[i])) {
       return toast.error("Assign a tenant to every included payment first");
     }
-    payload.transactions.forEach((tx, i) => {
+    txRows.forEach((tx, i) => {
       if (!included[i]) return;
       addLedger({
         tenantId: txTenantIds[i],
@@ -699,7 +757,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         sourceFileData: proposal.sourceFileData,
       });
     });
-    expenseLines.forEach((e, i) => {
+    expRows.forEach((e, i) => {
       if (!expensesIncluded[i]) return;
       const match = billMatches[i];
       if (match && matchAsBill[i]) {
@@ -736,8 +794,35 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     });
     markProposalApplied(proposal.id);
     toast.success(
-      expenseLines.some((_, i) => expensesIncluded[i]) ? "Rent payments and expenses added" : "Rent payments added",
+      expRows.some((_, i) => expensesIncluded[i]) ? "Rent payments and expenses added" : "Rent payments added",
     );
+  };
+
+  const [reparsing, setReparsing] = useState(false);
+  const reparse = async () => {
+    if (!proposal.sourceFileData) return;
+    setReparsing(true);
+    try {
+      const raw = proposal.sourceFileData.includes(",")
+        ? proposal.sourceFileData.slice(proposal.sourceFileData.indexOf(",") + 1)
+        : proposal.sourceFileData;
+      const { data, error } = await supabase.functions.invoke<{ ok: boolean; proposalId?: string; skipped?: boolean; error?: string }>(
+        "upload-document",
+        { body: { fileBase64: raw, fileName: proposal.sourceFileName ?? "statement.pdf", mimeType: mimeForFileName(proposal.sourceFileName) } },
+      );
+      if (error) throw error;
+      if (!data?.ok) {
+        toast.error(data?.error || "Re-parse failed");
+        return;
+      }
+      await refresh();
+      toast.success("Re-parsed into a fresh statement to review — this one has been dismissed");
+      onDismiss();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Re-parse failed");
+    } finally {
+      setReparsing(false);
+    }
   };
 
   return (
@@ -838,17 +923,32 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
 
         <div className="space-y-1 rounded border p-2">
           <div className="text-[11px] font-medium text-muted-foreground">Rent income → ledger</div>
-          {payload.transactions.map((tx, i) => (
+          {txRows.map((tx, i) => (
             <div key={i} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
-              <label className="flex items-center gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
                 <input
                   type="checkbox"
                   checked={included[i]}
                   onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
                 />
-                <span className="w-24 shrink-0">{tx.date}</span>
-                <span className="w-20 shrink-0 font-medium">{fmtCurrency(tx.amount)}</span>
-                <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
+                <Input
+                  type="date"
+                  value={tx.date}
+                  onChange={(e) => updateTxRow(i, { date: e.target.value })}
+                  className="h-6 w-[124px] shrink-0 text-xs"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={tx.amount}
+                  onChange={(e) => updateTxRow(i, { amount: Number(e.target.value) })}
+                  className="h-6 w-20 shrink-0 text-xs"
+                />
+                <Input
+                  value={tx.description}
+                  onChange={(e) => updateTxRow(i, { description: e.target.value })}
+                  className="h-6 min-w-[140px] flex-1 text-xs"
+                />
                 {!isRentTransaction(tx.description) && (
                   <span
                     className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -874,7 +974,19 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                     </SelectContent>
                   </Select>
                 )}
-              </label>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 shrink-0"
+                  title="This is actually a deduction, not income — move it to Deductions below"
+                  onClick={() => moveTxToExpense(i)}
+                >
+                  <ArrowRight className="h-3 w-3" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" title="Remove this line" onClick={() => removeTxRow(i)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
               {ledgerDuplicates[i] && (
                 <div className="ml-6 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
                   Possible duplicate — {fmtCurrency(ledgerDuplicates[i]!.credit)} rent payment already on this
@@ -885,63 +997,103 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               )}
             </div>
           ))}
+          <Button size="sm" variant="outline" className="h-6 gap-1 text-xs" onClick={addTxRow}>
+            <Plus className="h-3 w-3" /> Add income line
+          </Button>
         </div>
 
-        {expenseLines.length > 0 && (
-          <div className="space-y-1 rounded border p-2">
-            <div className="text-[11px] font-medium text-muted-foreground">
-              Deductions on this statement → expenses
-            </div>
-            {expenseLines.map((e, i) => (
-              <div key={i} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
-                <label className="flex items-center gap-2 text-xs">
+        <div className="space-y-1 rounded border p-2">
+          <div className="text-[11px] font-medium text-muted-foreground">
+            Deductions on this statement → expenses
+          </div>
+          {expRows.map((e, i) => (
+            <div key={i} className="space-y-1 border-b pb-1 last:border-b-0 last:pb-0">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={expensesIncluded[i]}
+                  onChange={(ev) => setExpensesIncluded((inc) => inc.map((v, j) => (j === i ? ev.target.checked : v)))}
+                />
+                <Input
+                  type="date"
+                  value={e.date}
+                  onChange={(ev) => updateExpRow(i, { date: ev.target.value })}
+                  className="h-6 w-[124px] shrink-0 text-xs"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={e.amount}
+                  onChange={(ev) => updateExpRow(i, { amount: Number(ev.target.value) })}
+                  className="h-6 w-20 shrink-0 text-xs"
+                />
+                <Input
+                  value={e.vendor}
+                  onChange={(ev) => updateExpRow(i, { vendor: ev.target.value })}
+                  placeholder="Paid to"
+                  className="h-6 w-28 shrink-0 text-xs"
+                />
+                <Input
+                  value={e.description}
+                  onChange={(ev) => updateExpRow(i, { description: ev.target.value })}
+                  placeholder="Description"
+                  className="h-6 min-w-[120px] flex-1 text-xs"
+                />
+                {multiTenant && (
+                  <Select
+                    value={expTenantIds[i]}
+                    onValueChange={(v) => setExpTenantIds((ids) => ids.map((val, j) => (j === i ? v : val)))}
+                  >
+                    <SelectTrigger className="h-6 w-[160px] shrink-0 text-xs">
+                      <SelectValue placeholder="Shared" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SHARED_EXPENSE_TENANT}>Shared / whole property</SelectItem>
+                      {tenantsAtProperty.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6 shrink-0"
+                  title="This is actually income, not a deduction — move it to Rent income above"
+                  onClick={() => moveExpToIncome(i)}
+                >
+                  <ArrowRight className="h-3 w-3 -scale-x-100" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" title="Remove this line" onClick={() => removeExpRow(i)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="ml-6 text-[10px] text-muted-foreground">
+                Will post under: {categorizeAgentStatementLine(e, agent?.name)}
+              </div>
+              {billMatches[i] && (
+                <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
                   <input
                     type="checkbox"
-                    checked={expensesIncluded[i]}
-                    onChange={(ev) => setExpensesIncluded((inc) => inc.map((v, j) => (j === i ? ev.target.checked : v)))}
+                    checked={matchAsBill[i]}
+                    onChange={(ev) => setMatchAsBill((m) => m.map((v, j) => (j === i ? ev.target.checked : v)))}
                   />
-                  <span className="w-24 shrink-0">{e.date}</span>
-                  <span className="w-20 shrink-0 font-medium">{fmtCurrency(e.amount)}</span>
-                  <span className="w-28 shrink-0 truncate">{e.vendor}</span>
-                  <span className="flex-1 truncate text-muted-foreground">{e.description}</span>
-                  {multiTenant && (
-                    <Select
-                      value={expTenantIds[i]}
-                      onValueChange={(v) => setExpTenantIds((ids) => ids.map((val, j) => (j === i ? v : val)))}
-                    >
-                      <SelectTrigger className="h-6 w-[160px] shrink-0 text-xs">
-                        <SelectValue placeholder="Shared" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={SHARED_EXPENSE_TENANT}>Shared / whole property</SelectItem>
-                        {tenantsAtProperty.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
+                  <span>
+                    Looks like your existing {fmtCurrency(billMatches[i]!.amount)} {billMatches[i]!.billType} bill due{" "}
+                    {billMatches[i]!.dueDate} — mark it paid instead of adding a new expense?
+                    {Math.abs(billMatches[i]!.amount - e.amount) > 0.01 &&
+                      ` (bill is ${fmtCurrency(billMatches[i]!.amount)}, statement says ${fmtCurrency(e.amount)})`}
+                  </span>
                 </label>
-                {billMatches[i] && (
-                  <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
-                    <input
-                      type="checkbox"
-                      checked={matchAsBill[i]}
-                      onChange={(ev) => setMatchAsBill((m) => m.map((v, j) => (j === i ? ev.target.checked : v)))}
-                    />
-                    <span>
-                      Looks like your existing {fmtCurrency(billMatches[i]!.amount)} {billMatches[i]!.billType} bill due{" "}
-                      {billMatches[i]!.dueDate} — mark it paid instead of adding a new expense?
-                      {Math.abs(billMatches[i]!.amount - e.amount) > 0.01 &&
-                        ` (bill is ${fmtCurrency(billMatches[i]!.amount)}, statement says ${fmtCurrency(e.amount)})`}
-                    </span>
-                  </label>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+            </div>
+          ))}
+          <Button size="sm" variant="outline" className="h-6 gap-1 text-xs" onClick={addExpRow}>
+            <Plus className="h-3 w-3" /> Add deduction line
+          </Button>
+        </div>
 
         <div className="space-y-1 rounded border bg-muted/30 p-2 text-xs">
           <div className="flex flex-wrap items-center gap-3">
@@ -979,13 +1131,25 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button size="sm" onClick={confirm}>
             Confirm &amp; Add Payments
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
           </Button>
+          {proposal.sourceFileData && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="gap-1 text-muted-foreground"
+              disabled={reparsing}
+              onClick={reparse}
+              title="Re-run the AI reader on the original file — useful if it missed or misread a line. Dismisses this version."
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> {reparsing ? "Re-parsing…" : "Re-parse document"}
+            </Button>
+          )}
         </div>
     </DocumentReviewCard>
   );
