@@ -50,7 +50,7 @@ import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
-import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, summarizeFeeChecksByType, type FeeCheckResult } from "@/lib/feeVerification";
+import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, summarizeFeeChecksByType, categorizeAgentStatementLine, type FeeCheckResult } from "@/lib/feeVerification";
 import type {
   Property,
   Tenant,
@@ -713,7 +713,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         date: e.date,
         propertyId: propertyId || undefined,
         taxCategory: "Immediate Deduction",
-        category: "Property Agent Fees",
+        // A statement deduction is only the agent's own fee when it's actually paid to the agent
+        // or reads as one (management/admin/letting/etc.) — a water bill or tradesperson invoice
+        // the agent merely paid on the owner's behalf gets its own real category instead.
+        category: categorizeAgentStatementLine(e, agent?.name),
+        providerName: e.vendor,
         // The AI's raw free-text classification (e.g. "management_fees") — itemName alone is
         // usually just the agency's name, so this is the only signal fee verification has to work
         // with once this line becomes a plain Expense row (see classifyFeeLine in feeVerification.ts).

@@ -1,4 +1,4 @@
-import type { Expense, Provider, RentFrequency } from "./types";
+import type { Expense, ExpenseCategory, Provider, RentFrequency } from "./types";
 
 export type FeeCheckType = "Management Fee" | "Letting Fee" | "Admin Fee" | "Lease Renewal Fee" | "Inspection Fee";
 export type FeeCheckStatus = "match" | "overcharge" | "undercharge" | "not_charged" | "unspecified";
@@ -43,6 +43,49 @@ export function classifyFeeLine(text: string): FeeCheckType | null {
     if (pattern.test(text)) return type;
   }
   return null;
+}
+
+/** Non-fee deduction lines checked after classifyFeeLine finds no fee keyword and the line isn't
+ * paid to the agent itself — a rent statement routinely deducts real bills (water usage, a
+ * tradesperson's invoice) the agent paid on the owner's behalf, and those need their own ATO
+ * category, not the agent's. Order matters for the same reason as CLASSIFY_PATTERNS — "water" is
+ * checked before the Repairs & Maintenance catch-all so a water bill doesn't fall through to it. */
+const NON_FEE_CATEGORY_PATTERNS: [ExpenseCategory, RegExp][] = [
+  ["Water Charges", /\bwater\b/i],
+  ["Gas", /\bgas\b/i],
+  ["Electricity", /\belectricity\b/i],
+  ["Council Rates", /council/i],
+  ["Strata Levies", /\bstrata\b/i],
+  ["Body Corporate Fees", /body\s*corp/i],
+  ["Insurance", /insur/i],
+  ["Pest Control", /\bpest\b/i],
+  ["Gardening / Lawn Mowing", /garden|lawn/i],
+  ["Cleaning", /\bclean/i],
+];
+
+/**
+ * Maps one statement deduction line to the ATO expense category it actually belongs under, for
+ * posting as an Expense — distinct from classifyFeeLine, which only asks "which fee type is
+ * this" and is meaningless for the majority of deduction lines that aren't a fee at all. A line
+ * counts as the agent's own charge (Property Agent Fees, or Letting Fees specifically) when it
+ * either matches a fee keyword or was paid to the agent by name; everything else gets matched
+ * against common bill/utility wording, falling back to Repairs & Maintenance — the most common
+ * real shape of "agent paid a bill on the owner's behalf" — rather than defaulting to the agent's
+ * own fee category, which would misattribute a tradesperson's invoice as agent income.
+ */
+export function categorizeAgentStatementLine(
+  line: { vendor?: string; category?: string; description?: string },
+  agentName?: string,
+): ExpenseCategory {
+  const blob = `${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`;
+  const feeType = classifyFeeLine(blob);
+  const payeeIsAgent = !!agentName && !!line.vendor && line.vendor.trim().toLowerCase() === agentName.trim().toLowerCase();
+  if (feeType === "Letting Fee") return "Letting Fees";
+  if (feeType || payeeIsAgent) return "Property Agent Fees";
+  for (const [category, pattern] of NON_FEE_CATEGORY_PATTERNS) {
+    if (pattern.test(blob)) return category;
+  }
+  return "Repairs & Maintenance";
 }
 
 function weeklyRentOf(rentAmount: number, frequency: RentFrequency): number {
