@@ -17,7 +17,6 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Building2,
@@ -98,12 +97,23 @@ import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
+import { DocumentsSection } from "@/components/DocumentEntryRow";
+import { buildDocumentEntries } from "@/lib/documents";
 import { FileSignature } from "lucide-react";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 /** Sentinel for "no specific dwelling" in a Dwelling Select — Radix Select item values can't be
  * an empty string, and shared/whole-property genuinely needs its own selectable option. */
 const SHARED_UNIT = "__shared__";
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Couldn't read file"));
+    reader.readAsDataURL(file);
+  });
+}
 
 interface DomainSuggestResult {
   ok?: boolean;
@@ -1929,44 +1939,8 @@ export function PropertyDialog({
   const [form, setForm] = useState({
     address: property?.address ?? initialAddress ?? "",
     alias: property?.alias ?? "",
-    tenantCode: property?.tenantCode ?? "",
-    managerName: property?.managerName ?? "",
-    managerPhone: property?.managerPhone ?? "",
-    managerEmail: property?.managerEmail ?? "",
-    councilRateRef: property?.councilRateRef ?? "",
-    waterAccountRef: property?.waterAccountRef ?? "",
-    purchasePrice: property?.purchasePrice?.toString() ?? "",
-    currentValue: property?.currentValue?.toString() ?? "",
-    purchaseDate: property?.purchaseDate ?? "",
-    stampDuty: property?.stampDuty?.toString() ?? "",
-    deposit: property?.deposit?.toString() ?? "",
-    lotSize: property?.lotSize ?? "",
-    physicalAttributes: property?.physicalAttributes ?? "",
-    lender: property?.lender ?? "",
-    loanAccountRef: property?.loanAccountRef ?? "",
-    loanBalance: property?.loanBalance?.toString() ?? "",
-    interestRate: property?.interestRate?.toString() ?? "",
-    repaymentFrequency: (property?.repaymentFrequency ?? "Monthly") as RepaymentFrequency,
-    councilRatesAnnual: property?.councilRatesAnnual?.toString() ?? "",
-    waterRatesAnnual: property?.waterRatesAnnual?.toString() ?? "",
-    insuranceAnnual: property?.insuranceAnnual?.toString() ?? "",
-    strataFeesAnnual: property?.strataFeesAnnual?.toString() ?? "",
-    landTaxAnnual: property?.landTaxAnnual?.toString() ?? "",
-    repairsMaintenanceAnnual: property?.repairsMaintenanceAnnual?.toString() ?? "",
-    pmFeePercent: property?.pmFeePercent?.toString() ?? "",
-    inspectionFrequencyMonths: property?.inspectionFrequencyMonths?.toString() ?? "",
     entityId: property?.entityId ?? "",
     occupancyType: (property?.occupancyType ?? "") as Property["occupancyType"] | "",
-    strataLevyAmount: property?.strataLevyAmount?.toString() ?? "",
-    strataLevyFrequency: property?.strataLevyFrequency ?? "",
-    insurerName: property?.insurerName ?? "",
-    insurancePolicyNumber: property?.insurancePolicyNumber ?? "",
-    insurancePremium: property?.insurancePremium?.toString() ?? "",
-    insuranceSumInsured: property?.insuranceSumInsured?.toString() ?? "",
-    insuranceRenewalDate: property?.insuranceRenewalDate ?? "",
-    smokeAlarmCheckDueDate: property?.smokeAlarmCheckDueDate ?? "",
-    poolSafetyCertExpiry: property?.poolSafetyCertExpiry ?? "",
-    notes: property?.notes ?? "",
     bedrooms: property?.bedrooms?.toString() ?? "",
     bathrooms: property?.bathrooms?.toString() ?? "",
     carSpaces: property?.carSpaces?.toString() ?? "",
@@ -1974,8 +1948,6 @@ export function PropertyDialog({
     domainPropertyType: property?.domainPropertyType ?? "",
     dwellingConfiguration: (property?.dwellingConfiguration ?? "House") as Property["dwellingConfiguration"],
   });
-  const [photos, setPhotos] = useState<{ name: string; data: string }[]>(property?.photos ?? []);
-  const [videos, setVideos] = useState<{ name: string; data: string }[]>(property?.videos ?? []);
   const [units, setUnits] = useState<PropertyUnit[]>(property?.units ?? []);
   const [addressSuggestions, setAddressSuggestions] = useState<{ id: string; address: string }[]>([]);
   const [addressLookupBusy, setAddressLookupBusy] = useState(false);
@@ -2034,52 +2006,8 @@ export function PropertyDialog({
   const removeUnit = (idx: number) => setUnits((rows) => rows.filter((_, i) => i !== idx));
   const updateUnit = (idx: number, patch: Partial<PropertyUnit>) =>
     setUnits((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  // Open the advanced section by default for properties that already have acquisition/loan
-  // data on file, so editing doesn't silently hide fields the landlord already filled in.
-  const [advancedOpen, setAdvancedOpen] = useState(
-    !!property &&
-      !!(
-        property.purchasePrice ||
-        property.currentValue ||
-        property.stampDuty ||
-        property.deposit ||
-        property.lotSize ||
-        property.physicalAttributes ||
-        property.lender ||
-        property.loanAccountRef ||
-        property.loanBalance ||
-        property.interestRate ||
-        property.councilRatesAnnual ||
-        property.waterRatesAnnual ||
-        property.insuranceAnnual ||
-        property.strataFeesAnnual ||
-        property.landTaxAnnual ||
-        property.repairsMaintenanceAnnual ||
-        property.pmFeePercent ||
-        property.notes ||
-        (property.photos && property.photos.length > 0) ||
-        (property.videos && property.videos.length > 0)
-      ),
-  );
 
   const currentTenant = property ? state.tenants.find((t) => t.propertyId === property.id) : undefined;
-
-  const onPhotos = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => setPhotos((ps) => [...ps, { name: f.name, data: String(reader.result) }]);
-      reader.readAsDataURL(f);
-    });
-  };
-  const onVideos = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => setVideos((vs) => [...vs, { name: f.name, data: String(reader.result) }]);
-      reader.readAsDataURL(f);
-    });
-  };
 
   return (
     <Dialog
@@ -2199,14 +2127,24 @@ export function PropertyDialog({
                 placeholder="e.g. The Rose St Duplex"
               />
             </Field>
-            <Field label="Tenant code (for maintenance portal)">
-              <Input value={form.tenantCode} onChange={(e) => setForm({ ...form, tenantCode: e.target.value.toUpperCase() })} placeholder="e.g. ROSE12" />
+            <Field label="Property type">
+              <Input
+                value={form.domainPropertyType}
+                onChange={(e) => setForm({ ...form, domainPropertyType: e.target.value })}
+                placeholder="e.g. House, Townhouse, Unit"
+              />
             </Field>
-            <Field label="Council rate reference">
-              <Input value={form.councilRateRef} onChange={(e) => setForm({ ...form, councilRateRef: e.target.value })} placeholder="for auto-matching bills" />
+            <Field label="Bedrooms">
+              <Input type="number" value={form.bedrooms} onChange={(e) => setForm({ ...form, bedrooms: e.target.value })} />
             </Field>
-            <Field label="Water account #">
-              <Input value={form.waterAccountRef} onChange={(e) => setForm({ ...form, waterAccountRef: e.target.value })} placeholder="for auto-matching bills" />
+            <Field label="Bathrooms">
+              <Input type="number" value={form.bathrooms} onChange={(e) => setForm({ ...form, bathrooms: e.target.value })} />
+            </Field>
+            <Field label="Car spaces">
+              <Input type="number" value={form.carSpaces} onChange={(e) => setForm({ ...form, carSpaces: e.target.value })} />
+            </Field>
+            <Field label="Land size (m²)">
+              <Input type="number" value={form.landSizeSqm} onChange={(e) => setForm({ ...form, landSizeSqm: e.target.value })} />
             </Field>
           </div>
 
@@ -2280,245 +2218,6 @@ export function PropertyDialog({
             </Field>
           </div>
 
-          <div className="rounded-md border p-3">
-            <div className="mb-2 text-sm font-medium">Property manager / primary contact</div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Name">
-                <Input value={form.managerName} onChange={(e) => setForm({ ...form, managerName: e.target.value })} />
-              </Field>
-              <Field label="Phone">
-                <Input value={form.managerPhone} onChange={(e) => setForm({ ...form, managerPhone: e.target.value })} />
-              </Field>
-              <Field label="Email">
-                <Input value={form.managerEmail} onChange={(e) => setForm({ ...form, managerEmail: e.target.value })} />
-              </Field>
-            </div>
-          </div>
-
-          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-            <CollapsibleTrigger asChild>
-              <Button type="button" variant="outline" size="sm" className="w-full justify-between">
-                Portfolio &amp; Acquisition Details
-                {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-3 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Purchase price (AUD)">
-                  <Input type="number" value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })} />
-                </Field>
-                <Field label="Estimated market value (AUD)">
-                  <Input type="number" value={form.currentValue} onChange={(e) => setForm({ ...form, currentValue: e.target.value })} />
-                </Field>
-                <Field label="Settlement date">
-                  <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
-                </Field>
-                <Field label="Stamp duty (AUD)">
-                  <Input type="number" value={form.stampDuty} onChange={(e) => setForm({ ...form, stampDuty: e.target.value })} />
-                </Field>
-                <Field label="Deposit (AUD)">
-                  <Input type="number" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} />
-                </Field>
-                <Field label="Lot size">
-                  <Input value={form.lotSize} onChange={(e) => setForm({ ...form, lotSize: e.target.value })} placeholder="e.g. 450m²" />
-                </Field>
-                <div className="sm:col-span-2">
-                  <Field label="Physical attributes">
-                    <Input
-                      value={form.physicalAttributes}
-                      onChange={(e) => setForm({ ...form, physicalAttributes: e.target.value })}
-                      placeholder="e.g. 3 bed / 2 bath / 1 car"
-                    />
-                  </Field>
-                </div>
-                <Field label="Bedrooms">
-                  <Input type="number" value={form.bedrooms} onChange={(e) => setForm({ ...form, bedrooms: e.target.value })} />
-                </Field>
-                <Field label="Bathrooms">
-                  <Input type="number" value={form.bathrooms} onChange={(e) => setForm({ ...form, bathrooms: e.target.value })} />
-                </Field>
-                <Field label="Car spaces">
-                  <Input type="number" value={form.carSpaces} onChange={(e) => setForm({ ...form, carSpaces: e.target.value })} />
-                </Field>
-                <Field label="Land size (m²)">
-                  <Input type="number" value={form.landSizeSqm} onChange={(e) => setForm({ ...form, landSizeSqm: e.target.value })} />
-                </Field>
-                <div className="sm:col-span-2">
-                  <Field label="Property type (Domain)">
-                    <Input value={form.domainPropertyType} onChange={(e) => setForm({ ...form, domainPropertyType: e.target.value })} placeholder="e.g. House, Townhouse, Unit" />
-                  </Field>
-                </div>
-              </div>
-
-              <div className="rounded-md border p-3">
-                <div className="mb-2 text-sm font-medium">Bank loan (optional)</div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Lender name">
-                    <Input value={form.lender} onChange={(e) => setForm({ ...form, lender: e.target.value })} />
-                  </Field>
-                  <Field label="Loan account / reference">
-                    <Input value={form.loanAccountRef} onChange={(e) => setForm({ ...form, loanAccountRef: e.target.value })} />
-                  </Field>
-                  <Field label="Current loan balance (AUD)">
-                    <Input type="number" value={form.loanBalance} onChange={(e) => setForm({ ...form, loanBalance: e.target.value })} />
-                  </Field>
-                  <Field label="Interest rate (%)">
-                    <Input type="number" step="0.01" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
-                  </Field>
-                  <Field label="Repayment frequency">
-                    <Select value={form.repaymentFrequency} onValueChange={(v) => setForm({ ...form, repaymentFrequency: v as RepaymentFrequency })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Weekly">Weekly</SelectItem>
-                        <SelectItem value="Fortnightly">Fortnightly</SelectItem>
-                        <SelectItem value="Monthly">Monthly</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-              </div>
-
-              <div className="rounded-md border p-3">
-                <div className="mb-1 text-sm font-medium">Annual running costs</div>
-                <div className="mb-2 text-xs text-muted-foreground">Used across the property's finances.</div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Council rates (annual)">
-                    <Input type="number" value={form.councilRatesAnnual} onChange={(e) => setForm({ ...form, councilRatesAnnual: e.target.value })} />
-                  </Field>
-                  <Field label="Water rates (annual)">
-                    <Input type="number" value={form.waterRatesAnnual} onChange={(e) => setForm({ ...form, waterRatesAnnual: e.target.value })} />
-                  </Field>
-                  <Field label="Insurance (annual)">
-                    <Input type="number" value={form.insuranceAnnual} onChange={(e) => setForm({ ...form, insuranceAnnual: e.target.value })} />
-                  </Field>
-                  <Field label="Strata fees (annual)">
-                    <Input type="number" value={form.strataFeesAnnual} onChange={(e) => setForm({ ...form, strataFeesAnnual: e.target.value })} />
-                  </Field>
-                  <Field label="Land tax (annual)">
-                    <Input type="number" value={form.landTaxAnnual} onChange={(e) => setForm({ ...form, landTaxAnnual: e.target.value })} />
-                  </Field>
-                  <Field label="Repairs & maintenance (annual)">
-                    <Input type="number" value={form.repairsMaintenanceAnnual} onChange={(e) => setForm({ ...form, repairsMaintenanceAnnual: e.target.value })} />
-                  </Field>
-                  <Field label="PM fee (%)">
-                    <Input type="number" step="0.01" value={form.pmFeePercent} onChange={(e) => setForm({ ...form, pmFeePercent: e.target.value })} />
-                  </Field>
-                  <Field label="Inspection frequency">
-                    <Select
-                      value={form.inspectionFrequencyMonths || "__default__"}
-                      onValueChange={(v) => setForm({ ...form, inspectionFrequencyMonths: v === "__default__" ? "" : v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__default__">Default (6 months)</SelectItem>
-                        <SelectItem value="3">Every 3 months</SelectItem>
-                        <SelectItem value="4">Every 4 months</SelectItem>
-                        <SelectItem value="6">Every 6 months</SelectItem>
-                        <SelectItem value="12">Every 12 months</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-              </div>
-
-              <div className="rounded-md border p-3">
-                <div className="mb-2 text-sm font-medium">Strata, insurance &amp; compliance</div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Strata levy amount">
-                    <Input type="number" value={form.strataLevyAmount} onChange={(e) => setForm({ ...form, strataLevyAmount: e.target.value })} />
-                  </Field>
-                  <Field label="Strata levy frequency">
-                    <Select
-                      value={form.strataLevyFrequency || "__unset__"}
-                      onValueChange={(v) => setForm({ ...form, strataLevyFrequency: v === "__unset__" ? "" : v })}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__unset__">Not set</SelectItem>
-                        <SelectItem value="Quarterly">Quarterly</SelectItem>
-                        <SelectItem value="Annually">Annually</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Insurer">
-                    <Input value={form.insurerName} onChange={(e) => setForm({ ...form, insurerName: e.target.value })} />
-                  </Field>
-                  <Field label="Policy number">
-                    <Input value={form.insurancePolicyNumber} onChange={(e) => setForm({ ...form, insurancePolicyNumber: e.target.value })} />
-                  </Field>
-                  <Field label="Premium (annual)">
-                    <Input type="number" value={form.insurancePremium} onChange={(e) => setForm({ ...form, insurancePremium: e.target.value })} />
-                  </Field>
-                  <Field label="Sum insured">
-                    <Input type="number" value={form.insuranceSumInsured} onChange={(e) => setForm({ ...form, insuranceSumInsured: e.target.value })} />
-                  </Field>
-                  <Field label="Insurance renewal date">
-                    <Input type="date" value={form.insuranceRenewalDate} onChange={(e) => setForm({ ...form, insuranceRenewalDate: e.target.value })} />
-                  </Field>
-                  <Field label="Smoke alarm check due">
-                    <Input type="date" value={form.smokeAlarmCheckDueDate} onChange={(e) => setForm({ ...form, smokeAlarmCheckDueDate: e.target.value })} />
-                  </Field>
-                  {property?.hasSwimmingPool && (
-                    <Field label="Pool safety cert expiry">
-                      <Input type="date" value={form.poolSafetyCertExpiry} onChange={(e) => setForm({ ...form, poolSafetyCertExpiry: e.target.value })} />
-                    </Field>
-                  )}
-                </div>
-              </div>
-
-              <Field label="Notes">
-                <Textarea
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  placeholder="Anything worth remembering about this property…"
-                />
-              </Field>
-
-              <div className="rounded-md border p-3">
-                <div className="mb-2 text-sm font-medium">Photos &amp; videos</div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Photos">
-                    <Input type="file" accept="image/*" multiple onChange={(e) => onPhotos(e.target.files)} />
-                  </Field>
-                  <Field label="Videos">
-                    <Input type="file" accept="video/*" multiple onChange={(e) => onVideos(e.target.files)} />
-                  </Field>
-                </div>
-                {photos.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {photos.map((p, i) => (
-                      <div key={i} className="relative">
-                        <img src={p.data} alt={p.name} className="h-14 w-14 rounded object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => setPhotos((ps) => ps.filter((_, j) => j !== i))}
-                          className="absolute -right-1 -top-1 rounded-full bg-destructive p-0.5 text-destructive-foreground"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {videos.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {videos.map((v, i) => (
-                      <div key={i} className="flex items-center justify-between rounded border p-2 text-xs">
-                        <span className="flex items-center gap-1 truncate">
-                          <VideoIcon className="h-3 w-3 shrink-0" /> {v.name}
-                        </span>
-                        <button type="button" onClick={() => setVideos((vs) => vs.filter((_, j) => j !== i))}>
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
         </div>
         <DialogFooter>
           {asset && (
@@ -2550,53 +2249,11 @@ export function PropertyDialog({
               const payload = {
                 address: form.address,
                 alias: form.alias || undefined,
-                tenantCode: form.tenantCode || undefined,
-                managerName: form.managerName || undefined,
-                managerPhone: form.managerPhone || undefined,
-                managerEmail: form.managerEmail || undefined,
-                councilRateRef: form.councilRateRef || undefined,
-                waterAccountRef: form.waterAccountRef || undefined,
-                purchasePrice: parseFloat(form.purchasePrice) || 0,
-                currentValue: parseFloat(form.currentValue) || 0,
-                purchaseDate: form.purchaseDate || undefined,
-                stampDuty: form.stampDuty ? parseFloat(form.stampDuty) : undefined,
-                deposit: form.deposit ? parseFloat(form.deposit) : undefined,
-                lotSize: form.lotSize || undefined,
-                physicalAttributes: form.physicalAttributes || undefined,
-                lender: form.lender || undefined,
-                loanAccountRef: form.loanAccountRef || undefined,
-                loanBalance: form.loanBalance ? parseFloat(form.loanBalance) : undefined,
-                interestRate: form.interestRate ? parseFloat(form.interestRate) : undefined,
-                repaymentFrequency: form.repaymentFrequency,
-                councilRatesAnnual: form.councilRatesAnnual ? parseFloat(form.councilRatesAnnual) : undefined,
-                waterRatesAnnual: form.waterRatesAnnual ? parseFloat(form.waterRatesAnnual) : undefined,
-                insuranceAnnual: form.insuranceAnnual ? parseFloat(form.insuranceAnnual) : undefined,
-                strataFeesAnnual: form.strataFeesAnnual ? parseFloat(form.strataFeesAnnual) : undefined,
-                landTaxAnnual: form.landTaxAnnual ? parseFloat(form.landTaxAnnual) : undefined,
-                repairsMaintenanceAnnual: form.repairsMaintenanceAnnual
-                  ? parseFloat(form.repairsMaintenanceAnnual)
-                  : undefined,
-                pmFeePercent: form.pmFeePercent ? parseFloat(form.pmFeePercent) : undefined,
-                inspectionFrequencyMonths: form.inspectionFrequencyMonths
-                  ? parseInt(form.inspectionFrequencyMonths, 10)
-                  : undefined,
                 entityId:
                   creatingEntity && newEntityName.trim()
                     ? findOrCreateEntity(newEntityName, newEntityType)
                     : form.entityId || undefined,
                 occupancyType: form.occupancyType || undefined,
-                strataLevyAmount: form.strataLevyAmount ? parseFloat(form.strataLevyAmount) : undefined,
-                strataLevyFrequency: (form.strataLevyFrequency || undefined) as Property["strataLevyFrequency"],
-                insurerName: form.insurerName || undefined,
-                insurancePolicyNumber: form.insurancePolicyNumber || undefined,
-                insurancePremium: form.insurancePremium ? parseFloat(form.insurancePremium) : undefined,
-                insuranceSumInsured: form.insuranceSumInsured ? parseFloat(form.insuranceSumInsured) : undefined,
-                insuranceRenewalDate: form.insuranceRenewalDate || undefined,
-                smokeAlarmCheckDueDate: form.smokeAlarmCheckDueDate || undefined,
-                poolSafetyCertExpiry: form.poolSafetyCertExpiry || undefined,
-                notes: form.notes || undefined,
-                photos: photos.length > 0 ? photos : undefined,
-                videos: videos.length > 0 ? videos : undefined,
                 bedrooms: form.bedrooms ? parseFloat(form.bedrooms) : undefined,
                 bathrooms: form.bathrooms ? parseFloat(form.bathrooms) : undefined,
                 carSpaces: form.carSpaces ? parseFloat(form.carSpaces) : undefined,
@@ -2608,7 +2265,7 @@ export function PropertyDialog({
               if (property) {
                 updateProperty(property.id, payload);
               } else {
-                const newId = addProperty(payload);
+                const newId = addProperty({ ...payload, purchasePrice: 0, currentValue: 0 });
                 onCreated?.(newId);
               }
               setOpen(false);
@@ -2624,7 +2281,20 @@ export function PropertyDialog({
   );
 }
 
-export function PropertyOverviewTab({ prop, loan, tenants }: { prop: Property; loan?: Loan; tenants: Tenant[] }) {
+/** Merges the old separate Overview and Performance tabs into one "Performance & Summary" view.
+ * Insurance expiry/Compliance due are read from the InsurancePolicy/ComplianceCertificate
+ * systems of record instead of the deprecated Property-level quick-fields. */
+export function PropertySummaryTab({
+  prop,
+  loan,
+  tenants,
+  expenses,
+}: {
+  prop: Property;
+  loan?: Loan;
+  tenants: Tenant[];
+  expenses: Expense[];
+}) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const { start, end } = fyRange(currentFY);
@@ -2637,54 +2307,15 @@ export function PropertyOverviewTab({ prop, loan, tenants }: { prop: Property; l
     .filter((b) => b.propertyId === prop.id && b.status !== "Paid")
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))[0];
   const equity = prop.currentValue - (loan?.totalBalance ?? 0);
-  const complianceDue = [prop.smokeAlarmCheckDueDate, prop.hasSwimmingPool ? prop.poolSafetyCertExpiry : undefined]
-    .filter((d): d is string => !!d)
+  const insuranceExpiry = state.insurancePolicies
+    .filter((p) => p.propertyId === prop.id && p.coverEnd)
+    .map((p) => p.coverEnd as string)
+    .sort()[0];
+  const complianceDue = state.complianceCertificates
+    .filter((c) => c.propertyId === prop.id && c.expiryDate)
+    .map((c) => c.expiryDate as string)
     .sort()[0];
 
-  return (
-    <div className="grid grid-cols-2 gap-3 text-sm">
-      <Stat label="Property value" value={fmtCurrency(prop.currentValue)} />
-      <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
-      <Stat label="Current equity" value={fmtCurrency(equity)} />
-      <Stat label="Loan balance" value={fmtCurrency(loan?.totalBalance ?? 0)} />
-      <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
-      <Stat label="Weekly rent" value={activeTenant ? `${fmtCurrency(activeTenant.rentAmount)}/${activeTenant.rentFrequency}` : "—"} />
-      <Stat label="Current tenant" value={activeTenant?.name || "—"} />
-      <Stat label="Lease end date" value={activeTenant?.leaseExpiry || "—"} />
-      <Stat
-        label="Next bill due"
-        value={nextBill ? `${nextBill.billType} · ${fmtCurrency(nextBill.amount)} · ${nextBill.dueDate}` : "—"}
-      />
-      <Stat label="Insurance expiry" value={prop.insuranceRenewalDate || "—"} />
-      <Stat label="Compliance due" value={complianceDue || "—"} />
-      <Stat label="YTD income" value={fmtCurrency(ytdIncome)} />
-    </div>
-  );
-}
-
-export function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loan }) {
-  return (
-    <div className="grid grid-cols-2 gap-3 text-sm">
-      <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
-      <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
-      <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
-      <Stat label="Stamp duty" value={prop.stampDuty ? fmtCurrency(prop.stampDuty) : "—"} />
-      <Stat label="Deposit" value={prop.deposit ? fmtCurrency(prop.deposit) : "—"} />
-      <Stat label="Lot size" value={prop.lotSize || "—"} />
-      <Stat label="Physical attributes" value={prop.physicalAttributes || "—"} />
-      <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
-      <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
-      <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
-      <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
-      <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
-    </div>
-  );
-}
-
-export function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
-  const currentFY = ausFinancialYear(todayISO());
-  const { start, end } = fyRange(currentFY);
-  const activeTenant = tenants[0];
   const annualRent = activeTenant
     ? activeTenant.rentFrequency === "Weekly"
       ? activeTenant.rentAmount * 52
@@ -2700,16 +2331,183 @@ export function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop
   const cashOnCash = cashInvested > 0 ? ((annualRent - ytdExpenses - loanInterest) / cashInvested) * 100 : undefined;
 
   return (
-    <div className="space-y-3 text-sm">
-      <p className="text-xs text-muted-foreground">
-        Estimates based on the current tenant's rent annualised and this FY's expenses — not a formal valuation.
-      </p>
+    <div className="space-y-5 text-sm">
       <div className="grid grid-cols-2 gap-3">
-        <Stat label="Gross yield" value={`${grossYield.toFixed(2)}%`} />
-        <Stat label="Net yield" value={`${netYield.toFixed(2)}%`} />
-        <Stat label="Cash-on-cash return" value={cashOnCash !== undefined ? `${cashOnCash.toFixed(2)}%` : "— (no deposit/stamp duty on file)"} />
-        <Stat label="Annualised rent" value={fmtCurrency(annualRent)} />
+        <Stat label="Property value" value={fmtCurrency(prop.currentValue)} />
+        <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+        <Stat label="Current equity" value={fmtCurrency(equity)} />
+        <Stat label="Loan balance" value={fmtCurrency(loan?.totalBalance ?? 0)} />
+        <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
+        <Stat label="Weekly rent" value={activeTenant ? `${fmtCurrency(activeTenant.rentAmount)}/${activeTenant.rentFrequency}` : "—"} />
+        <Stat label="Current tenant" value={activeTenant?.name || "—"} />
+        <Stat label="Lease end date" value={activeTenant?.leaseExpiry || "—"} />
+        <Stat
+          label="Next bill due"
+          value={nextBill ? `${nextBill.billType} · ${fmtCurrency(nextBill.amount)} · ${nextBill.dueDate}` : "—"}
+        />
+        <Stat label="Insurance expiry" value={insuranceExpiry || "—"} />
+        <Stat label="Compliance due" value={complianceDue || "—"} />
+        <Stat label="YTD income" value={fmtCurrency(ytdIncome)} />
       </div>
+
+      <div className="border-t pt-4">
+        <p className="mb-2 text-xs text-muted-foreground">
+          Estimates based on the current tenant's rent annualised and this FY's expenses — not a formal valuation.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label="Gross yield" value={`${grossYield.toFixed(2)}%`} />
+          <Stat label="Net yield" value={`${netYield.toFixed(2)}%`} />
+          <Stat label="Cash-on-cash return" value={cashOnCash !== undefined ? `${cashOnCash.toFixed(2)}%` : "— (no deposit/stamp duty on file)"} />
+          <Stat label="Annualised rent" value={fmtCurrency(annualRent)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?: React.ReactNode }) {
+  const { updateProperty } = useStore();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    purchasePrice: prop.purchasePrice?.toString() ?? "",
+    currentValue: prop.currentValue?.toString() ?? "",
+    purchaseDate: prop.purchaseDate ?? "",
+    stampDuty: prop.stampDuty?.toString() ?? "",
+    deposit: prop.deposit?.toString() ?? "",
+    lotSize: prop.lotSize ?? "",
+    physicalAttributes: prop.physicalAttributes ?? "",
+    lender: prop.lender ?? "",
+    loanAccountRef: prop.loanAccountRef ?? "",
+    loanBalance: prop.loanBalance?.toString() ?? "",
+    interestRate: prop.interestRate?.toString() ?? "",
+    repaymentFrequency: (prop.repaymentFrequency ?? "Monthly") as RepaymentFrequency,
+  });
+
+  const save = () => {
+    updateProperty(prop.id, {
+      purchasePrice: form.purchasePrice ? parseFloat(form.purchasePrice) : 0,
+      currentValue: form.currentValue ? parseFloat(form.currentValue) : 0,
+      purchaseDate: form.purchaseDate || undefined,
+      stampDuty: form.stampDuty ? parseFloat(form.stampDuty) : undefined,
+      deposit: form.deposit ? parseFloat(form.deposit) : undefined,
+      lotSize: form.lotSize || undefined,
+      physicalAttributes: form.physicalAttributes || undefined,
+      lender: form.lender || undefined,
+      loanAccountRef: form.loanAccountRef || undefined,
+      loanBalance: form.loanBalance ? parseFloat(form.loanBalance) : undefined,
+      interestRate: form.interestRate ? parseFloat(form.interestRate) : undefined,
+      repaymentFrequency: form.repaymentFrequency,
+    });
+    toast.success("Purchase & acquisition details saved");
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" className="h-6 w-6">
+            <Pencil className="h-3 w-3" />
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit purchase &amp; acquisition</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Purchase price (AUD)">
+              <Input type="number" value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })} />
+            </Field>
+            <Field label="Estimated market value (AUD)">
+              <Input type="number" value={form.currentValue} onChange={(e) => setForm({ ...form, currentValue: e.target.value })} />
+            </Field>
+            <Field label="Settlement date">
+              <Input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+            </Field>
+            <Field label="Stamp duty (AUD)">
+              <Input type="number" value={form.stampDuty} onChange={(e) => setForm({ ...form, stampDuty: e.target.value })} />
+            </Field>
+            <Field label="Deposit (AUD)">
+              <Input type="number" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} />
+            </Field>
+            <Field label="Lot size">
+              <Input value={form.lotSize} onChange={(e) => setForm({ ...form, lotSize: e.target.value })} placeholder="e.g. 450m²" />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Physical attributes">
+                <Input
+                  value={form.physicalAttributes}
+                  onChange={(e) => setForm({ ...form, physicalAttributes: e.target.value })}
+                  placeholder="e.g. 3 bed / 2 bath / 1 car"
+                />
+              </Field>
+            </div>
+          </div>
+
+          <div className="rounded-md border p-3">
+            <div className="mb-2 text-sm font-medium">Bank loan (optional)</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Lender name">
+                <Input value={form.lender} onChange={(e) => setForm({ ...form, lender: e.target.value })} />
+              </Field>
+              <Field label="Loan account / reference">
+                <Input value={form.loanAccountRef} onChange={(e) => setForm({ ...form, loanAccountRef: e.target.value })} />
+              </Field>
+              <Field label="Current loan balance (AUD)">
+                <Input type="number" value={form.loanBalance} onChange={(e) => setForm({ ...form, loanBalance: e.target.value })} />
+              </Field>
+              <Field label="Interest rate (%)">
+                <Input type="number" step="0.01" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
+              </Field>
+              <Field label="Repayment frequency">
+                <Select value={form.repaymentFrequency} onValueChange={(v) => setForm({ ...form, repaymentFrequency: v as RepaymentFrequency })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Weekly">Weekly</SelectItem>
+                    <SelectItem value="Fortnightly">Fortnightly</SelectItem>
+                    <SelectItem value="Monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={save}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loan }) {
+  const { state } = useStore();
+  const documents = buildDocumentEntries(state).filter(
+    (e) => e.propertyId === prop.id && (e.kind === "Property Document" || e.kind === "Property Sale"),
+  );
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">Acquisition and financing details for this property.</div>
+        <PurchaseAcquisitionDialog prop={prop} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+        <Stat label="Current value" value={fmtCurrency(prop.currentValue)} />
+        <Stat label="Settlement date" value={prop.purchaseDate || "—"} />
+        <Stat label="Stamp duty" value={prop.stampDuty ? fmtCurrency(prop.stampDuty) : "—"} />
+        <Stat label="Deposit" value={prop.deposit ? fmtCurrency(prop.deposit) : "—"} />
+        <Stat label="Lot size" value={prop.lotSize || "—"} />
+        <Stat label="Physical attributes" value={prop.physicalAttributes || "—"} />
+        <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
+        <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
+        <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
+        <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
+        <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
+      </div>
+      <DocumentsSection title="Documents" entries={documents} />
     </div>
   );
 }
@@ -2975,6 +2773,10 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
 
   const items = assetId ? state.depreciationItems.filter((d) => d.assetId === assetId) : [];
   const schedule = buildDepreciationSchedule(items);
+  const linkedPropertyId = state.assets.find((a) => a.id === assetId)?.linkedPropertyId;
+  const documents = linkedPropertyId
+    ? buildDocumentEntries(state).filter((e) => e.propertyId === linkedPropertyId && e.kind === "Depreciation Report")
+    : [];
 
   return (
     <div className="space-y-4 text-sm">
@@ -3060,6 +2862,8 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
           )}
         </CardContent>
       </Card>
+
+      <DocumentsSection title="Documents" entries={documents} />
     </div>
   );
 }
@@ -3095,18 +2899,169 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   );
 }
 
+function PropertyDetailsDialog({ prop, trigger }: { prop: Property; trigger?: React.ReactNode }) {
+  const { updateProperty } = useStore();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    tenantCode: prop.tenantCode ?? "",
+    councilRateRef: prop.councilRateRef ?? "",
+    waterAccountRef: prop.waterAccountRef ?? "",
+    managerName: prop.managerName ?? "",
+    managerPhone: prop.managerPhone ?? "",
+    managerEmail: prop.managerEmail ?? "",
+    councilRatesAnnual: prop.councilRatesAnnual?.toString() ?? "",
+    waterRatesAnnual: prop.waterRatesAnnual?.toString() ?? "",
+    insuranceAnnual: prop.insuranceAnnual?.toString() ?? "",
+    strataFeesAnnual: prop.strataFeesAnnual?.toString() ?? "",
+    landTaxAnnual: prop.landTaxAnnual?.toString() ?? "",
+    repairsMaintenanceAnnual: prop.repairsMaintenanceAnnual?.toString() ?? "",
+    pmFeePercent: prop.pmFeePercent?.toString() ?? "",
+    inspectionFrequencyMonths: prop.inspectionFrequencyMonths?.toString() ?? "",
+    notes: prop.notes ?? "",
+  });
+
+  const save = () => {
+    updateProperty(prop.id, {
+      tenantCode: form.tenantCode || undefined,
+      councilRateRef: form.councilRateRef || undefined,
+      waterAccountRef: form.waterAccountRef || undefined,
+      managerName: form.managerName || undefined,
+      managerPhone: form.managerPhone || undefined,
+      managerEmail: form.managerEmail || undefined,
+      councilRatesAnnual: form.councilRatesAnnual ? parseFloat(form.councilRatesAnnual) : undefined,
+      waterRatesAnnual: form.waterRatesAnnual ? parseFloat(form.waterRatesAnnual) : undefined,
+      insuranceAnnual: form.insuranceAnnual ? parseFloat(form.insuranceAnnual) : undefined,
+      strataFeesAnnual: form.strataFeesAnnual ? parseFloat(form.strataFeesAnnual) : undefined,
+      landTaxAnnual: form.landTaxAnnual ? parseFloat(form.landTaxAnnual) : undefined,
+      repairsMaintenanceAnnual: form.repairsMaintenanceAnnual ? parseFloat(form.repairsMaintenanceAnnual) : undefined,
+      pmFeePercent: form.pmFeePercent ? parseFloat(form.pmFeePercent) : undefined,
+      inspectionFrequencyMonths: form.inspectionFrequencyMonths ? parseInt(form.inspectionFrequencyMonths, 10) : undefined,
+      notes: form.notes || undefined,
+    });
+    toast.success("Property details saved");
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" className="h-6 w-6">
+            <Pencil className="h-3 w-3" />
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit property details</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded-md border p-3">
+            <div className="mb-2 text-sm font-medium">Operational references</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Tenant code (for maintenance portal)">
+                <Input value={form.tenantCode} onChange={(e) => setForm({ ...form, tenantCode: e.target.value.toUpperCase() })} placeholder="e.g. ROSE12" />
+              </Field>
+              <Field label="Council rate reference">
+                <Input value={form.councilRateRef} onChange={(e) => setForm({ ...form, councilRateRef: e.target.value })} placeholder="for auto-matching bills" />
+              </Field>
+              <Field label="Water account #">
+                <Input value={form.waterAccountRef} onChange={(e) => setForm({ ...form, waterAccountRef: e.target.value })} placeholder="for auto-matching bills" />
+              </Field>
+            </div>
+          </div>
+
+          <div className="rounded-md border p-3">
+            <div className="mb-2 text-sm font-medium">Property manager / primary contact</div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Name">
+                <Input value={form.managerName} onChange={(e) => setForm({ ...form, managerName: e.target.value })} />
+              </Field>
+              <Field label="Phone">
+                <Input value={form.managerPhone} onChange={(e) => setForm({ ...form, managerPhone: e.target.value })} />
+              </Field>
+              <Field label="Email">
+                <Input value={form.managerEmail} onChange={(e) => setForm({ ...form, managerEmail: e.target.value })} />
+              </Field>
+            </div>
+          </div>
+
+          <div className="rounded-md border p-3">
+            <div className="mb-1 text-sm font-medium">Annual running costs</div>
+            <div className="mb-2 text-xs text-muted-foreground">Used across the property's finances.</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Council rates (annual)">
+                <Input type="number" value={form.councilRatesAnnual} onChange={(e) => setForm({ ...form, councilRatesAnnual: e.target.value })} />
+              </Field>
+              <Field label="Water rates (annual)">
+                <Input type="number" value={form.waterRatesAnnual} onChange={(e) => setForm({ ...form, waterRatesAnnual: e.target.value })} />
+              </Field>
+              <Field label="Insurance (annual)">
+                <Input type="number" value={form.insuranceAnnual} onChange={(e) => setForm({ ...form, insuranceAnnual: e.target.value })} />
+              </Field>
+              <Field label="Strata fees (annual)">
+                <Input type="number" value={form.strataFeesAnnual} onChange={(e) => setForm({ ...form, strataFeesAnnual: e.target.value })} />
+              </Field>
+              <Field label="Land tax (annual)">
+                <Input type="number" value={form.landTaxAnnual} onChange={(e) => setForm({ ...form, landTaxAnnual: e.target.value })} />
+              </Field>
+              <Field label="Repairs & maintenance (annual)">
+                <Input type="number" value={form.repairsMaintenanceAnnual} onChange={(e) => setForm({ ...form, repairsMaintenanceAnnual: e.target.value })} />
+              </Field>
+              <Field label="PM fee (%)">
+                <Input type="number" step="0.01" value={form.pmFeePercent} onChange={(e) => setForm({ ...form, pmFeePercent: e.target.value })} />
+              </Field>
+              <Field label="Inspection frequency">
+                <Select
+                  value={form.inspectionFrequencyMonths || "__default__"}
+                  onValueChange={(v) => setForm({ ...form, inspectionFrequencyMonths: v === "__default__" ? "" : v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">Default (6 months)</SelectItem>
+                    <SelectItem value="3">Every 3 months</SelectItem>
+                    <SelectItem value="4">Every 4 months</SelectItem>
+                    <SelectItem value="6">Every 6 months</SelectItem>
+                    <SelectItem value="12">Every 12 months</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          </div>
+
+          <Field label="Notes">
+            <Textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              placeholder="Anything worth remembering about this property…"
+            />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button onClick={save}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PropertyDetailsTab({
   prop,
-  expenses,
   tenants,
 }: {
   prop: Property;
-  expenses: Expense[];
   tenants: Tenant[];
 }) {
   const { state } = useStore();
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">Operational references, running costs and notes for this property.</div>
+        <PropertyDetailsDialog prop={prop} />
+      </div>
+
       <div>
         <div className="mb-2 text-xs font-medium text-muted-foreground">Operational</div>
         <div className="grid grid-cols-2 gap-3">
@@ -3159,41 +3114,58 @@ export function PropertyDetailsTab({
           </Link>
         </Button>
       </div>
-
-      <div>
-        <div className="mb-2 text-sm font-medium">Document vault ({expenses.length})</div>
-        {expenses.length === 0 && <div className="text-muted-foreground text-xs">No documents.</div>}
-        {expenses
-          .filter((e) => e.invoiceFileName)
-          .map((e) => (
-            <div key={e.id} className="flex justify-between rounded border p-2 text-xs">
-              <span>{e.itemName}</span>
-              {e.invoiceFileData ? (
-                <DocumentLink fileName={e.invoiceFileName} fileData={e.invoiceFileData} className="text-primary underline">
-                  {e.invoiceFileName}
-                </DocumentLink>
-              ) : (
-                <span className="text-muted-foreground">{e.invoiceFileName}</span>
-              )}
-            </div>
-          ))}
-      </div>
     </div>
   );
 }
 
 export function PropertyMediaTab({ prop }: { prop: Property }) {
+  const { updateProperty } = useStore();
+
+  const onUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const photos: { name: string; data: string }[] = [];
+    const videos: { name: string; data: string }[] = [];
+    for (const f of Array.from(files)) {
+      const data = await readFileAsDataUrl(f);
+      if (f.type.startsWith("video/")) videos.push({ name: f.name, data });
+      else photos.push({ name: f.name, data });
+    }
+    updateProperty(prop.id, {
+      photos: photos.length > 0 ? [...(prop.photos ?? []), ...photos] : prop.photos,
+      videos: videos.length > 0 ? [...(prop.videos ?? []), ...videos] : prop.videos,
+    });
+    toast.success(`${photos.length + videos.length} file${photos.length + videos.length === 1 ? "" : "s"} uploaded`);
+  };
+
+  const removePhoto = (idx: number) =>
+    updateProperty(prop.id, { photos: (prop.photos ?? []).filter((_, i) => i !== idx) });
+  const removeVideo = (idx: number) =>
+    updateProperty(prop.id, { videos: (prop.videos ?? []).filter((_, i) => i !== idx) });
+
   return (
     <div className="space-y-4">
+      <div>
+        <Label className="text-xs">Upload photos or videos</Label>
+        <Input type="file" accept="image/*,video/*" multiple onChange={(e) => void onUpload(e.target.files)} />
+      </div>
       <div>
         <div className="mb-2 text-sm font-medium">Photos ({prop.photos?.length ?? 0})</div>
         {!prop.photos?.length && <div className="text-xs text-muted-foreground">No photos yet.</div>}
         {!!prop.photos?.length && (
           <div className="flex flex-wrap gap-2">
             {prop.photos.map((p, i) => (
-              <a key={i} href={p.data} download={p.name}>
-                <img src={p.data} alt={p.name} className="h-20 w-20 rounded object-cover" />
-              </a>
+              <div key={i} className="relative">
+                <a href={p.data} download={p.name}>
+                  <img src={p.data} alt={p.name} className="h-20 w-20 rounded object-cover" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => removePhoto(i)}
+                  className="absolute -right-1 -top-1 rounded-full bg-destructive p-0.5 text-destructive-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -3203,8 +3175,13 @@ export function PropertyMediaTab({ prop }: { prop: Property }) {
         {!prop.videos?.length && <div className="text-xs text-muted-foreground">No videos yet.</div>}
         {prop.videos?.map((v, i) => (
           <div key={i} className="mb-2 rounded border p-2">
-            <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-              <VideoIcon className="h-3 w-3" /> {v.name}
+            <div className="mb-1 flex items-center justify-between gap-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <VideoIcon className="h-3 w-3" /> {v.name}
+              </span>
+              <button type="button" onClick={() => removeVideo(i)}>
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
             <video src={v.data} controls className="max-h-48 w-full rounded" />
           </div>
@@ -4685,6 +4662,12 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
   const [reviewProposalId, setReviewProposalId] = useState<string | null>(null);
 
   const statements = state.aiProposals.filter((p) => p.propertyId === propertyId && p.kind === "rent_ledger");
+  // Rent statements already get their own richer, review-capable section below
+  // (AgentStatementsSection) — this generic list only needs to cover lease/tenant documents that
+  // don't have one.
+  const tenancyDocuments = buildDocumentEntries(state).filter(
+    (e) => e.propertyId === propertyId && (e.kind === "Lease Agreement" || e.kind === "Tenant Document"),
+  );
 
   return (
     <div className="space-y-5 text-sm">
@@ -4743,6 +4726,10 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
 
       <div className="border-t pt-4">
         <AgentStatementsSection statements={statements} onReview={setReviewProposalId} />
+      </div>
+
+      <div className="border-t pt-4">
+        <DocumentsSection title="Lease & tenant documents" entries={tenancyDocuments} />
       </div>
 
       <ProposalReviewDialog

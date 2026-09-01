@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   Building2,
   ShoppingCart,
-  TrendingUp,
   Receipt,
   Landmark,
   Calculator,
@@ -27,10 +26,9 @@ import {
   ChevronRight,
 } from "lucide-react";
 import {
-  PropertyOverviewTab,
+  PropertySummaryTab,
   PropertyDetailsTab,
   PropertyPurchaseTab,
-  PropertyPerformanceTab,
   PropertyBillsTab,
   PropertyCostBaseTab,
   DepreciationTab,
@@ -44,6 +42,8 @@ import {
 import { PropertyInsuranceTab, PropertyMaintenanceTab, PropertyCertificatesTab, PropertyNotesTab } from "@/components/PropertyExtraTabs";
 import { LedgerTab } from "@/routes/transactions";
 import { DocumentsContent } from "@/routes/documents";
+import { buildDocumentEntries } from "@/lib/documents";
+import { DocumentsSection } from "@/components/DocumentEntryRow";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -53,10 +53,8 @@ export const Route = createFileRoute("/assets_/$assetId")({
 });
 
 type Section =
-  | "overview"
-  | "details"
+  | "summary"
   | "purchase"
-  | "performance"
   | "transactions"
   | "bills"
   | "loans"
@@ -68,15 +66,14 @@ type Section =
   | "insurance"
   | "maintenance"
   | "compliance"
+  | "details"
   | "documents"
   | "photos"
   | "notes";
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
-  { section: "overview", label: "Overview", icon: LayoutDashboard },
-  { section: "details", label: "Property Details", icon: Building2 },
-  { section: "purchase", label: "Purchase & Settlement", icon: ShoppingCart },
-  { section: "performance", label: "Performance", icon: TrendingUp },
+  { section: "summary", label: "Performance & Summary", icon: LayoutDashboard },
+  { section: "purchase", label: "Purchase & Acquisition", icon: ShoppingCart },
   { section: "providers", label: "Providers", icon: Users2 },
   { section: "transactions", label: "Transactions", icon: Receipt, group: "Finance" },
   { section: "bills", label: "Bills", icon: Receipt, group: "Finance" },
@@ -88,6 +85,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "insurance", label: "Insurance", icon: ShieldCheck, group: "Property" },
   { section: "maintenance", label: "Maintenance", icon: Wrench, group: "Property" },
   { section: "compliance", label: "Compliance", icon: ShieldCheck, group: "Property" },
+  { section: "details", label: "Details", icon: Building2, group: "Property" },
   { section: "documents", label: "Documents", icon: FolderOpen, group: "Property" },
   { section: "photos", label: "Photos", icon: ImageIcon, group: "Property" },
   { section: "notes", label: "Notes", icon: StickyNote, group: "Property" },
@@ -96,20 +94,26 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
   const loans = state.loans.filter((l) => l.propertyId === propertyId);
+  const documents = buildDocumentEntries(state).filter(
+    (e) => e.propertyId === propertyId && (e.kind === "Loan Document" || e.kind === "Loan Statement"),
+  );
   return (
-    <div className="space-y-2 text-sm">
-      {loans.length === 0 && <div className="text-xs text-muted-foreground">No loans on file for this property.</div>}
-      {loans.map((l) => (
-        <div key={l.id} className="rounded border p-3 text-xs">
-          <div className="font-medium">{l.bankName}</div>
-          <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
-            <span>Balance: {fmtCurrency(l.totalBalance)}</span>
-            <span>Rate: {l.interestRate}%</span>
-            <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
-            <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
+    <div className="space-y-4 text-sm">
+      <div className="space-y-2">
+        {loans.length === 0 && <div className="text-xs text-muted-foreground">No loans on file for this property.</div>}
+        {loans.map((l) => (
+          <div key={l.id} className="rounded border p-3 text-xs">
+            <div className="font-medium">{l.bankName}</div>
+            <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
+              <span>Balance: {fmtCurrency(l.totalBalance)}</span>
+              <span>Rate: {l.interestRate}%</span>
+              <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
+              <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
+      <DocumentsSection title="Documents" entries={documents} />
     </div>
   );
 }
@@ -118,7 +122,7 @@ function PropertyAssetPage() {
   const { assetId } = Route.useParams();
   const { state, loading } = useStore();
   const navigate = useNavigate();
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>("summary");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (group: string) =>
     setCollapsedGroups((prev) => {
@@ -203,7 +207,7 @@ function PropertyAssetPage() {
             <DeletePropertyDialog
               property={prop}
               onDeleted={(keptProperty) => {
-                if (keptProperty) setSection("overview");
+                if (keptProperty) setSection("summary");
                 else void navigate({ to: "/assets" });
               }}
             />
@@ -262,10 +266,8 @@ function PropertyAssetPage() {
       </div>
 
       <div className="min-w-0 flex-1 p-4 sm:p-6">
-        {section === "overview" && <PropertyOverviewTab prop={prop} loan={loan} tenants={tenants} />}
-        {section === "details" && <PropertyDetailsTab prop={prop} expenses={expenses} tenants={tenants} />}
+        {section === "summary" && <PropertySummaryTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
         {section === "purchase" && <PropertyPurchaseTab prop={prop} loan={loan} />}
-        {section === "performance" && <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
         {section === "transactions" && <LedgerTab propertyId={prop.id} />}
         {section === "bills" && <PropertyBillsTab propertyId={prop.id} />}
         {section === "loans" && <PropertyLoansTab propertyId={prop.id} />}
@@ -277,6 +279,7 @@ function PropertyAssetPage() {
         {section === "insurance" && <PropertyInsuranceTab prop={prop} />}
         {section === "maintenance" && <PropertyMaintenanceTab prop={prop} />}
         {section === "compliance" && <PropertyCertificatesTab prop={prop} />}
+        {section === "details" && <PropertyDetailsTab prop={prop} tenants={tenants} />}
         {section === "documents" && <DocumentsContent propertyId={prop.id} />}
         {section === "photos" && <PropertyMediaTab prop={prop} />}
         {section === "notes" && <PropertyNotesTab prop={prop} />}

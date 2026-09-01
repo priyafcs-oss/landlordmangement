@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Pencil, Trash2, Eye, ShieldCheck, Wrench, HardHat, FileText, X } from "lucide-react";
 import { fmtCurrency, daysUntil } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
+import { DocumentLink } from "@/components/DocumentLink";
 import { toast } from "sonner";
 import type {
   Property,
@@ -32,6 +33,7 @@ import type {
   ComplianceCertificate,
   ComplianceCertType,
   PropertyNote,
+  Expense,
 } from "@/lib/types";
 import { COMPLIANCE_CERT_TYPES } from "@/lib/types";
 
@@ -712,49 +714,99 @@ function MaintenanceItemRow({ item }: { item: MaintenanceItem }) {
   );
 }
 
+function WarrantyReceiptRow({ expense }: { expense: Expense }) {
+  const expiring = expense.hasWarranty && expense.warrantyExpiry ? daysUntil(expense.warrantyExpiry) : undefined;
+  return (
+    <div className="flex items-start justify-between gap-2 rounded border p-2 text-xs">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{expense.itemName}</span>
+          {expiring !== undefined && (
+            <Badge variant={expiring < 0 ? "destructive" : "outline"} className="text-[10px]">
+              {expiring < 0 ? "Expired" : `Expires in ${expiring}d`}
+            </Badge>
+          )}
+        </div>
+        <div className="mt-0.5 flex flex-wrap gap-x-3 text-muted-foreground">
+          <span>{fmtCurrency(expense.cost)}</span>
+          <span>{expense.date}</span>
+        </div>
+        {expense.invoiceFileData && (
+          <DocumentLink fileName={expense.invoiceFileName} fileData={expense.invoiceFileData} className="mt-1 inline-flex items-center gap-1 text-primary underline">
+            <FileText className="h-3 w-3" /> Invoice
+          </DocumentLink>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PropertyMaintenanceTab({ prop }: { prop: Property }) {
   const { state } = useStore();
   const items = state.maintenanceItems
     .filter((m) => m.propertyId === prop.id)
     .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  const warrantyExpenses = state.expenses
+    .filter((e) => e.propertyId === prop.id && (e.category === "Repairs & Maintenance" || e.hasWarranty))
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 
   return (
-    <div className="space-y-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-xs text-muted-foreground">Repairs and major work projects tracked against this property.</div>
-        <div className="flex gap-2">
-          <MaintenanceItemDialog
-            prop={prop}
-            itemType="Repair"
-            trigger={
-              <Button size="sm" variant="outline" className="gap-1">
-                <Plus className="h-3.5 w-3.5" /> Add a repair / small work item
-              </Button>
-            }
-          />
-          <MaintenanceItemDialog
-            prop={prop}
-            itemType="Major Work"
-            trigger={
-              <Button size="sm" className="gap-1">
-                <Plus className="h-3.5 w-3.5" /> Add a major work item
-              </Button>
-            }
-          />
+    <div className="space-y-5 text-sm">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-muted-foreground">Repairs and major work projects tracked against this property.</div>
+          <div className="flex gap-2">
+            <MaintenanceItemDialog
+              prop={prop}
+              itemType="Repair"
+              trigger={
+                <Button size="sm" variant="outline" className="gap-1">
+                  <Plus className="h-3.5 w-3.5" /> Add a repair / small work item
+                </Button>
+              }
+            />
+            <MaintenanceItemDialog
+              prop={prop}
+              itemType="Major Work"
+              trigger={
+                <Button size="sm" className="gap-1">
+                  <Plus className="h-3.5 w-3.5" /> Add a major work item
+                </Button>
+              }
+            />
+          </div>
         </div>
+        {items.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+            <Wrench className="mx-auto mb-2 h-6 w-6" />
+            No maintenance items yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((m) => (
+              <MaintenanceItemRow key={m.id} item={m} />
+            ))}
+          </div>
+        )}
       </div>
-      {items.length === 0 ? (
-        <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          <Wrench className="mx-auto mb-2 h-6 w-6" />
-          No maintenance items yet.
+
+      <div className="border-t pt-4">
+        <div className="mb-2 text-sm font-medium">Warranties &amp; receipts</div>
+        <div className="mb-2 text-xs text-muted-foreground">
+          AI-ingested repair/maintenance invoices and anything carrying a warranty.
         </div>
-      ) : (
-        <div className="space-y-2">
-          {items.map((m) => (
-            <MaintenanceItemRow key={m.id} item={m} />
-          ))}
-        </div>
-      )}
+        {warrantyExpenses.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+            No warranties or maintenance receipts on file yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {warrantyExpenses.map((e) => (
+              <WarrantyReceiptRow key={e.id} expense={e} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
