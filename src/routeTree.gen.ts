@@ -20,12 +20,14 @@ import { Route as ForecastsRouteImport } from './routes/forecasts'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
+import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 import { Route as ApiVisionRouteImport } from './routes/api/vision'
 import { Route as AssetsAssetIdRouteImport } from './routes/assets_.$assetId'
+import { Route as ProvidersProviderIdRouteImport } from './routes/providers_.$providerId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -82,6 +84,11 @@ const MaintenanceRoute = MaintenanceRouteImport.update({
   path: '/maintenance',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProvidersRoute = ProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RentalRoute = RentalRouteImport.update({
   id: '/rental',
   path: '/rental',
@@ -112,6 +119,11 @@ const AssetsAssetIdRoute = AssetsAssetIdRouteImport.update({
   path: '/assets/$assetId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProvidersProviderIdRoute = ProvidersProviderIdRouteImport.update({
+  id: '/providers_/$providerId',
+  path: '/providers/$providerId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -125,12 +137,14 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
+  '/providers': typeof ProvidersRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets/$assetId': typeof AssetsAssetIdRoute
+  '/providers/$providerId': typeof ProvidersProviderIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -144,12 +158,14 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
+  '/providers': typeof ProvidersRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets/$assetId': typeof AssetsAssetIdRoute
+  '/providers/$providerId': typeof ProvidersProviderIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -164,12 +180,14 @@ export interface FileRoutesById {
   '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
+  '/providers': typeof ProvidersRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets_/$assetId': typeof AssetsAssetIdRoute
+  '/providers_/$providerId': typeof ProvidersProviderIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -185,12 +203,14 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inspections'
     | '/maintenance'
+    | '/providers'
     | '/rental'
     | '/settings'
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
     | '/assets/$assetId'
+    | '/providers/$providerId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -204,12 +224,14 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inspections'
     | '/maintenance'
+    | '/providers'
     | '/rental'
     | '/settings'
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
     | '/assets/$assetId'
+    | '/providers/$providerId'
   id:
     | '__root__'
     | '/'
@@ -223,12 +245,14 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inspections'
     | '/maintenance'
+    | '/providers'
     | '/rental'
     | '/settings'
     | '/transactions'
     | '/api/copilot'
     | '/api/vision'
     | '/assets_/$assetId'
+    | '/providers_/$providerId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -243,12 +267,14 @@ export interface RootRouteChildren {
   InboxRoute: typeof InboxRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
+  ProvidersRoute: typeof ProvidersRoute
   RentalRoute: typeof RentalRoute
   SettingsRoute: typeof SettingsRoute
   TransactionsRoute: typeof TransactionsRoute
   ApiCopilotRoute: typeof ApiCopilotRoute
   ApiVisionRoute: typeof ApiVisionRoute
   AssetsAssetIdRoute: typeof AssetsAssetIdRoute
+  ProvidersProviderIdRoute: typeof ProvidersProviderIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -330,6 +356,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MaintenanceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/providers': {
+      id: '/providers'
+      path: '/providers'
+      fullPath: '/providers'
+      preLoaderRoute: typeof ProvidersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/rental': {
       id: '/rental'
       path: '/rental'
@@ -372,6 +405,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssetsAssetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/providers_/$providerId': {
+      id: '/providers_/$providerId'
+      path: '/providers/$providerId'
+      fullPath: '/providers/$providerId'
+      preLoaderRoute: typeof ProvidersProviderIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -387,12 +427,14 @@ const rootRouteChildren: RootRouteChildren = {
   InboxRoute: InboxRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
+  ProvidersRoute: ProvidersRoute,
   RentalRoute: RentalRoute,
   SettingsRoute: SettingsRoute,
   TransactionsRoute: TransactionsRoute,
   ApiCopilotRoute: ApiCopilotRoute,
   ApiVisionRoute: ApiVisionRoute,
   AssetsAssetIdRoute: AssetsAssetIdRoute,
+  ProvidersProviderIdRoute: ProvidersProviderIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -83,7 +83,9 @@ import type {
   Expense,
   PropertyUnit,
   Entity,
+  ExpenseCategory,
 } from "@/lib/types";
+import { EXPENSE_CATEGORIES } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
@@ -4168,7 +4170,9 @@ export function ProviderDialog({
   children,
   defaultRole,
 }: {
-  propertyId: string;
+  /** Unset creates/edits a portfolio-scoped provider (no single property) — the Providers
+   * directory page uses this; the per-property Providers tab always passes its own propertyId. */
+  propertyId?: string;
   provider?: Provider;
   children: React.ReactNode;
   /** Pre-selects the role on a brand-new contact (e.g. "Agent" from the Tenancy tab's "Add
@@ -4206,6 +4210,7 @@ export function ProviderDialog({
     contractStartDate: provider?.contractStartDate ?? "",
     contractReviewDate: provider?.contractReviewDate ?? "",
     contractNotes: provider?.contractNotes ?? "",
+    defaultCategory: provider?.defaultCategory ?? "",
   });
   const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
@@ -4336,6 +4341,7 @@ export function ProviderDialog({
       contractStartDate: form.contractStartDate || undefined,
       contractReviewDate: form.contractReviewDate || undefined,
       contractNotes: form.contractNotes.trim() || undefined,
+      defaultCategory: (form.defaultCategory || undefined) as ExpenseCategory | undefined,
     };
     if (provider) {
       updateProvider(provider.id, payload);
@@ -4400,6 +4406,24 @@ export function ProviderDialog({
           </Field>
           <Field label="ABN">
             <Input value={form.abn} onChange={(e) => setForm((f) => ({ ...f, abn: e.target.value }))} />
+          </Field>
+          <Field label="Default category">
+            <Select
+              value={form.defaultCategory || "__none__"}
+              onValueChange={(v) => setForm((f) => ({ ...f, defaultCategory: v === "__none__" ? "" : v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="—" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">—</SelectItem>
+                {EXPENSE_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <div className="col-span-2">
             <Field label="Address">
@@ -4622,7 +4646,7 @@ export function ProviderRow({ provider }: { provider: Provider }) {
         {provider.notes && <div className="mt-1 whitespace-pre-wrap">{provider.notes}</div>}
       </div>
       <div className="flex shrink-0 gap-1">
-        <ProviderDialog propertyId={provider.propertyId ?? ""} provider={provider}>
+        <ProviderDialog propertyId={provider.propertyId} provider={provider}>
           <Button size="icon" variant="ghost" className="h-6 w-6">
             <Pencil className="h-3 w-3" />
           </Button>

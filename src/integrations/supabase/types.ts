@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   graphql_public: {
     Tables: {
@@ -216,6 +216,48 @@ export type Database = {
         }
         Relationships: []
       }
+      compliance_certificates: {
+        Row: {
+          certType: string
+          created_at: string
+          expiryDate: string | null
+          fileData: string | null
+          fileName: string | null
+          id: string
+          issueDate: string | null
+          issuer: string | null
+          notes: string | null
+          propertyId: string
+          referenceNumber: string | null
+        }
+        Insert: {
+          certType: string
+          created_at?: string
+          expiryDate?: string | null
+          fileData?: string | null
+          fileName?: string | null
+          id: string
+          issueDate?: string | null
+          issuer?: string | null
+          notes?: string | null
+          propertyId: string
+          referenceNumber?: string | null
+        }
+        Update: {
+          certType?: string
+          created_at?: string
+          expiryDate?: string | null
+          fileData?: string | null
+          fileName?: string | null
+          id?: string
+          issueDate?: string | null
+          issuer?: string | null
+          notes?: string | null
+          propertyId?: string
+          referenceNumber?: string | null
+        }
+        Relationships: []
+      }
       depreciation_items: {
         Row: {
           assetId: string
@@ -391,6 +433,7 @@ export type Database = {
           date: string
           direction: string | null
           emailMessageId: string | null
+          gst: number | null
           hasWarranty: boolean
           id: string
           invoiceFileData: string | null
@@ -401,6 +444,8 @@ export type Database = {
           periodEnd: string | null
           periodStart: string | null
           propertyId: string | null
+          providerId: string | null
+          providerName: string | null
           rawPropertyAddress: string | null
           recharged: boolean
           rechargeToTenant: boolean
@@ -425,6 +470,7 @@ export type Database = {
           date?: string
           direction?: string | null
           emailMessageId?: string | null
+          gst?: number | null
           hasWarranty?: boolean
           id: string
           invoiceFileData?: string | null
@@ -435,6 +481,8 @@ export type Database = {
           periodEnd?: string | null
           periodStart?: string | null
           propertyId?: string | null
+          providerId?: string | null
+          providerName?: string | null
           rawPropertyAddress?: string | null
           recharged?: boolean
           rechargeToTenant?: boolean
@@ -459,6 +507,7 @@ export type Database = {
           date?: string
           direction?: string | null
           emailMessageId?: string | null
+          gst?: number | null
           hasWarranty?: boolean
           id?: string
           invoiceFileData?: string | null
@@ -469,6 +518,8 @@ export type Database = {
           periodEnd?: string | null
           periodStart?: string | null
           propertyId?: string | null
+          providerId?: string | null
+          providerName?: string | null
           rawPropertyAddress?: string | null
           recharged?: boolean
           rechargeToTenant?: boolean
@@ -483,7 +534,15 @@ export type Database = {
           unitId?: string | null
           warrantyExpiry?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "expenses_providerId_fkey"
+            columns: ["providerId"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       gold_details: {
         Row: {
@@ -568,6 +627,72 @@ export type Database = {
           status?: string
           tenantId?: string | null
           type?: string
+        }
+        Relationships: []
+      }
+      insurance_policies: {
+        Row: {
+          coverageSummary: string | null
+          coverEnd: string | null
+          coverStart: string | null
+          coverTypes: string[]
+          created_at: string
+          documentType: string | null
+          excess: number | null
+          fileData: string | null
+          fileName: string | null
+          id: string
+          insurer: string
+          isSeparatePolicy: boolean | null
+          policyNumber: string | null
+          premium: number | null
+          premiumFrequency: string | null
+          propertyId: string
+          replacesPolicyId: string | null
+          sumInsured: number | null
+          unitId: string | null
+        }
+        Insert: {
+          coverageSummary?: string | null
+          coverEnd?: string | null
+          coverStart?: string | null
+          coverTypes?: string[]
+          created_at?: string
+          documentType?: string | null
+          excess?: number | null
+          fileData?: string | null
+          fileName?: string | null
+          id: string
+          insurer: string
+          isSeparatePolicy?: boolean | null
+          policyNumber?: string | null
+          premium?: number | null
+          premiumFrequency?: string | null
+          propertyId: string
+          replacesPolicyId?: string | null
+          sumInsured?: number | null
+          unitId?: string | null
+        }
+        Update: {
+          coverageSummary?: string | null
+          coverEnd?: string | null
+          coverStart?: string | null
+          coverTypes?: string[]
+          created_at?: string
+          documentType?: string | null
+          excess?: number | null
+          fileData?: string | null
+          fileName?: string | null
+          id?: string
+          insurer?: string
+          isSeparatePolicy?: boolean | null
+          policyNumber?: string | null
+          premium?: number | null
+          premiumFrequency?: string | null
+          propertyId?: string
+          replacesPolicyId?: string | null
+          sumInsured?: number | null
+          unitId?: string | null
         }
         Relationships: []
       }
@@ -735,6 +860,95 @@ export type Database = {
           totalBalance?: number
         }
         Relationships: []
+      }
+      maintenance_items: {
+        Row: {
+          budget: number | null
+          completedDate: string | null
+          contractorEmail: string | null
+          contractorName: string | null
+          contractorPhone: string | null
+          cost: number | null
+          created_at: string
+          description: string | null
+          id: string
+          itemType: string
+          photos: Json
+          priority: string | null
+          progressNotes: string | null
+          projectType: string | null
+          propertyId: string
+          providerId: string | null
+          scheduledDate: string | null
+          sourceFileData: string | null
+          sourceFileName: string | null
+          startDate: string | null
+          status: string
+          title: string
+          tradeCategory: string | null
+          unitId: string | null
+        }
+        Insert: {
+          budget?: number | null
+          completedDate?: string | null
+          contractorEmail?: string | null
+          contractorName?: string | null
+          contractorPhone?: string | null
+          cost?: number | null
+          created_at?: string
+          description?: string | null
+          id: string
+          itemType: string
+          photos?: Json
+          priority?: string | null
+          progressNotes?: string | null
+          projectType?: string | null
+          propertyId: string
+          providerId?: string | null
+          scheduledDate?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
+          startDate?: string | null
+          status?: string
+          title: string
+          tradeCategory?: string | null
+          unitId?: string | null
+        }
+        Update: {
+          budget?: number | null
+          completedDate?: string | null
+          contractorEmail?: string | null
+          contractorName?: string | null
+          contractorPhone?: string | null
+          cost?: number | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          itemType?: string
+          photos?: Json
+          priority?: string | null
+          progressNotes?: string | null
+          projectType?: string | null
+          propertyId?: string
+          providerId?: string | null
+          scheduledDate?: string | null
+          sourceFileData?: string | null
+          sourceFileName?: string | null
+          startDate?: string | null
+          status?: string
+          title?: string
+          tradeCategory?: string | null
+          unitId?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maintenance_items_providerId_fkey"
+            columns: ["providerId"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       maintenance_requests: {
         Row: {
@@ -1052,6 +1266,7 @@ export type Database = {
           portalUrl: string | null
           portalUsername: string | null
           propertyId: string | null
+          providerId: string | null
           providerName: string | null
           recurrenceMonths: number | null
           referenceNumber: string | null
@@ -1087,6 +1302,7 @@ export type Database = {
           portalUrl?: string | null
           portalUsername?: string | null
           propertyId?: string | null
+          providerId?: string | null
           providerName?: string | null
           recurrenceMonths?: number | null
           referenceNumber?: string | null
@@ -1122,6 +1338,7 @@ export type Database = {
           portalUrl?: string | null
           portalUsername?: string | null
           propertyId?: string | null
+          providerId?: string | null
           providerName?: string | null
           recurrenceMonths?: number | null
           referenceNumber?: string | null
@@ -1133,7 +1350,92 @@ export type Database = {
           tenantRebillStatus?: string | null
           unitId?: string | null
         }
+        Relationships: [
+          {
+            foreignKeyName: "property_bills_providerId_fkey"
+            columns: ["providerId"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_notes: {
+        Row: {
+          attachments: Json
+          category: string | null
+          content: string | null
+          created_at: string
+          id: string
+          propertyId: string
+          reminderDate: string | null
+          tags: string[]
+          title: string
+          unitId: string | null
+        }
+        Insert: {
+          attachments?: Json
+          category?: string | null
+          content?: string | null
+          created_at?: string
+          id: string
+          propertyId: string
+          reminderDate?: string | null
+          tags?: string[]
+          title: string
+          unitId?: string | null
+        }
+        Update: {
+          attachments?: Json
+          category?: string | null
+          content?: string | null
+          created_at?: string
+          id?: string
+          propertyId?: string
+          reminderDate?: string | null
+          tags?: string[]
+          title?: string
+          unitId?: string | null
+        }
         Relationships: []
+      }
+      provider_documents: {
+        Row: {
+          created_at: string
+          docType: string | null
+          expiryDate: string | null
+          fileData: string | null
+          fileName: string | null
+          id: string
+          providerId: string
+        }
+        Insert: {
+          created_at?: string
+          docType?: string | null
+          expiryDate?: string | null
+          fileData?: string | null
+          fileName?: string | null
+          id: string
+          providerId: string
+        }
+        Update: {
+          created_at?: string
+          docType?: string | null
+          expiryDate?: string | null
+          fileData?: string | null
+          fileName?: string | null
+          id?: string
+          providerId?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_documents_providerId_fkey"
+            columns: ["providerId"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       providers: {
         Row: {
@@ -1141,12 +1443,14 @@ export type Database = {
           address: string | null
           adminFeeAmount: number | null
           adminFeeFrequency: string | null
+          advertisingFeeAmount: number | null
           contractFileData: string | null
           contractFileName: string | null
           contractNotes: string | null
           contractReviewDate: string | null
           contractStartDate: string | null
           created_at: string
+          defaultCategory: string | null
           email: string | null
           id: string
           inspectionFeeAmount: number | null
@@ -1156,6 +1460,7 @@ export type Database = {
           managementFeePercent: number | null
           name: string
           notes: string | null
+          noticePeriodDays: number | null
           passwordNote: string | null
           phone: string | null
           portalUrl: string | null
@@ -1170,12 +1475,14 @@ export type Database = {
           address?: string | null
           adminFeeAmount?: number | null
           adminFeeFrequency?: string | null
+          advertisingFeeAmount?: number | null
           contractFileData?: string | null
           contractFileName?: string | null
           contractNotes?: string | null
           contractReviewDate?: string | null
           contractStartDate?: string | null
           created_at?: string
+          defaultCategory?: string | null
           email?: string | null
           id: string
           inspectionFeeAmount?: number | null
@@ -1185,6 +1492,7 @@ export type Database = {
           managementFeePercent?: number | null
           name: string
           notes?: string | null
+          noticePeriodDays?: number | null
           passwordNote?: string | null
           phone?: string | null
           portalUrl?: string | null
@@ -1199,12 +1507,14 @@ export type Database = {
           address?: string | null
           adminFeeAmount?: number | null
           adminFeeFrequency?: string | null
+          advertisingFeeAmount?: number | null
           contractFileData?: string | null
           contractFileName?: string | null
           contractNotes?: string | null
           contractReviewDate?: string | null
           contractStartDate?: string | null
           created_at?: string
+          defaultCategory?: string | null
           email?: string | null
           id?: string
           inspectionFeeAmount?: number | null
@@ -1214,6 +1524,7 @@ export type Database = {
           managementFeePercent?: number | null
           name?: string
           notes?: string | null
+          noticePeriodDays?: number | null
           passwordNote?: string | null
           phone?: string | null
           portalUrl?: string | null

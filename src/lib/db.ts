@@ -28,6 +28,7 @@ export const TABLES = {
   maintenanceItems: "maintenance_items",
   complianceCertificates: "compliance_certificates",
   propertyNotes: "property_notes",
+  providerDocuments: "provider_documents",
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";

@@ -44,6 +44,23 @@ Extract the fields defined in the response schema as strict JSON.
 - addressed_to: the billing/account name the notice is addressed to (e.g. the name on the account),
   if printed — null if not shown. Do not guess or invent this.`;
 
+/** Folds known Provider directory vendor names into the extraction prompt so Gemini normalizes a
+ * vendor's spelling/formatting against what's already on file (e.g. "AGL" vs. "AGL Energy Pty
+ * Ltd") instead of transcribing the notice's own wording verbatim — cuts down near-duplicate
+ * Provider rows being created for the same real-world vendor. Mirrors classify.ts's
+ * buildClassifyPrompt(knownEntityNames) pattern. */
+function buildBillPrompt(knownProviders: { name: string; abn: string | null }[]): string {
+  if (knownProviders.length === 0) return BILL_PROMPT;
+  const list = knownProviders.map((p) => (p.abn ? `${p.name} (ABN ${p.abn})` : p.name)).join(", ");
+  return `${BILL_PROMPT}
+
+This landlord's known vendors/billers already on file are: ${list}. If the vendor printed on this
+notice is the same real-world vendor as one of these (allowing for punctuation, legal-suffix, or
+capitalisation differences — e.g. "AGL" vs. "AGL Energy Pty Ltd"), report the vendor field using
+EXACTLY that on-file spelling instead of the notice's own wording. Only do this when you are
+confident it's the same vendor — never rename to an unrelated on-file name.`;
+}
+
 const BILL_SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -99,11 +116,15 @@ const BILL_SCHEMA = {
 };
 
 /** Shared with extract-bill (the stateless upload-and-preview endpoint behind the Add Bill dialog)
- * and parse-bill (the staging/direct-write intake pipeline). */
-export async function extractBillFields(input: NormalizedBillInput): Promise<ParsedBillFields> {
+ * and parse-bill (the staging/direct-write intake pipeline). knownProviders is optional and
+ * additive — extract-bill doesn't pass one, and omitting it behaves exactly as before. */
+export async function extractBillFields(
+  input: NormalizedBillInput,
+  knownProviders: { name: string; abn: string | null }[] = [],
+): Promise<ParsedBillFields> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-  const parts = buildDocumentParts(BILL_PROMPT, input);
+  const parts = buildDocumentParts(buildBillPrompt(knownProviders), input);
   return callGeminiJSON<ParsedBillFields>(apiKey, parts, BILL_SCHEMA);
 }
 

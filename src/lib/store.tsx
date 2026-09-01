@@ -32,6 +32,7 @@ import type {
   MaintenanceItem,
   ComplianceCertificate,
   PropertyNote,
+  ProviderDocument,
 } from "./types";
 import {
   TABLES,
@@ -131,6 +132,7 @@ const empty: AppState = {
   maintenanceItems: [],
   complianceCertificates: [],
   propertyNotes: [],
+  providerDocuments: [],
   aiConfig: defaultAi,
   landlordProfile: defaultProfile,
   bills: [],
@@ -257,6 +259,10 @@ interface StoreCtx {
   updatePropertyNote: (id: string, n: Partial<PropertyNote>) => void;
   deletePropertyNote: (id: string) => void;
 
+  addProviderDocument: (d: Omit<ProviderDocument, "id">) => void;
+  updateProviderDocument: (id: string, d: Partial<ProviderDocument>) => void;
+  deleteProviderDocument: (id: string) => void;
+
   addMaintenanceRequest: (m: Omit<MaintenanceRequest, "id" | "createdAt" | "status">) => Promise<void>;
   updateMaintenanceRequest: (id: string, m: Partial<MaintenanceRequest>) => void;
   deleteMaintenanceRequest: (id: string) => void;
@@ -345,6 +351,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         maintenanceItems,
         complianceCertificates,
         propertyNotes,
+        providerDocuments,
         bills,
         aiProposals,
         emailInboxLog,
@@ -373,6 +380,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         selectAll<MaintenanceItem>(TABLES.maintenanceItems),
         selectAll<ComplianceCertificate>(TABLES.complianceCertificates),
         selectAll<PropertyNote>(TABLES.propertyNotes),
+        selectAll<ProviderDocument>(TABLES.providerDocuments),
         selectAll<PropertyBill>(TABLES.bills),
         selectAll<AiIntakeProposal>(TABLES.aiProposals),
         selectAll<EmailInboxLogEntry>(TABLES.emailInboxLog),
@@ -419,6 +427,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         maintenanceItems,
         complianceCertificates,
         propertyNotes,
+        providerDocuments,
         bills,
         aiProposals,
         emailInboxLog,
@@ -900,7 +909,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     deleteProvider: (id) => {
       void deleteRow(TABLES.providers, id);
-      set((s) => ({ ...s, providers: s.providers.filter((p) => p.id !== id) }));
+      set((s) => ({
+        ...s,
+        providers: s.providers.filter((p) => p.id !== id),
+        // Mirrors the DB's ON DELETE CASCADE on provider_documents.providerId — the cascade
+        // removes the DB rows automatically, but local state needs the same cleanup so a
+        // just-deleted provider's documents don't linger in the UI until next refresh().
+        providerDocuments: s.providerDocuments.filter((d) => d.providerId !== id),
+      }));
     },
 
     addEntity: (e) => {
@@ -1105,6 +1121,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deletePropertyNote: (id) => {
       void deleteRow(TABLES.propertyNotes, id);
       set((s) => ({ ...s, propertyNotes: s.propertyNotes.filter((n) => n.id !== id) }));
+    },
+
+    addProviderDocument: (d) => {
+      const row: ProviderDocument = { ...d, id: uid("provdoc") };
+      void upsertRow(TABLES.providerDocuments, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, providerDocuments: [...s.providerDocuments, row] }));
+    },
+    updateProviderDocument: (id, patch) => {
+      void updateRow(TABLES.providerDocuments, id, patch as Record<string, unknown>);
+      set((s) => ({
+        ...s,
+        providerDocuments: s.providerDocuments.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+      }));
+    },
+    deleteProviderDocument: (id) => {
+      void deleteRow(TABLES.providerDocuments, id);
+      set((s) => ({ ...s, providerDocuments: s.providerDocuments.filter((d) => d.id !== id) }));
     },
 
     addMaintenanceRequest: async (m) => {

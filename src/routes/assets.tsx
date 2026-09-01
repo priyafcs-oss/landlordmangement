@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   FolderOpen,
   Inbox as InboxIcon,
+  Users2,
 } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
@@ -48,6 +49,7 @@ import { ForecastsContent } from "@/routes/forecasts";
 import { BuffersContent } from "@/routes/buffers";
 import { DocumentsContent } from "@/routes/documents";
 import { InboxContent } from "@/routes/inbox";
+import { ProvidersContent } from "@/routes/providers";
 import { DocumentLink } from "@/components/DocumentLink";
 import { toast } from "sonner";
 
@@ -573,7 +575,7 @@ function AllAssetsContent() {
   );
 }
 
-type Section = "all" | "bills" | "transactions" | "loans" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents" | "inbox";
+type Section = "all" | "bills" | "transactions" | "loans" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents" | "inbox" | "providers";
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
   { section: "all", label: "All Assets", icon: LayoutGrid },
@@ -585,6 +587,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "pnl", label: "YTD P&L", icon: FileText, group: "Finance" },
   { section: "forecasts", label: "Forecasts", icon: TrendingUp },
   { section: "buffers", label: "Buffers", icon: ShieldCheck },
+  { section: "providers", label: "Providers", icon: Users2 },
   { section: "documents", label: "Documents", icon: FolderOpen },
   { section: "inbox", label: "Inbox", icon: InboxIcon },
 ];
@@ -646,6 +649,7 @@ function AssetsPage() {
         {section === "pnl" && <PortfolioPnLTab />}
         {section === "forecasts" && <ForecastsContent />}
         {section === "buffers" && <BuffersContent />}
+        {section === "providers" && <ProvidersContent />}
         {section === "documents" && <DocumentsContent />}
         {section === "inbox" && <InboxContent />}
       </div>

@@ -378,6 +378,9 @@ export interface Expense {
    * tradesperson on a repair, the agent/tenant a rent line came from. Free text, separate from the
    * Provider directory (a transaction doesn't have to match a saved Provider record). */
   providerName?: string;
+  /** Set when providerName was matched (or manually linked) to a directory Provider — lets
+   * payment history/outstanding-invoices roll up on the provider's profile page. */
+  providerId?: string;
   /** GST component of `cost`, when known — entered per-line-item on manual transactions. Absent
    * (not zero) for rows where GST was never captured, so a Transactions GST total can tell "no GST
    * on this line" apart from "GST unknown/not entered". */
@@ -541,6 +544,23 @@ export interface Provider {
   /** When the agreement is next up for renewal/review, if stated. */
   contractReviewDate?: string;
   contractNotes?: string;
+  /** The ATO category most often confirmed on bills/expenses from this provider — suggested (not
+   * forced) on future bills that resolve to this provider via provider-match.ts, the same way a
+   * council's bills are always "Council Rates". */
+  defaultCategory?: ExpenseCategory;
+}
+
+/** A document held against a Provider directory record rather than a specific property — a
+ * certificate of currency, trade licence, or similar — badged with the same expiry-soon
+ * treatment as InsurancePolicy/ComplianceCertificate. */
+export interface ProviderDocument {
+  id: string;
+  created_at?: string;
+  providerId: string;
+  docType?: string;
+  fileName?: string;
+  fileData?: string;
+  expiryDate?: string;
 }
 
 export type EntityType = "Individual" | "Joint" | "Trust" | "SMSF" | "Company";
@@ -709,6 +729,9 @@ export interface PropertyBill {
   /** e.g. "Instalment 2" — set when this row is one of several sharing a billGroupId. */
   label?: string;
   providerName?: string;
+  /** Set when providerName was matched (or manually linked) to a directory Provider — see
+   * Expense.providerId. */
+  providerId?: string;
   referenceNumber?: string;
   bpayBillerCode?: string;
   bpayReference?: string;
@@ -850,7 +873,17 @@ export interface BankStatementProposalPayload {
   bankName?: string;
   periodStart?: string;
   periodEnd?: string;
-  transactions: { date: string; description: string; amount: number; direction: "in" | "out" }[];
+  transactions: {
+    date: string;
+    description: string;
+    amount: number;
+    direction: "in" | "out";
+    /** Set when this line's description matched an existing Provider directory record. */
+    providerId?: string;
+    /** Set instead of providerId when no directory match was found, so the review UI can still
+     * show a suggested vendor name (usually the cleaned-up description) for this line. */
+    suggestedProviderName?: string;
+  }[];
   confidence: number;
 }
 
@@ -880,6 +913,13 @@ export interface BillProposalPayload {
   vendorWebsite?: string;
   vendorAbn?: string;
   vendorAddress?: string;
+  /** Set when the extracted vendor matched an existing Provider directory record — see
+   * provider-match.ts. Resolving to an existing provider happens on both the approved and staged
+   * paths; only auto-approved bills may CREATE a brand-new provider row. */
+  providerId?: string;
+  /** Prefilled from the matched provider's defaultCategory when the bill's own extraction didn't
+   * confidently determine one. */
+  category?: ExpenseCategory;
   confidence: number;
 }
 
@@ -1016,6 +1056,7 @@ export interface AppState {
   maintenanceItems: MaintenanceItem[];
   complianceCertificates: ComplianceCertificate[];
   propertyNotes: PropertyNote[];
+  providerDocuments: ProviderDocument[];
   aiConfig: AiConfig;
   landlordProfile: LandlordProfile;
   bills: PropertyBill[];
@@ -1090,6 +1131,9 @@ export interface MaintenanceItem {
   contractorName?: string;
   contractorEmail?: string;
   contractorPhone?: string;
+  /** Optional link to a Provider directory record for this job's tradesperson/contractor —
+   * additive alongside the free-text contractorName, which stays the primary field. */
+  providerId?: string;
   photos: { name: string; data: string }[];
   sourceFileName?: string;
   sourceFileData?: string;

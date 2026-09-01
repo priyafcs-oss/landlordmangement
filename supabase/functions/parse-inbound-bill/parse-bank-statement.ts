@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
+import { matchProviderInRows } from "./provider-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedBankStatementFields, ProposalParseResult } from "./types.ts";
 
@@ -72,6 +73,22 @@ export async function parseBankStatement(
 
   const matchedPropertyId = parsed.property_address ? await matchProperty(supabase, parsed.property_address) : null;
 
+  // Only outgoing lines are candidates for a vendor/provider match — an "in" line is money the
+  // landlord received (rent, a transfer), which was never paid TO a provider. A match failure
+  // falls back to the line's own description as a suggested (not yet directory-linked) provider
+  // name, so the review UI never has to show a blank vendor field for a paid-out line. Providers
+  // are fetched once up front rather than once per transaction line.
+  const { data: providerRows } = await supabase.from("providers").select("id, name, abn");
+  const transactions = parsed.transactions.map((t) => {
+    if (t.direction !== "out") return t;
+    const providerId = matchProviderInRows(providerRows ?? [], t.description);
+    return {
+      ...t,
+      providerId,
+      suggestedProviderName: providerId ? undefined : t.description.trim() || undefined,
+    };
+  });
+
   const row = {
     id: `prop_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     kind: "bank_statement",
@@ -89,7 +106,7 @@ export async function parseBankStatement(
       bankName: parsed.bank_name ?? undefined,
       periodStart: parsed.period_start ?? undefined,
       periodEnd: parsed.period_end ?? undefined,
-      transactions: parsed.transactions,
+      transactions,
       confidence: parsed.confidence,
     },
   };

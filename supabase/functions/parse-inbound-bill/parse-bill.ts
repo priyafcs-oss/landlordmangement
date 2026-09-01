@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
+import { matchProvider } from "./provider-match.ts";
 import {
   BILL_TYPES,
   type BillType,
@@ -262,6 +263,8 @@ async function writeApprovedBill(
   matchedPropertyId: string | null,
   input: NormalizedBillInput,
   emailMessageId: string | null,
+  matchedProviderId: string | undefined,
+  defaultCategory: string | undefined,
 ): Promise<ParseResult> {
   const billId = `bill_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const billType = mapBillType(parsed.bill_category, parsed.vendor);
@@ -276,6 +279,8 @@ async function writeApprovedBill(
     dueDate: parsed.due_date,
     status: "Unpaid",
     providerName: parsed.vendor,
+    providerId: matchedProviderId,
+    category: defaultCategory,
     bpayBillerCode: parsed.bpay_biller_code ?? undefined,
     bpayReference: parsed.bpay_reference ?? undefined,
     source: "Email",
@@ -307,7 +312,13 @@ async function writeApprovedBill(
         source,
       );
     }
-    await upsertProviderFromBill(supabase, matchedPropertyId, billType, parsed);
+    // Only create a new provider row when this vendor didn't already resolve to one via
+    // matchProvider (portfolio-wide) — otherwise this would create a redundant property-scoped
+    // duplicate of a provider that already exists (possibly portfolio-scoped, or on another
+    // property). Creation itself stays gated to this auto-approved path either way.
+    if (!matchedProviderId) {
+      await upsertProviderFromBill(supabase, matchedPropertyId, billType, parsed);
+    }
     await updateAnnualRunningCost(
       supabase,
       matchedPropertyId,
@@ -330,6 +341,8 @@ async function stageBillProposal(
   reviewReason: string | null,
   input: NormalizedBillInput,
   emailMessageId: string | null,
+  matchedProviderId: string | undefined,
+  defaultCategory: string | undefined,
 ): Promise<ProposalParseResult> {
   const row = {
     id: `prop_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
@@ -360,6 +373,8 @@ async function stageBillProposal(
       vendorWebsite: parsed.vendor_website ?? undefined,
       vendorAbn: parsed.vendor_abn ?? undefined,
       vendorAddress: parsed.vendor_address ?? undefined,
+      providerId: matchedProviderId,
+      category: defaultCategory,
       confidence: parsed.confidence,
     },
   };
@@ -391,9 +406,15 @@ export async function parseInboundBill(
     if (existingProposal) return { ok: true, proposalId: existingProposal.id };
   }
 
+  // Best-effort — extraction is still useful without it, so a lookup failure here shouldn't block
+  // the whole pipeline. Fetching a lightweight list of known provider names/ABNs and folding them
+  // into the extraction prompt lets Gemini normalize a vendor's spelling against what's already on
+  // file (same pattern router.ts already uses for known entity names on classification).
+  const { data: knownProviders } = await supabase.from("providers").select("name, abn");
+
   let parsed: ParsedBillFields;
   try {
-    parsed = await extractBillFields(input);
+    parsed = await extractBillFields(input, knownProviders ?? []);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Gemini extraction failed" };
   }
@@ -404,9 +425,33 @@ export async function parseInboundBill(
   }
 
   const matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "", parsed.bpay_reference);
+  const matchedProviderId = await matchProvider(supabase, parsed.vendor, parsed.vendor_abn);
+
+  // Matching to an EXISTING provider is safe on both the approved and staged paths — only
+  // CREATING a brand-new provider row (upsertProviderFromBill, below) stays gated to the
+  // auto-approved path, so an unreviewed bill can't silently expand the directory.
+  let defaultCategory: string | undefined;
+  if (matchedProviderId) {
+    const { data: providerRow } = await supabase
+      .from("providers")
+      .select("defaultCategory")
+      .eq("id", matchedProviderId)
+      .maybeSingle();
+    defaultCategory = providerRow?.defaultCategory ?? undefined;
+  }
+
   const { clean, reviewReason } = await runGuardrails(supabase, parsed, matchedPropertyId);
 
   return clean
-    ? writeApprovedBill(supabase, parsed, matchedPropertyId, input, emailMessageId)
-    : stageBillProposal(supabase, parsed, matchedPropertyId, reviewReason, input, emailMessageId);
+    ? writeApprovedBill(supabase, parsed, matchedPropertyId, input, emailMessageId, matchedProviderId, defaultCategory)
+    : stageBillProposal(
+        supabase,
+        parsed,
+        matchedPropertyId,
+        reviewReason,
+        input,
+        emailMessageId,
+        matchedProviderId,
+        defaultCategory,
+      );
 }
