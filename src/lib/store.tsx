@@ -19,6 +19,8 @@ import type {
   ExpenseProposalPayload,
   LeaseTemplateConfig,
   Provider,
+  ProviderAgreement,
+  ProviderProperty,
   Entity,
   ReportHistoryEntry,
   Asset,
@@ -112,6 +114,8 @@ const empty: AppState = {
   properties: [],
   tenants: [],
   providers: [],
+  providerAgreements: [],
+  providerProperties: [],
   entities: [],
   assets: [],
   goldDetails: [],
@@ -206,9 +210,28 @@ interface StoreCtx {
   updateLeaseHistory: (id: string, h: Partial<LeaseHistory>) => void;
   deleteLeaseHistory: (id: string) => void;
 
-  addProvider: (p: Omit<Provider, "id">) => void;
+  addProvider: (p: Omit<Provider, "id">) => string;
   updateProvider: (id: string, p: Partial<Provider>) => void;
   deleteProvider: (id: string) => void;
+
+  addProviderAgreement: (a: Omit<ProviderAgreement, "id">) => string;
+  updateProviderAgreement: (id: string, a: Partial<ProviderAgreement>) => void;
+  deleteProviderAgreement: (id: string) => void;
+
+  addProviderProperty: (p: Omit<ProviderProperty, "id">) => string;
+  deleteProviderProperty: (id: string) => void;
+  /** Ensures a `provider_properties` tag exists for this (providerId, propertyId) pair — a no-op
+   * if one already does. Called alongside findOrCreateProvider whenever a provider is being
+   * attached to a specific property (a new agreement, a bill/expense/maintenance item, or
+   * explicitly from a property's Providers tab), so that property's Providers tab picks it up. */
+  ensureProviderProperty: (providerId: string, propertyId: string) => void;
+  /** Re-points every row referencing `duplicateId` (provider_agreements, provider_properties,
+   * expenses, property_bills, maintenance_items, provider_documents) onto `survivorId`, then
+   * deletes the duplicate provider — used by the "Merge providers" tool on /providers to fix two
+   * rows that turned out to be the same real-world business. Duplicates predating this action
+   * mostly come from before findOrCreateProvider deduped portfolio-wide (it used to only dedup
+   * within one property), or from a name typed two slightly different ways. */
+  mergeProviders: (survivorId: string, duplicateId: string) => void;
 
   addEntity: (e: Omit<Entity, "id">) => void;
   updateEntity: (id: string, e: Partial<Entity>) => void;
@@ -331,6 +354,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         properties,
         tenants,
         providers,
+        providerAgreements,
+        providerProperties,
         entities,
         assets,
         goldDetails,
@@ -360,6 +385,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         selectAll<Property>(TABLES.properties),
         selectAll<Tenant>(TABLES.tenants),
         selectAll<Provider>(TABLES.providers),
+        selectAll<ProviderAgreement>(TABLES.providerAgreements),
+        selectAll<ProviderProperty>(TABLES.providerProperties),
         selectAll<Entity>(TABLES.entities),
         selectAll<Asset>(TABLES.assets),
         selectAll<GoldDetails>(TABLES.goldDetails),
@@ -407,6 +434,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         properties: propertiesWithUnitIds,
         tenants,
         providers,
+        providerAgreements,
+        providerProperties,
         entities,
         assets,
         goldDetails,
@@ -578,6 +607,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteWhere(TABLES.maintenanceRequests, "propertyId", id);
       void deleteWhere(TABLES.bills, "propertyId", id);
       void deleteWhere(TABLES.providers, "propertyId", id);
+      void deleteWhere(TABLES.providerAgreements, "propertyId", id);
+      void deleteWhere(TABLES.providerProperties, "propertyId", id);
       void deleteWhere(TABLES.aiProposals, "propertyId", id);
       void deleteWhere(TABLES.insurancePolicies, "propertyId", id);
       void deleteWhere(TABLES.maintenanceItems, "propertyId", id);
@@ -617,6 +648,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         maintenanceRequests: s.maintenanceRequests.filter((m) => m.propertyId !== id),
         bills: s.bills.filter((b) => b.propertyId !== id),
         providers: s.providers.filter((p) => p.propertyId !== id),
+        providerAgreements: s.providerAgreements.filter((a) => a.propertyId !== id),
+        providerProperties: s.providerProperties.filter((pp) => pp.propertyId !== id),
         aiProposals: s.aiProposals.filter((p) => p.propertyId !== id),
         insurancePolicies: s.insurancePolicies.filter((p) => p.propertyId !== id),
         maintenanceItems: s.maintenanceItems.filter((m) => m.propertyId !== id),
@@ -902,6 +935,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: Provider = { ...p, id: uid("prov") };
       void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, providers: [...s.providers, row] }));
+      return row.id;
     },
     updateProvider: (id, patch) => {
       void updateRow(TABLES.providers, id, patch as Record<string, unknown>);
@@ -912,10 +946,99 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({
         ...s,
         providers: s.providers.filter((p) => p.id !== id),
-        // Mirrors the DB's ON DELETE CASCADE on provider_documents.providerId — the cascade
-        // removes the DB rows automatically, but local state needs the same cleanup so a
-        // just-deleted provider's documents don't linger in the UI until next refresh().
+        // Mirrors the DB's ON DELETE CASCADE on provider_documents/provider_agreements/
+        // provider_properties.providerId — the cascade removes the DB rows automatically, but
+        // local state needs the same cleanup so a just-deleted provider's documents/agreements/
+        // property tags don't linger in the UI until next refresh().
         providerDocuments: s.providerDocuments.filter((d) => d.providerId !== id),
+        providerAgreements: s.providerAgreements.filter((a) => a.providerId !== id),
+        providerProperties: s.providerProperties.filter((pp) => pp.providerId !== id),
+      }));
+    },
+
+    addProviderAgreement: (a) => {
+      const row: ProviderAgreement = { ...a, id: uid("provagr") };
+      void upsertRow(TABLES.providerAgreements, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, providerAgreements: [...s.providerAgreements, row] }));
+      value.ensureProviderProperty(row.providerId, row.propertyId);
+      return row.id;
+    },
+    updateProviderAgreement: (id, patch) => {
+      void updateRow(TABLES.providerAgreements, id, patch as Record<string, unknown>);
+      set((s) => ({
+        ...s,
+        providerAgreements: s.providerAgreements.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+      }));
+    },
+    deleteProviderAgreement: (id) => {
+      void deleteRow(TABLES.providerAgreements, id);
+      set((s) => ({ ...s, providerAgreements: s.providerAgreements.filter((a) => a.id !== id) }));
+    },
+
+    addProviderProperty: (p) => {
+      const row: ProviderProperty = { ...p, id: uid("provprop") };
+      void upsertRow(TABLES.providerProperties, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, providerProperties: [...s.providerProperties, row] }));
+      return row.id;
+    },
+    deleteProviderProperty: (id) => {
+      void deleteRow(TABLES.providerProperties, id);
+      set((s) => ({ ...s, providerProperties: s.providerProperties.filter((pp) => pp.id !== id) }));
+    },
+    ensureProviderProperty: (providerId, propertyId) => {
+      const exists = state.providerProperties.some((pp) => pp.providerId === providerId && pp.propertyId === propertyId);
+      if (exists) return;
+      const row: ProviderProperty = { id: uid("provprop"), providerId, propertyId };
+      void upsertRow(TABLES.providerProperties, row as unknown as Record<string, unknown>);
+      set((s) =>
+        s.providerProperties.some((pp) => pp.providerId === providerId && pp.propertyId === propertyId)
+          ? s
+          : { ...s, providerProperties: [...s.providerProperties, row] },
+      );
+    },
+    mergeProviders: (survivorId, duplicateId) => {
+      if (survivorId === duplicateId) return;
+      const agreementsToMove = state.providerAgreements.filter((a) => a.providerId === duplicateId);
+      const propertiesToMove = state.providerProperties.filter((pp) => pp.providerId === duplicateId);
+      const documentsToMove = state.providerDocuments.filter((d) => d.providerId === duplicateId);
+      const expensesToMove = state.expenses.filter((e) => e.providerId === duplicateId);
+      const billsToMove = state.bills.filter((b) => b.providerId === duplicateId);
+      const maintenanceToMove = state.maintenanceItems.filter((m) => m.providerId === duplicateId);
+      const survivorPropertyIds = new Set(
+        state.providerProperties.filter((pp) => pp.providerId === survivorId).map((pp) => pp.propertyId),
+      );
+
+      for (const a of agreementsToMove) void updateRow(TABLES.providerAgreements, a.id, { providerId: survivorId });
+      // provider_properties is unique on (providerId, propertyId) — re-pointing a tag the
+      // survivor already has for that property would violate the constraint, so those are
+      // deleted instead of re-pointed.
+      for (const pp of propertiesToMove) {
+        if (survivorPropertyIds.has(pp.propertyId)) void deleteRow(TABLES.providerProperties, pp.id);
+        else void updateRow(TABLES.providerProperties, pp.id, { providerId: survivorId });
+      }
+      for (const d of documentsToMove) void updateRow(TABLES.providerDocuments, d.id, { providerId: survivorId });
+      for (const e of expensesToMove) void updateRow(TABLES.expenses, e.id, { providerId: survivorId });
+      for (const b of billsToMove) void updateRow(TABLES.bills, b.id, { providerId: survivorId });
+      for (const m of maintenanceToMove) void updateRow(TABLES.maintenanceItems, m.id, { providerId: survivorId });
+      void deleteRow(TABLES.providers, duplicateId);
+
+      set((s) => ({
+        ...s,
+        providers: s.providers.filter((p) => p.id !== duplicateId),
+        providerAgreements: s.providerAgreements.map((a) =>
+          a.providerId === duplicateId ? { ...a, providerId: survivorId } : a,
+        ),
+        providerProperties: s.providerProperties
+          .filter((pp) => !(pp.providerId === duplicateId && survivorPropertyIds.has(pp.propertyId)))
+          .map((pp) => (pp.providerId === duplicateId ? { ...pp, providerId: survivorId } : pp)),
+        providerDocuments: s.providerDocuments.map((d) =>
+          d.providerId === duplicateId ? { ...d, providerId: survivorId } : d,
+        ),
+        expenses: s.expenses.map((e) => (e.providerId === duplicateId ? { ...e, providerId: survivorId } : e)),
+        bills: s.bills.map((b) => (b.providerId === duplicateId ? { ...b, providerId: survivorId } : b)),
+        maintenanceItems: s.maintenanceItems.map((m) =>
+          m.providerId === duplicateId ? { ...m, providerId: survivorId } : m,
+        ),
       }));
     },
 
@@ -960,19 +1083,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
 
     /** A payee typed on a Transaction/Expense (or bill) is matched case-insensitively against the
-     * Provider directory scoped to the same property, so "Miracle Vibes Cleaning" typed twice
-     * reuses one Provider row instead of silently never appearing in the directory — the gap that
-     * previously meant only bills added via Add Bill ever created a Provider. */
+     * Provider directory, portfolio-wide (identity is no longer scoped to one property — see the
+     * Provider/ProviderAgreement split), so "Miracle Vibes Cleaning" typed twice at two different
+     * properties reuses one Provider row instead of creating a duplicate identity. When called
+     * with a propertyId, also ensures a `provider_properties` tag exists for that pair, so the
+     * provider shows up on that property's Providers tab. */
     findOrCreateProvider: (name, propertyId) => {
       const trimmed = name.trim();
-      const existing = state.providers.find(
-        (p) => p.propertyId === propertyId && p.name.trim().toLowerCase() === trimmed.toLowerCase(),
-      );
-      if (existing) return existing.id;
-      const row: Provider = { id: uid("prov"), propertyId, name: trimmed, role: "Other" };
-      void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
-      set((s) => ({ ...s, providers: [...s.providers, row] }));
-      return row.id;
+      const existing = state.providers.find((p) => p.name.trim().toLowerCase() === trimmed.toLowerCase());
+      const id = existing ? existing.id : uid("prov");
+      if (!existing) {
+        const row: Provider = { id, name: trimmed, role: "Other" };
+        void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
+        set((s) => ({ ...s, providers: [...s.providers, row] }));
+      }
+      if (propertyId) value.ensureProviderProperty(id, propertyId);
+      return id;
     },
 
     addAsset: (a, details) => {

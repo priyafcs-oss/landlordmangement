@@ -1,4 +1,23 @@
-import type { Expense, ExpenseCategory, Provider, RentFrequency } from "./types";
+import type { Expense, ExpenseCategory, FeeFrequency, ProviderAgreement, RentFrequency } from "./types";
+
+/** The subset of a ProviderAgreement's fields verification actually needs — lets a caller pass
+ * either a real ProviderAgreement row or a plain object built ad hoc (e.g. from an AI-extracted
+ * proposal payload not yet saved) without pulling in id/providerId/propertyId/contract-file noise. */
+export type AgreementFeeTerms = Pick<
+  ProviderAgreement,
+  | "managementFeePercent"
+  | "lettingFeeAmount"
+  | "lettingFeeWeeksRent"
+  | "adminFeeAmount"
+  | "adminFeeFrequency"
+  | "leaseRenewalFeeAmount"
+  | "inspectionFeeAmount"
+  | "advertisingFeeAmount"
+> & {
+  /** Optional here (unlike the DB row, where it's required) so an ad hoc terms object built from
+   * an AI-extracted proposal not yet saved — which has no GST flag yet — can still be passed in. */
+  gstApplicable?: boolean;
+};
 
 export type FeeCheckType = "Management Fee" | "Letting Fee" | "Admin Fee" | "Lease Renewal Fee" | "Inspection Fee";
 export type FeeCheckStatus = "match" | "overcharge" | "undercharge" | "not_charged" | "unspecified";
@@ -110,78 +129,186 @@ export function buildResult(type: FeeCheckType, expected: number | undefined, ac
   return { type, expected, actual, variance, status };
 }
 
-/**
- * Compares agent-charged fee lines (from one rent statement, or aggregated across a whole
- * period) against a Provider's recorded management-agreement terms. Only produces a result for
- * a fee type that's either (a) Management Fee — checked every time rent was collected, since it
- * recurs on virtually every statement, even when the statement charged nothing so the landlord
- * notices a missing deduction, not just a wrong one — or (b) any other fee type that was actually
- * charged on this statement/period; a letting fee never being charged in a given month is normal,
- * not a discrepancy, so it's simply not reported on.
- */
-export function verifyAgentFees(params: {
-  provider: Pick<
-    Provider,
-    "name" | "managementFeePercent" | "lettingFeeAmount" | "lettingFeeWeeksRent" | "adminFeeAmount" | "leaseRenewalFeeAmount" | "inspectionFeeAmount"
-  >;
-  rentCollected: number;
-  lines: FeeLine[];
-  /** Matched tenant's rent, for a letting fee contracted as "N weeks' rent" rather than a flat $. */
-  tenantRent?: { amount: number; frequency: RentFrequency };
-}): FeeCheckResult[] {
-  const { provider, rentCollected, lines, tenantRent } = params;
-  const normalizedAgentName = provider.name.trim().toLowerCase();
-
-  const actualByType = new Map<FeeCheckType, number>();
+/** Classifies each fee line to a FeeCheckType and sums amounts by type — the shared core of both
+ * verifyAgentFees (one statement/period) and reconcileFlatFees (a whole FY at once). A line with
+ * no recognisable fee keyword (a bare "Agency Fee"/"Commission" with no further detail) still
+ * overwhelmingly means the recurring management fee — the only fee type charged on virtually every
+ * statement — rather than something to silently drop from the total, PROVIDED the line was
+ * actually paid to the agent itself (its vendor/payee name matches), or is explicitly tagged with
+ * the dedicated fee category. Without that guard, a bill the agent merely paid on the owner's
+ * behalf (a tradesperson invoice deducted from the same statement, or a Repairs & Maintenance
+ * expense routed through the agent's trust account) would fall into this same catch-all and
+ * inflate the management fee total with costs that have nothing to do with it. */
+function actualTotalsByType(lines: FeeLine[], agentName: string): Map<FeeCheckType, number> {
+  const normalizedAgentName = agentName.trim().toLowerCase();
+  const totals = new Map<FeeCheckType, number>();
   for (const line of lines) {
-    // A line with no recognisable fee keyword (a bare "Agency Fee"/"Commission" with no further
-    // detail) still overwhelmingly means the recurring management fee — the only fee type charged
-    // on virtually every statement — rather than something to silently drop from the total,
-    // PROVIDED the line was actually paid to the agent itself (its vendor/payee name matches), or
-    // is explicitly tagged with the dedicated fee category. Without that guard, a bill the agent
-    // merely paid on the owner's behalf (a tradesperson invoice deducted from the same statement,
-    // or a Repairs & Maintenance expense routed through the agent's trust account) would fall into
-    // this same catch-all and inflate the management fee total with costs that have nothing to do
-    // with it.
     const isFeeCategory = /property agent fees|letting fees/i.test(line.category ?? "");
     const payeeIsAgent = [line.vendor, line.providerName].some((v) => !!v && v.trim().toLowerCase() === normalizedAgentName);
     const type = classifyFeeLine(`${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`) ?? (isFeeCategory || payeeIsAgent ? "Management Fee" : null);
     if (!type) continue;
-    actualByType.set(type, (actualByType.get(type) ?? 0) + line.amount);
+    totals.set(type, (totals.get(type) ?? 0) + line.amount);
   }
+  return totals;
+}
 
+/** GST multiplier applied to any computed "expected" amount before it's compared against the
+ * actual (GST-inclusive) charge — see ProviderAgreement.gstApplicable. */
+function gstMultiplierOf(agreement: Pick<AgreementFeeTerms, "gstApplicable">): number {
+  return agreement.gstApplicable ? 1.1 : 1;
+}
+
+/**
+ * Compares agent-charged fee lines (from one rent statement, or aggregated across a whole
+ * period) against a provider's recorded management-agreement terms. Only produces a result for
+ * a fee type that's either (a) Management Fee — checked every time rent was collected, since it
+ * recurs on virtually every statement, even when the statement charged nothing so the landlord
+ * notices a missing deduction, not just a wrong one — or (b) any other requested fee type that was
+ * actually charged on this statement/period; a letting fee never being charged in a given month is
+ * normal, not a discrepancy, so it's simply not reported on.
+ *
+ * Admin Fee, Lease Renewal Fee and Inspection Fee are flat contracted amounts, not a per-period
+ * charge — comparing the raw contracted amount against every period it happens to recur in (e.g.
+ * a $66/year admin fee charged on every monthly statement) re-adds the full amount as "expected"
+ * each time and overstates the true annual figure once summed across many calls. Callers that sum
+ * results across more than one call (the Fee Verification tab, EOFY) should pass
+ * `feeTypes: ["Management Fee", "Letting Fee"]` here to restrict this function to the two fee
+ * types that genuinely are per-period/per-transaction, and use `reconcileFlatFees` separately,
+ * once per FY, for the other three. A single-statement review (RentLedgerProposalCard) isn't
+ * summed anywhere, so it can safely omit `feeTypes` and see every fee type this one statement
+ * actually charged.
+ */
+export function verifyAgentFees(params: {
+  agentName: string;
+  agreement: AgreementFeeTerms;
+  rentCollected: number;
+  lines: FeeLine[];
+  /** Matched tenant's rent, for a letting fee contracted as "N weeks' rent" rather than a flat $. */
+  tenantRent?: { amount: number; frequency: RentFrequency };
+  /** Restricts which fee types are computed/returned — see the doc comment above. Defaults to all
+   * five types. */
+  feeTypes?: FeeCheckType[];
+}): FeeCheckResult[] {
+  const { agentName, agreement, rentCollected, lines, tenantRent, feeTypes } = params;
+  const wants = (t: FeeCheckType) => !feeTypes || feeTypes.includes(t);
+  const gstMultiplier = gstMultiplierOf(agreement);
+  const actualByType = actualTotalsByType(lines, agentName);
   const results: FeeCheckResult[] = [];
 
-  const mgmtActual = actualByType.get("Management Fee") ?? 0;
-  if (provider.managementFeePercent !== undefined && (rentCollected > 0 || mgmtActual > 0)) {
-    // No rent recorded in this bucket (e.g. a monthly breakdown where the fee deduction landed in
-    // a different month than the rent it was deducted from) still surfaces the actual charge
-    // rather than silently dropping it — there's just nothing to compute an expected amount
-    // against, so it reads as "unspecified" instead of a computed variance.
-    const expected = rentCollected > 0 ? rentCollected * (provider.managementFeePercent / 100) : undefined;
-    results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0));
+  if (wants("Management Fee")) {
+    const mgmtActual = actualByType.get("Management Fee") ?? 0;
+    if (agreement.managementFeePercent !== undefined && (rentCollected > 0 || mgmtActual > 0)) {
+      // No rent recorded in this bucket (e.g. a monthly breakdown where the fee deduction landed
+      // in a different month than the rent it was deducted from) still surfaces the actual charge
+      // rather than silently dropping it — there's just nothing to compute an expected amount
+      // against, so it reads as "unspecified" instead of a computed variance.
+      const expected = rentCollected > 0 ? rentCollected * (agreement.managementFeePercent / 100) * gstMultiplier : undefined;
+      results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0));
+    }
   }
 
-  const lettingActual = actualByType.get("Letting Fee") ?? 0;
-  if (lettingActual > 0) {
-    const weeklyRent = tenantRent ? weeklyRentOf(tenantRent.amount, tenantRent.frequency) : undefined;
-    const expected = provider.lettingFeeAmount ?? (provider.lettingFeeWeeksRent && weeklyRent ? provider.lettingFeeWeeksRent * weeklyRent : undefined);
-    results.push(buildResult("Letting Fee", expected, lettingActual, false));
+  if (wants("Letting Fee")) {
+    const lettingActual = actualByType.get("Letting Fee") ?? 0;
+    if (lettingActual > 0) {
+      const weeklyRent = tenantRent ? weeklyRentOf(tenantRent.amount, tenantRent.frequency) : undefined;
+      const rawExpected =
+        agreement.lettingFeeAmount ?? (agreement.lettingFeeWeeksRent && weeklyRent ? agreement.lettingFeeWeeksRent * weeklyRent : undefined);
+      results.push(buildResult("Letting Fee", rawExpected !== undefined ? rawExpected * gstMultiplier : undefined, lettingActual, false));
+    }
   }
+
+  if (wants("Admin Fee")) {
+    const adminActual = actualByType.get("Admin Fee") ?? 0;
+    if (adminActual > 0) {
+      const expected = agreement.adminFeeAmount !== undefined ? agreement.adminFeeAmount * gstMultiplier : undefined;
+      results.push(buildResult("Admin Fee", expected, adminActual, false));
+    }
+  }
+
+  if (wants("Lease Renewal Fee")) {
+    const renewalActual = actualByType.get("Lease Renewal Fee") ?? 0;
+    if (renewalActual > 0) {
+      const expected = agreement.leaseRenewalFeeAmount !== undefined ? agreement.leaseRenewalFeeAmount * gstMultiplier : undefined;
+      results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
+    }
+  }
+
+  if (wants("Inspection Fee")) {
+    const inspectionActual = actualByType.get("Inspection Fee") ?? 0;
+    if (inspectionActual > 0) {
+      const expected = agreement.inspectionFeeAmount !== undefined ? agreement.inspectionFeeAmount * gstMultiplier : undefined;
+      results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
+    }
+  }
+
+  return results;
+}
+
+/** Annualizes a flat contracted fee amount using its billing frequency, so it can be compared
+ * against a whole FY's worth of actual charges in one go. "Per Statement" is the one frequency
+ * that's genuinely per-occurrence, so it scales with however many statements were actually issued
+ * in the FY rather than a fixed multiplier. Missing/"Annually" frequency is left as-is (the most
+ * common real-world case, and the safest assumption when the frequency wasn't captured). */
+function annualizeFlatFee(amount: number, frequency: FeeFrequency | undefined, statementCountInFY: number): number {
+  switch (frequency) {
+    case "Monthly":
+      return amount * 12;
+    case "Quarterly":
+      return amount * 4;
+    case "Per Statement":
+      return amount * statementCountInFY;
+    case "Annually":
+    default:
+      return amount;
+  }
+}
+
+/**
+ * Reconciles the three flat/infrequent agreement fees — Admin Fee, Lease Renewal Fee, Inspection
+ * Fee — once for a whole FY (or other span), rather than once per calling period. This is the
+ * counterpart to verifyAgentFees's per-period Management/Letting Fee handling: those two scale
+ * naturally with how often they're charged (a % of rent, a fee per new tenancy), but a flat
+ * contracted admin fee doesn't — comparing the same raw contracted amount against every period it
+ * recurs in and then summing those "expected" values overstates the true annual figure by however
+ * many periods it appeared in. Pass every agent-fee line across the WHOLE span being reconciled in
+ * one call (not per month) so `actual` is summed exactly once; `expected` is the frequency-
+ * annualized contracted amount. Only emits a result for a fee type that was actually charged
+ * somewhere in the span — a renewal/inspection fee never occurring is normal, not a discrepancy,
+ * the same asymmetry verifyAgentFees applies to those types.
+ */
+export function reconcileFlatFees(params: {
+  agentName: string;
+  agreement: AgreementFeeTerms;
+  /** Every agent-fee line across the whole span being reconciled (e.g. a full FY), not per period. */
+  lines: FeeLine[];
+  /** Count of rent statements actually issued in the span — only used to annualize an Admin Fee
+   * with "Per Statement" frequency. */
+  statementCount: number;
+}): FeeCheckResult[] {
+  const { agentName, agreement, lines, statementCount } = params;
+  const gstMultiplier = gstMultiplierOf(agreement);
+  const actualByType = actualTotalsByType(lines, agentName);
+  const results: FeeCheckResult[] = [];
 
   const adminActual = actualByType.get("Admin Fee") ?? 0;
   if (adminActual > 0) {
-    results.push(buildResult("Admin Fee", provider.adminFeeAmount, adminActual, false));
+    const expected =
+      agreement.adminFeeAmount !== undefined
+        ? annualizeFlatFee(agreement.adminFeeAmount, agreement.adminFeeFrequency, statementCount) * gstMultiplier
+        : undefined;
+    results.push(buildResult("Admin Fee", expected, adminActual, false));
   }
 
   const renewalActual = actualByType.get("Lease Renewal Fee") ?? 0;
   if (renewalActual > 0) {
-    results.push(buildResult("Lease Renewal Fee", provider.leaseRenewalFeeAmount, renewalActual, false));
+    const expected = agreement.leaseRenewalFeeAmount !== undefined ? agreement.leaseRenewalFeeAmount * gstMultiplier : undefined;
+    results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
   }
 
   const inspectionActual = actualByType.get("Inspection Fee") ?? 0;
   if (inspectionActual > 0) {
-    results.push(buildResult("Inspection Fee", provider.inspectionFeeAmount, inspectionActual, false));
+    const expected = agreement.inspectionFeeAmount !== undefined ? agreement.inspectionFeeAmount * gstMultiplier : undefined;
+    results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
   }
 
   return results;
@@ -244,16 +371,16 @@ export function isAgentFeeExpense(expense: Pick<Expense, "category" | "providerN
   return !!expense.providerName && expense.providerName.trim().toLowerCase() === agentName.trim().toLowerCase();
 }
 
-/** Whether a Provider has recorded enough of its agreement to make verification worthwhile at
+/** Whether a ProviderAgreement has recorded enough fee terms to make verification worthwhile at
  * all — used to decide whether to show the fee-check UI in the first place. */
-export function hasFeeTerms(provider: Pick<Provider, "managementFeePercent" | "lettingFeeAmount" | "lettingFeeWeeksRent" | "adminFeeAmount" | "leaseRenewalFeeAmount" | "inspectionFeeAmount" | "advertisingFeeAmount">): boolean {
+export function hasFeeTerms(agreement: AgreementFeeTerms): boolean {
   return (
-    provider.managementFeePercent !== undefined ||
-    provider.lettingFeeAmount !== undefined ||
-    provider.lettingFeeWeeksRent !== undefined ||
-    provider.adminFeeAmount !== undefined ||
-    provider.leaseRenewalFeeAmount !== undefined ||
-    provider.inspectionFeeAmount !== undefined ||
-    provider.advertisingFeeAmount !== undefined
+    agreement.managementFeePercent !== undefined ||
+    agreement.lettingFeeAmount !== undefined ||
+    agreement.lettingFeeWeeksRent !== undefined ||
+    agreement.adminFeeAmount !== undefined ||
+    agreement.leaseRenewalFeeAmount !== undefined ||
+    agreement.inspectionFeeAmount !== undefined ||
+    agreement.advertisingFeeAmount !== undefined
   );
 }

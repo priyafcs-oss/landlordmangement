@@ -49,7 +49,17 @@ import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
-import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, summarizeFeeChecksByType, categorizeAgentStatementLine, type FeeCheckResult } from "@/lib/feeVerification";
+import {
+  verifyAgentFees,
+  reconcileFlatFees,
+  hasFeeTerms,
+  collectAgentFeeLines,
+  isAgentFeeExpense,
+  summarizeFeeChecksByType,
+  categorizeAgentStatementLine,
+  type FeeCheckResult,
+  type AgreementFeeTerms,
+} from "@/lib/feeVerification";
 import type {
   Property,
   Tenant,
@@ -69,6 +79,7 @@ import type {
   LeaseHistory,
   ContactPerson,
   Provider,
+  ProviderAgreement,
   ProviderRole,
   FeeFrequency,
   DepreciationItem,
@@ -101,6 +112,7 @@ import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/fil
 import { DocumentLink } from "@/components/DocumentLink";
 import { DocumentsSection } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
+import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -729,7 +741,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const hasBalanceRollover = payload.openingBalance !== undefined || payload.closingBalance !== undefined;
   const reconciledNet = computedNet + (payload.openingBalance ?? 0) - (payload.closingBalance ?? 0);
 
-  const agent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+  const agentProviderIds = new Set(
+    state.providerProperties.filter((pp) => pp.propertyId === propertyId).map((pp) => pp.providerId),
+  );
+  const agent = state.providers.find((p) => agentProviderIds.has(p.id) && p.role === "Agent");
+  const agentAgreement = agent ? latestAgreementFor(state.providerAgreements, agent.id, propertyId) : undefined;
   const assignedIncludedTenantIds = [...new Set(txRows.filter((_, i) => included[i]).map((_, i) => txTenantIds[i]).filter(Boolean))];
   const singleAssignedTenant =
     assignedIncludedTenantIds.length === 1 ? state.tenants.find((t) => t.id === assignedIncludedTenantIds[0]) : undefined;
@@ -742,9 +758,10 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     0,
   );
   const feeChecks: FeeCheckResult[] =
-    agent && hasFeeTerms(agent)
+    agent && agentAgreement && hasFeeTerms(agentAgreement)
       ? verifyAgentFees({
-          provider: agent,
+          agentName: agent.name,
+          agreement: agentAgreement,
           rentCollected: rentOnlyIncome,
           lines: expRows.filter((_, i) => expensesIncluded[i]),
           tenantRent: singleAssignedTenant ? { amount: singleAssignedTenant.rentAmount, frequency: singleAssignedTenant.rentFrequency } : undefined,
@@ -1810,11 +1827,14 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
 }
 
 /** A signed Property Management Agreement, uploaded/emailed in rather than added via the agent
- * Provider's own "Upload & extract" — applies the same extracted fee terms onto that property's
- * Agent Provider record (updating one if it already exists, filling in blanks only, otherwise
- * creating one from the agency name) so both entry points land in the same place. */
+ * Provider's own "Upload & extract" — find-or-creates the agency's identity portfolio-wide by
+ * name (mirrors findOrCreateProvider — the same real agency should never get a second identity
+ * row just because its agreement arrived through this path instead of the Tenancy tab), then
+ * find-or-creates/updates the (provider, property) agreement (filling in blanks only when one
+ * already exists, same "fill blanks only" rule the manual extract-and-review form follows) so
+ * both entry points land in the same place. */
 function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addProvider, updateProvider, markProposalApplied } = useStore();
+  const { state, findOrCreateProvider, updateProvider, addProviderAgreement, updateProviderAgreement, markProposalApplied } = useStore();
   const payload = proposal.payload as AgencyAgreementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
@@ -1822,7 +1842,9 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
     const property = state.properties.find((p) => p.id === propertyId);
     if (!property) return toast.error("Select a property first");
 
-    const existingAgent = state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent");
+    const providerId = findOrCreateProvider(payload.agencyName || "Managing agent", propertyId);
+    updateProvider(providerId, { role: "Agent" });
+    const existingAgreement = latestAgreementFor(state.providerAgreements, providerId, propertyId);
     const fields = {
       managementFeePercent: payload.managementFeePercent,
       lettingFeeAmount: payload.lettingFeeAmount,
@@ -1838,21 +1860,21 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
       contractFileName: proposal.sourceFileName,
       contractFileData: proposal.sourceFileData,
     };
-    if (existingAgent) {
+    if (existingAgreement) {
       // Never overwrites a value already on file — same "fill blanks only" rule the manual
       // extract-and-review form follows.
-      const patch: Partial<Provider> = {};
+      const patch: Partial<ProviderAgreement> = {};
       for (const [key, value] of Object.entries(fields) as [keyof typeof fields, unknown][]) {
-        if (value !== undefined && (existingAgent as unknown as Record<string, unknown>)[key] === undefined) {
+        if (value !== undefined && (existingAgreement as unknown as Record<string, unknown>)[key] === undefined) {
           (patch as Record<string, unknown>)[key] = value;
         }
       }
-      updateProvider(existingAgent.id, patch);
+      updateProviderAgreement(existingAgreement.id, patch);
     } else {
-      addProvider({ propertyId, name: payload.agencyName || "Managing agent", role: "Agent", ...fields });
+      addProviderAgreement({ providerId, propertyId, gstApplicable: false, ...fields });
     }
     markProposalApplied(proposal.id);
-    toast.success(existingAgent ? "Management agreement applied to existing agent" : "Managing agent added");
+    toast.success(existingAgreement ? "Management agreement applied to existing agent" : "Managing agent added");
   };
 
   return (
@@ -4164,22 +4186,356 @@ interface AgencyAgreementExtractResult {
 
 const FEE_FREQUENCIES: FeeFrequency[] = ["Per Statement", "Monthly", "Quarterly", "Annually"];
 
+interface AgreementFormState {
+  contractFileName: string;
+  contractFileData: string;
+  managementFeePercent: string;
+  lettingFeeAmount: string;
+  lettingFeeWeeksRent: string;
+  adminFeeAmount: string;
+  adminFeeFrequency: string;
+  leaseRenewalFeeAmount: string;
+  inspectionFeeAmount: string;
+  advertisingFeeAmount: string;
+  noticePeriodDays: string;
+  contractStartDate: string;
+  contractReviewDate: string;
+  contractNotes: string;
+  gstApplicable: boolean;
+}
+
+function agreementFormFrom(agreement?: ProviderAgreement): AgreementFormState {
+  return {
+    contractFileName: agreement?.contractFileName ?? "",
+    contractFileData: agreement?.contractFileData ?? "",
+    managementFeePercent: agreement?.managementFeePercent !== undefined ? String(agreement.managementFeePercent) : "",
+    lettingFeeAmount: agreement?.lettingFeeAmount !== undefined ? String(agreement.lettingFeeAmount) : "",
+    lettingFeeWeeksRent: agreement?.lettingFeeWeeksRent !== undefined ? String(agreement.lettingFeeWeeksRent) : "",
+    adminFeeAmount: agreement?.adminFeeAmount !== undefined ? String(agreement.adminFeeAmount) : "",
+    adminFeeFrequency: agreement?.adminFeeFrequency ?? "",
+    leaseRenewalFeeAmount: agreement?.leaseRenewalFeeAmount !== undefined ? String(agreement.leaseRenewalFeeAmount) : "",
+    inspectionFeeAmount: agreement?.inspectionFeeAmount !== undefined ? String(agreement.inspectionFeeAmount) : "",
+    advertisingFeeAmount: agreement?.advertisingFeeAmount !== undefined ? String(agreement.advertisingFeeAmount) : "",
+    noticePeriodDays: agreement?.noticePeriodDays !== undefined ? String(agreement.noticePeriodDays) : "",
+    contractStartDate: agreement?.contractStartDate ?? "",
+    contractReviewDate: agreement?.contractReviewDate ?? "",
+    contractNotes: agreement?.contractNotes ?? "",
+    gstApplicable: agreement?.gstApplicable ?? false,
+  };
+}
+
+function agreementPayloadFrom(form: AgreementFormState) {
+  const num = (s: string) => (s.trim() ? parseFloat(s) : undefined);
+  return {
+    contractFileName: form.contractFileName || undefined,
+    contractFileData: form.contractFileData || undefined,
+    managementFeePercent: num(form.managementFeePercent),
+    lettingFeeAmount: num(form.lettingFeeAmount),
+    lettingFeeWeeksRent: num(form.lettingFeeWeeksRent),
+    adminFeeAmount: num(form.adminFeeAmount),
+    adminFeeFrequency: (form.adminFeeFrequency || undefined) as FeeFrequency | undefined,
+    leaseRenewalFeeAmount: num(form.leaseRenewalFeeAmount),
+    inspectionFeeAmount: num(form.inspectionFeeAmount),
+    advertisingFeeAmount: num(form.advertisingFeeAmount),
+    noticePeriodDays: num(form.noticePeriodDays),
+    contractStartDate: form.contractStartDate || undefined,
+    contractReviewDate: form.contractReviewDate || undefined,
+    contractNotes: form.contractNotes.trim() || undefined,
+    gstApplicable: form.gstApplicable,
+  };
+}
+
+/** Shared AI-extraction for a signed management agreement PDF — fills whichever agreement-form
+ * fields the extraction found, never overwriting a value already typed in. Used by both
+ * ProviderDialog's Agreement section and ProviderAgreementDialog (the provider profile page's
+ * add/edit-agreement flow) so both entry points behave identically. Returns the extracted agency
+ * name, if any, so a caller creating a brand-new Contact + Agreement together can offer to prefill
+ * the contact's own name field too. */
+async function extractAgreementFile(
+  file: File,
+  setForm: React.Dispatch<React.SetStateAction<AgreementFormState>>,
+  setBusy: (v: boolean) => void,
+  setExtractSummary: (v: { fields: number; confidence: number } | null) => void,
+): Promise<string | undefined> {
+  if (file.size > MAX_AI_UPLOAD_BYTES) {
+    toast.error(
+      `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+    );
+    return undefined;
+  }
+  setBusy(true);
+  setExtractSummary(null);
+  let agencyName: string | undefined;
+  try {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Couldn't read file"));
+      reader.readAsDataURL(file);
+    });
+    const base64 = dataUrl.split(",")[1] ?? "";
+    setForm((f) => ({ ...f, contractFileName: file.name, contractFileData: base64 }));
+
+    const { data, error } = await supabase.functions.invoke<AgencyAgreementExtractResult>("extract-agency-agreement", {
+      body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
+    });
+    if (error) throw error;
+    if (!data?.ok) {
+      toast.error(data?.error || "Couldn't read this document");
+      return undefined;
+    }
+
+    let fieldsFound = 0;
+    agencyName = data.agency_name ?? undefined;
+    setForm((f) => {
+      const next = { ...f };
+      if (data.management_fee_percent !== undefined && data.management_fee_percent !== null) {
+        next.managementFeePercent = String(data.management_fee_percent);
+        fieldsFound++;
+      }
+      if (data.letting_fee_amount !== undefined && data.letting_fee_amount !== null) {
+        next.lettingFeeAmount = String(data.letting_fee_amount);
+        fieldsFound++;
+      }
+      if (data.letting_fee_weeks_rent !== undefined && data.letting_fee_weeks_rent !== null) {
+        next.lettingFeeWeeksRent = String(data.letting_fee_weeks_rent);
+        fieldsFound++;
+      }
+      if (data.admin_fee_amount !== undefined && data.admin_fee_amount !== null) {
+        next.adminFeeAmount = String(data.admin_fee_amount);
+        fieldsFound++;
+      }
+      if (data.admin_fee_frequency) {
+        next.adminFeeFrequency = data.admin_fee_frequency;
+        fieldsFound++;
+      }
+      if (data.lease_renewal_fee_amount !== undefined && data.lease_renewal_fee_amount !== null) {
+        next.leaseRenewalFeeAmount = String(data.lease_renewal_fee_amount);
+        fieldsFound++;
+      }
+      if (data.inspection_fee_amount !== undefined && data.inspection_fee_amount !== null) {
+        next.inspectionFeeAmount = String(data.inspection_fee_amount);
+        fieldsFound++;
+      }
+      if (data.advertising_fee_amount !== undefined && data.advertising_fee_amount !== null) {
+        next.advertisingFeeAmount = String(data.advertising_fee_amount);
+        fieldsFound++;
+      }
+      if (data.notice_period_days !== undefined && data.notice_period_days !== null) {
+        next.noticePeriodDays = String(data.notice_period_days);
+        fieldsFound++;
+      }
+      if (data.contract_start_date) {
+        next.contractStartDate = data.contract_start_date;
+        fieldsFound++;
+      }
+      if (data.contract_review_date) {
+        next.contractReviewDate = data.contract_review_date;
+        fieldsFound++;
+      }
+      return next;
+    });
+
+    if (fieldsFound === 0) {
+      toast.warning("Couldn't find fee terms in this file — the fields below are ready for manual entry");
+    } else {
+      setExtractSummary({ fields: fieldsFound, confidence: data.confidence ?? 0 });
+      toast.success("Extracted — review the fee terms before saving");
+    }
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : "Extraction failed");
+  } finally {
+    setBusy(false);
+  }
+  return agencyName;
+}
+
+/** The fee-term fields + GST flag + contract upload, shared between ProviderDialog's Agreement
+ * section and ProviderAgreementDialog — a plain presentational block, all state owned by the
+ * caller, so both entry points render (and behave) identically. */
+function AgreementFields({
+  form,
+  setForm,
+  busy,
+  extractSummary,
+  onFileSelected,
+}: {
+  form: AgreementFormState;
+  setForm: React.Dispatch<React.SetStateAction<AgreementFormState>>;
+  busy: boolean;
+  extractSummary: { fields: number; confidence: number } | null;
+  onFileSelected: (file: File) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Input
+          type="file"
+          accept="application/pdf,image/*"
+          className="h-8 text-xs"
+          disabled={busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onFileSelected(f);
+          }}
+        />
+        {busy && <span className="text-xs text-muted-foreground">Reading…</span>}
+      </div>
+      {form.contractFileName && (
+        <div className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1 text-xs">
+          <span className="truncate">{form.contractFileName}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 shrink-0 gap-1 text-xs"
+            onClick={() => openBillDocument(form.contractFileName, form.contractFileData)}
+          >
+            <Eye className="h-3 w-3" /> View
+          </Button>
+        </div>
+      )}
+      {extractSummary && (
+        <div className="flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
+          <CheckCircle2 className="h-3 w-3 shrink-0" />
+          Found {extractSummary.fields} fee term{extractSummary.fields === 1 ? "" : "s"} — review before saving.
+          {extractSummary.confidence < 0.85 && " Low confidence — double-check every field."}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Management fee (%)">
+          <Input
+            type="number"
+            value={form.managementFeePercent}
+            onChange={(e) => setForm((f) => ({ ...f, managementFeePercent: e.target.value }))}
+            placeholder="e.g. 6.6"
+          />
+        </Field>
+        <Field label="Letting fee ($ flat)">
+          <Input
+            type="number"
+            value={form.lettingFeeAmount}
+            onChange={(e) => setForm((f) => ({ ...f, lettingFeeAmount: e.target.value }))}
+          />
+        </Field>
+        <Field label="— or letting fee (weeks' rent)">
+          <Input
+            type="number"
+            value={form.lettingFeeWeeksRent}
+            onChange={(e) => setForm((f) => ({ ...f, lettingFeeWeeksRent: e.target.value }))}
+            placeholder="e.g. 1"
+          />
+        </Field>
+        <Field label="Admin / statement fee ($)">
+          <Input
+            type="number"
+            value={form.adminFeeAmount}
+            onChange={(e) => setForm((f) => ({ ...f, adminFeeAmount: e.target.value }))}
+          />
+        </Field>
+        <Field label="Admin fee frequency">
+          <Select value={form.adminFeeFrequency} onValueChange={(v) => setForm((f) => ({ ...f, adminFeeFrequency: v }))}>
+            <SelectTrigger>
+              <SelectValue placeholder="—" />
+            </SelectTrigger>
+            <SelectContent>
+              {FEE_FREQUENCIES.map((f) => (
+                <SelectItem key={f} value={f}>
+                  {f}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Lease renewal fee ($)">
+          <Input
+            type="number"
+            value={form.leaseRenewalFeeAmount}
+            onChange={(e) => setForm((f) => ({ ...f, leaseRenewalFeeAmount: e.target.value }))}
+          />
+        </Field>
+        <Field label="Inspection fee ($)">
+          <Input
+            type="number"
+            value={form.inspectionFeeAmount}
+            onChange={(e) => setForm((f) => ({ ...f, inspectionFeeAmount: e.target.value }))}
+          />
+        </Field>
+        <Field label="Advertising / marketing fee ($)">
+          <Input
+            type="number"
+            value={form.advertisingFeeAmount}
+            onChange={(e) => setForm((f) => ({ ...f, advertisingFeeAmount: e.target.value }))}
+          />
+        </Field>
+        <Field label="Notice period (days)">
+          <Input
+            type="number"
+            value={form.noticePeriodDays}
+            onChange={(e) => setForm((f) => ({ ...f, noticePeriodDays: e.target.value }))}
+            placeholder="e.g. 30 or 60"
+          />
+        </Field>
+        <Field label="Agreement start date">
+          <Input
+            type="date"
+            value={form.contractStartDate}
+            onChange={(e) => setForm((f) => ({ ...f, contractStartDate: e.target.value }))}
+          />
+        </Field>
+        <Field label="Next review/renewal date">
+          <Input
+            type="date"
+            value={form.contractReviewDate}
+            onChange={(e) => setForm((f) => ({ ...f, contractReviewDate: e.target.value }))}
+          />
+        </Field>
+        <div className="col-span-2 flex items-center gap-2 rounded border p-2">
+          <Checkbox
+            id="agreement-gst"
+            checked={form.gstApplicable}
+            onCheckedChange={(v) => setForm((f) => ({ ...f, gstApplicable: v === true }))}
+          />
+          <Label htmlFor="agreement-gst" className="text-xs font-normal">
+            Fees are GST-registered — add 10% GST on top of every fee above when checking statement charges
+          </Label>
+        </div>
+        <div className="col-span-2">
+          <Field label="Agreement notes">
+            <Textarea
+              value={form.contractNotes}
+              onChange={(e) => setForm((f) => ({ ...f, contractNotes: e.target.value }))}
+              rows={2}
+              placeholder="Any other terms worth remembering — exclusivity period, marketing fee, etc."
+            />
+          </Field>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProviderDialog({
   propertyId,
   provider,
+  agreement,
   children,
   defaultRole,
 }: {
-  /** Unset creates/edits a portfolio-scoped provider (no single property) — the Providers
-   * directory page uses this; the per-property Providers tab always passes its own propertyId. */
+  /** Unset creates/edits a portfolio-scoped contact with no Agreement section shown — the /providers
+   * directory page uses this. The per-property Providers/Tenancy tabs always pass their own
+   * propertyId, which shows the Agreement section alongside Contact. */
   propertyId?: string;
   provider?: Provider;
+  /** The existing agreement to edit for (provider, propertyId), if any — leave unset when adding a
+   * brand-new provider/agreement. Ignored when propertyId is unset. */
+  agreement?: ProviderAgreement;
   children: React.ReactNode;
   /** Pre-selects the role on a brand-new contact (e.g. "Agent" from the Tenancy tab's "Add
    * managing agent" button) instead of always defaulting to "Other". Ignored when editing. */
   defaultRole?: ProviderRole;
 }) {
-  const { addProvider, updateProvider, state } = useStore();
+  const { addProvider, updateProvider, addProviderAgreement, updateProviderAgreement, ensureProviderProperty, state } = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
@@ -4196,124 +4552,18 @@ export function ProviderDialog({
     portalUrl: provider?.portalUrl ?? "",
     portalUsername: provider?.portalUsername ?? "",
     passwordNote: provider?.passwordNote ?? "",
-    contractFileName: provider?.contractFileName ?? "",
-    contractFileData: provider?.contractFileData ?? "",
-    managementFeePercent: provider?.managementFeePercent !== undefined ? String(provider.managementFeePercent) : "",
-    lettingFeeAmount: provider?.lettingFeeAmount !== undefined ? String(provider.lettingFeeAmount) : "",
-    lettingFeeWeeksRent: provider?.lettingFeeWeeksRent !== undefined ? String(provider.lettingFeeWeeksRent) : "",
-    adminFeeAmount: provider?.adminFeeAmount !== undefined ? String(provider.adminFeeAmount) : "",
-    adminFeeFrequency: provider?.adminFeeFrequency ?? "",
-    leaseRenewalFeeAmount: provider?.leaseRenewalFeeAmount !== undefined ? String(provider.leaseRenewalFeeAmount) : "",
-    inspectionFeeAmount: provider?.inspectionFeeAmount !== undefined ? String(provider.inspectionFeeAmount) : "",
-    advertisingFeeAmount: provider?.advertisingFeeAmount !== undefined ? String(provider.advertisingFeeAmount) : "",
-    noticePeriodDays: provider?.noticePeriodDays !== undefined ? String(provider.noticePeriodDays) : "",
-    contractStartDate: provider?.contractStartDate ?? "",
-    contractReviewDate: provider?.contractReviewDate ?? "",
-    contractNotes: provider?.contractNotes ?? "",
     defaultCategory: provider?.defaultCategory ?? "",
   });
+  const [agreementForm, setAgreementForm] = useState<AgreementFormState>(() => agreementFormFrom(agreement));
   const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
-  const extractContract = async (file: File) => {
-    if (file.size > MAX_AI_UPLOAD_BYTES) {
-      return toast.error(
-        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
-      );
-    }
-    setBusy(true);
-    setExtractSummary(null);
-    try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Couldn't read file"));
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
-      setForm((f) => ({ ...f, contractFileName: file.name, contractFileData: base64 }));
-
-      const { data, error } = await supabase.functions.invoke<AgencyAgreementExtractResult>("extract-agency-agreement", {
-        body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
-      });
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Couldn't read this document");
-        return;
-      }
-
-      let fieldsFound = 0;
-      setForm((f) => {
-        const next = { ...f };
-        if (data.agency_name && !f.name.trim()) {
-          next.name = data.agency_name;
-          fieldsFound++;
-        }
-        if (data.management_fee_percent !== undefined && data.management_fee_percent !== null) {
-          next.managementFeePercent = String(data.management_fee_percent);
-          fieldsFound++;
-        }
-        if (data.letting_fee_amount !== undefined && data.letting_fee_amount !== null) {
-          next.lettingFeeAmount = String(data.letting_fee_amount);
-          fieldsFound++;
-        }
-        if (data.letting_fee_weeks_rent !== undefined && data.letting_fee_weeks_rent !== null) {
-          next.lettingFeeWeeksRent = String(data.letting_fee_weeks_rent);
-          fieldsFound++;
-        }
-        if (data.admin_fee_amount !== undefined && data.admin_fee_amount !== null) {
-          next.adminFeeAmount = String(data.admin_fee_amount);
-          fieldsFound++;
-        }
-        if (data.admin_fee_frequency) {
-          next.adminFeeFrequency = data.admin_fee_frequency;
-          fieldsFound++;
-        }
-        if (data.lease_renewal_fee_amount !== undefined && data.lease_renewal_fee_amount !== null) {
-          next.leaseRenewalFeeAmount = String(data.lease_renewal_fee_amount);
-          fieldsFound++;
-        }
-        if (data.inspection_fee_amount !== undefined && data.inspection_fee_amount !== null) {
-          next.inspectionFeeAmount = String(data.inspection_fee_amount);
-          fieldsFound++;
-        }
-        if (data.advertising_fee_amount !== undefined && data.advertising_fee_amount !== null) {
-          next.advertisingFeeAmount = String(data.advertising_fee_amount);
-          fieldsFound++;
-        }
-        if (data.notice_period_days !== undefined && data.notice_period_days !== null) {
-          next.noticePeriodDays = String(data.notice_period_days);
-          fieldsFound++;
-        }
-        if (data.contract_start_date) {
-          next.contractStartDate = data.contract_start_date;
-          fieldsFound++;
-        }
-        if (data.contract_review_date) {
-          next.contractReviewDate = data.contract_review_date;
-          fieldsFound++;
-        }
-        return next;
-      });
-
-      if (fieldsFound === 0) {
-        toast.warning("Couldn't find fee terms in this file — the fields below are ready for manual entry");
-      } else {
-        setExtractSummary({ fields: fieldsFound, confidence: data.confidence ?? 0 });
-        toast.success("Extracted — review the fee terms before saving");
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Extraction failed");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const showAgreement = !!propertyId;
 
   const save = () => {
     if (!form.name.trim()) {
       toast.error("Name is required");
       return;
     }
-    const num = (s: string) => (s.trim() ? parseFloat(s) : undefined);
     const payload = {
       name: form.name.trim(),
       role: form.role,
@@ -4327,29 +4577,38 @@ export function ProviderDialog({
       portalUrl: form.portalUrl.trim() || undefined,
       portalUsername: form.portalUsername.trim() || undefined,
       passwordNote: form.passwordNote.trim() || undefined,
-      contractFileName: form.contractFileName || undefined,
-      contractFileData: form.contractFileData || undefined,
-      managementFeePercent: num(form.managementFeePercent),
-      lettingFeeAmount: num(form.lettingFeeAmount),
-      lettingFeeWeeksRent: num(form.lettingFeeWeeksRent),
-      adminFeeAmount: num(form.adminFeeAmount),
-      adminFeeFrequency: (form.adminFeeFrequency || undefined) as FeeFrequency | undefined,
-      leaseRenewalFeeAmount: num(form.leaseRenewalFeeAmount),
-      inspectionFeeAmount: num(form.inspectionFeeAmount),
-      advertisingFeeAmount: num(form.advertisingFeeAmount),
-      noticePeriodDays: num(form.noticePeriodDays),
-      contractStartDate: form.contractStartDate || undefined,
-      contractReviewDate: form.contractReviewDate || undefined,
-      contractNotes: form.contractNotes.trim() || undefined,
       defaultCategory: (form.defaultCategory || undefined) as ExpenseCategory | undefined,
     };
+    // Creating a brand-new contact still dedups portfolio-wide by exact name (+ ABN, when both
+    // sides have one) before creating a fresh identity row — the same real-world business added
+    // from two different properties' Providers tabs should land on one Provider, not two. A found
+    // match's existing identity fields are left untouched (only editing via the `provider` prop
+    // updates them) — this is a reuse, not a merge.
+    const existingByIdentity = !provider
+      ? state.providers.find((p) => {
+          if (p.name.trim().toLowerCase() !== form.name.trim().toLowerCase()) return false;
+          const formAbn = form.abn.trim();
+          if (formAbn && p.abn && p.abn.trim() !== formAbn) return false;
+          return true;
+        })
+      : undefined;
+    const providerId = provider ? provider.id : (existingByIdentity?.id ?? addProvider(payload));
     if (provider) {
       updateProvider(provider.id, payload);
-      toast.success("Contact updated");
-    } else {
-      addProvider({ propertyId, ...payload });
-      toast.success("Contact added");
     }
+
+    if (showAgreement && propertyId) {
+      const hasAnyAgreementField = Object.values(agreementPayloadFrom(agreementForm)).some((v) => v !== undefined && v !== false);
+      if (agreement) {
+        updateProviderAgreement(agreement.id, agreementPayloadFrom(agreementForm));
+      } else if (hasAnyAgreementField) {
+        addProviderAgreement({ providerId, propertyId, ...agreementPayloadFrom(agreementForm) });
+      } else {
+        ensureProviderProperty(providerId, propertyId);
+      }
+    }
+
+    toast.success(provider ? "Contact updated" : "Contact added");
     setOpen(false);
   };
 
@@ -4448,145 +4707,20 @@ export function ProviderDialog({
           </div>
         </div>
 
-        {form.role === "Agent" && (
+        {showAgreement && form.role === "Agent" && (
           <div className="col-span-2 space-y-3 rounded-md border p-3">
-            <div className="text-xs font-medium">Management agreement</div>
-            <div className="flex items-center gap-2">
-              <Input
-                type="file"
-                accept="application/pdf,image/*"
-                className="h-8 text-xs"
-                disabled={busy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void extractContract(f);
-                }}
-              />
-              {busy && <span className="text-xs text-muted-foreground">Reading…</span>}
-            </div>
-            {form.contractFileName && (
-              <div className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1 text-xs">
-                <span className="truncate">{form.contractFileName}</span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 shrink-0 gap-1 text-xs"
-                  onClick={() => openBillDocument(form.contractFileName, form.contractFileData)}
-                >
-                  <Eye className="h-3 w-3" /> View
-                </Button>
-              </div>
-            )}
-            {extractSummary && (
-              <div className="flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
-                <CheckCircle2 className="h-3 w-3 shrink-0" />
-                Found {extractSummary.fields} fee term{extractSummary.fields === 1 ? "" : "s"} — review before saving.
-                {extractSummary.confidence < 0.85 && " Low confidence — double-check every field."}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Management fee (%)">
-                <Input
-                  type="number"
-                  value={form.managementFeePercent}
-                  onChange={(e) => setForm((f) => ({ ...f, managementFeePercent: e.target.value }))}
-                  placeholder="e.g. 6.6"
-                />
-              </Field>
-              <Field label="Letting fee ($ flat)">
-                <Input
-                  type="number"
-                  value={form.lettingFeeAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, lettingFeeAmount: e.target.value }))}
-                />
-              </Field>
-              <Field label="— or letting fee (weeks' rent)">
-                <Input
-                  type="number"
-                  value={form.lettingFeeWeeksRent}
-                  onChange={(e) => setForm((f) => ({ ...f, lettingFeeWeeksRent: e.target.value }))}
-                  placeholder="e.g. 1"
-                />
-              </Field>
-              <Field label="Admin / statement fee ($)">
-                <Input
-                  type="number"
-                  value={form.adminFeeAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, adminFeeAmount: e.target.value }))}
-                />
-              </Field>
-              <Field label="Admin fee frequency">
-                <Select
-                  value={form.adminFeeFrequency}
-                  onValueChange={(v) => setForm((f) => ({ ...f, adminFeeFrequency: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="—" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FEE_FREQUENCIES.map((f) => (
-                      <SelectItem key={f} value={f}>
-                        {f}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Lease renewal fee ($)">
-                <Input
-                  type="number"
-                  value={form.leaseRenewalFeeAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, leaseRenewalFeeAmount: e.target.value }))}
-                />
-              </Field>
-              <Field label="Inspection fee ($)">
-                <Input
-                  type="number"
-                  value={form.inspectionFeeAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, inspectionFeeAmount: e.target.value }))}
-                />
-              </Field>
-              <Field label="Advertising / marketing fee ($)">
-                <Input
-                  type="number"
-                  value={form.advertisingFeeAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, advertisingFeeAmount: e.target.value }))}
-                />
-              </Field>
-              <Field label="Notice period (days)">
-                <Input
-                  type="number"
-                  value={form.noticePeriodDays}
-                  onChange={(e) => setForm((f) => ({ ...f, noticePeriodDays: e.target.value }))}
-                  placeholder="e.g. 30 or 60"
-                />
-              </Field>
-              <Field label="Agreement start date">
-                <Input
-                  type="date"
-                  value={form.contractStartDate}
-                  onChange={(e) => setForm((f) => ({ ...f, contractStartDate: e.target.value }))}
-                />
-              </Field>
-              <Field label="Next review/renewal date">
-                <Input
-                  type="date"
-                  value={form.contractReviewDate}
-                  onChange={(e) => setForm((f) => ({ ...f, contractReviewDate: e.target.value }))}
-                />
-              </Field>
-              <div className="col-span-2">
-                <Field label="Agreement notes">
-                  <Textarea
-                    value={form.contractNotes}
-                    onChange={(e) => setForm((f) => ({ ...f, contractNotes: e.target.value }))}
-                    rows={2}
-                    placeholder="Any other terms worth remembering — exclusivity period, marketing fee, etc."
-                  />
-                </Field>
-              </div>
-            </div>
+            <div className="text-xs font-medium">Management agreement — this property</div>
+            <AgreementFields
+              form={agreementForm}
+              setForm={setAgreementForm}
+              busy={busy}
+              extractSummary={extractSummary}
+              onFileSelected={(file) =>
+                void extractAgreementFile(file, setAgreementForm, setBusy, setExtractSummary).then((agencyName) => {
+                  if (agencyName && !form.name.trim()) setForm((f) => ({ ...f, name: agencyName }));
+                })
+              }
+            />
           </div>
         )}
 
@@ -4598,7 +4732,97 @@ export function ProviderDialog({
   );
 }
 
-export function ProviderRow({ provider }: { provider: Provider }) {
+/** Adds or edits a single ProviderAgreement for an existing provider — used from the provider
+ * profile page's "Agreements" section (Issue 1), where the contact identity already exists and
+ * only the per-property agreement terms need a picker + the shared fee-term fields. Editing an
+ * existing agreement fixes the property (an agreement can't be moved to a different property —
+ * add a new one there instead). */
+export function ProviderAgreementDialog({
+  providerId,
+  agreement,
+  children,
+}: {
+  providerId: string;
+  agreement?: ProviderAgreement;
+  children: React.ReactNode;
+}) {
+  const { state, addProviderAgreement, updateProviderAgreement } = useStore();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [propertyId, setPropertyId] = useState(agreement?.propertyId ?? "");
+  const [form, setForm] = useState<AgreementFormState>(() => agreementFormFrom(agreement));
+  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
+
+  const save = () => {
+    if (!propertyId) return toast.error("Select a property first");
+    if (agreement) {
+      updateProviderAgreement(agreement.id, agreementPayloadFrom(form));
+      toast.success("Agreement updated");
+    } else {
+      addProviderAgreement({ providerId, propertyId, ...agreementPayloadFrom(form) });
+      toast.success("Agreement added");
+    }
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{agreement ? "Edit agreement" : "Add agreement"}</DialogTitle>
+        </DialogHeader>
+        <Field label="Property">
+          {agreement ? (
+            <div className="text-sm">
+              {(() => {
+                const p = state.properties.find((x) => x.id === agreement.propertyId);
+                return p?.alias || p?.address || "Unknown property";
+              })()}
+            </div>
+          ) : (
+            <Select value={propertyId} onValueChange={setPropertyId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a property…" />
+              </SelectTrigger>
+              <SelectContent>
+                {state.properties.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.alias || p.address}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+        <AgreementFields
+          form={form}
+          setForm={setForm}
+          busy={busy}
+          extractSummary={extractSummary}
+          onFileSelected={(file) => void extractAgreementFile(file, setForm, setBusy, setExtractSummary)}
+        />
+        <DialogFooter>
+          <Button onClick={save}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function ProviderRow({
+  provider,
+  propertyId,
+  agreement,
+}: {
+  provider: Provider;
+  /** The property context this row is being shown in, if any — passed through to ProviderDialog
+   * so editing shows the right Agreement section. Unset on the portfolio-wide /providers page. */
+  propertyId?: string;
+  /** This provider's resolved agreement for `propertyId`, if any — fee terms/contract file render
+   * from here instead of directly off the provider (identity no longer carries agreement fields). */
+  agreement?: ProviderAgreement;
+}) {
   const { deleteProvider } = useStore();
   const details = [provider.email, provider.phone, provider.website].filter(Boolean).join(" · ");
   return (
@@ -4624,18 +4848,19 @@ export function ProviderRow({ provider }: { provider: Provider }) {
             {provider.passwordNote && <> • Note: <span className="font-mono">{provider.passwordNote}</span></>}
           </div>
         )}
-        {provider.role === "Agent" && hasFeeTerms(provider) && (
+        {provider.role === "Agent" && agreement && hasFeeTerms(agreement) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
-            {provider.managementFeePercent !== undefined && <span>Mgmt fee {provider.managementFeePercent}%</span>}
-            {provider.lettingFeeAmount !== undefined && <span>Letting {fmtCurrency(provider.lettingFeeAmount)}</span>}
-            {provider.lettingFeeWeeksRent !== undefined && <span>Letting {provider.lettingFeeWeeksRent} wk rent</span>}
-            {provider.adminFeeAmount !== undefined && <span>Admin {fmtCurrency(provider.adminFeeAmount)}</span>}
-            {provider.advertisingFeeAmount !== undefined && <span>Advertising {fmtCurrency(provider.advertisingFeeAmount)}</span>}
-            {provider.noticePeriodDays !== undefined && <span>Notice {provider.noticePeriodDays} days</span>}
-            {provider.contractFileData && (
+            {agreement.managementFeePercent !== undefined && <span>Mgmt fee {agreement.managementFeePercent}%</span>}
+            {agreement.lettingFeeAmount !== undefined && <span>Letting {fmtCurrency(agreement.lettingFeeAmount)}</span>}
+            {agreement.lettingFeeWeeksRent !== undefined && <span>Letting {agreement.lettingFeeWeeksRent} wk rent</span>}
+            {agreement.adminFeeAmount !== undefined && <span>Admin {fmtCurrency(agreement.adminFeeAmount)}</span>}
+            {agreement.advertisingFeeAmount !== undefined && <span>Advertising {fmtCurrency(agreement.advertisingFeeAmount)}</span>}
+            {agreement.noticePeriodDays !== undefined && <span>Notice {agreement.noticePeriodDays} days</span>}
+            {agreement.gstApplicable && <span>+GST</span>}
+            {agreement.contractFileData && (
               <button
                 type="button"
-                onClick={() => openBillDocument(provider.contractFileName, provider.contractFileData)}
+                onClick={() => openBillDocument(agreement.contractFileName, agreement.contractFileData)}
                 className="inline-flex items-center gap-1 text-primary underline"
               >
                 <FileText className="h-3 w-3" /> Agreement
@@ -4646,7 +4871,7 @@ export function ProviderRow({ provider }: { provider: Provider }) {
         {provider.notes && <div className="mt-1 whitespace-pre-wrap">{provider.notes}</div>}
       </div>
       <div className="flex shrink-0 gap-1">
-        <ProviderDialog propertyId={provider.propertyId} provider={provider}>
+        <ProviderDialog propertyId={propertyId} provider={provider} agreement={agreement}>
           <Button size="icon" variant="ghost" className="h-6 w-6">
             <Pencil className="h-3 w-3" />
           </Button>
@@ -4656,7 +4881,7 @@ export function ProviderRow({ provider }: { provider: Provider }) {
           variant="ghost"
           className="h-6 w-6"
           onClick={() => {
-            if (confirm(`Delete contact "${provider.name}"?`)) {
+            if (confirm(`Delete contact "${provider.name}"? This also removes every agreement and document on file for them.`)) {
               deleteProvider(provider.id);
               toast.success("Contact deleted");
             }
@@ -4678,11 +4903,21 @@ export function ProviderRow({ provider }: { provider: Provider }) {
  */
 export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
-  const agents = [...state.providers.filter((p) => p.propertyId === propertyId && p.role === "Agent")].sort((a, b) =>
-    (b.contractStartDate ?? b.created_at ?? "").localeCompare(a.contractStartDate ?? a.created_at ?? ""),
+  // A property's "agents" are Agent-role providers tagged to it via provider_properties — not
+  // every one of those necessarily has an agreement on file yet (see the "no fee terms" message
+  // below), so this deliberately isn't filtered down to providers with a provider_agreements row.
+  const agentProviderIds = new Set(
+    state.providerProperties.filter((pp) => pp.propertyId === propertyId).map((pp) => pp.providerId),
   );
+  const agreementFor = (providerId: string) => latestAgreementFor(state.providerAgreements, providerId, propertyId);
+  const agents = [...state.providers.filter((p) => agentProviderIds.has(p.id) && p.role === "Agent")].sort((a, b) => {
+    const aStart = agreementFor(a.id)?.contractStartDate ?? a.created_at ?? "";
+    const bStart = agreementFor(b.id)?.contractStartDate ?? b.created_at ?? "";
+    return bStart.localeCompare(aStart);
+  });
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? agents[0];
+  const selectedAgreement = selectedAgent ? agreementFor(selectedAgent.id) : undefined;
   const [reviewProposalId, setReviewProposalId] = useState<string | null>(null);
 
   const statements = state.aiProposals.filter((p) => p.propertyId === propertyId && p.kind === "rent_ledger");
@@ -4718,7 +4953,7 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
         ) : (
           <div className="space-y-2">
             {agents.map((a) => (
-              <ProviderRow key={a.id} provider={a} />
+              <ProviderRow key={a.id} provider={a} propertyId={propertyId} agreement={agreementFor(a.id)} />
             ))}
           </div>
         )}
@@ -4737,14 +4972,16 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
                   {agents.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
                       {a.name}
-                      {a.contractStartDate ? ` (from ${a.contractStartDate})` : ""}
+                      {agreementFor(a.id)?.contractStartDate ? ` (from ${agreementFor(a.id)?.contractStartDate})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             )}
           </div>
-          {selectedAgent && <PropertyFeeVerificationTab propertyId={propertyId} agent={selectedAgent} />}
+          {selectedAgent && (
+            <PropertyFeeVerificationTab propertyId={propertyId} provider={selectedAgent} agreement={selectedAgreement} />
+          )}
         </div>
       )}
 
@@ -4912,12 +5149,26 @@ function feeVerificationMonthLabel(key: string): string {
  * On-demand fee-verification report for one property — a month-by-month breakdown of rent
  * collected against every posted expense paid to this agent (see isAgentFeeExpense — category
  * "Property Agent Fees"/"Letting Fees", or simply payee = the agent's name) within a chosen
- * financial year (or all time), each month checked against the given Provider's
- * management-agreement terms, summed to an FY total at the bottom. Same comparison engine
- * (verifyAgentFees) as the inline per-statement check in RentLedgerProposalCard, just run once per month instead of once per
- * statement still in review.
+ * financial year (or all time), each month checked against the given provider's management-
+ * agreement terms.
+ *
+ * Management Fee and Letting Fee are genuinely per-period/per-transaction charges, so they're
+ * computed once per month (verifyAgentFees, restricted to just those two types) and summed —
+ * mathematically identical to computing them once for the whole span. Admin Fee, Lease Renewal Fee
+ * and Inspection Fee are flat contracted amounts, not a per-period charge — comparing the same raw
+ * contracted amount against every month it happens to recur in would re-add it as "expected" each
+ * time and overstate the true annual figure, so those three are reconciled once for the whole
+ * selected span instead (reconcileFlatFees), not accumulated per month.
  */
-export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: string; agent: Provider }) {
+export function PropertyFeeVerificationTab({
+  propertyId,
+  provider,
+  agreement,
+}: {
+  propertyId: string;
+  provider: Provider;
+  agreement?: ProviderAgreement;
+}) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const [fy, setFy] = useState(currentFY);
@@ -4930,14 +5181,15 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
     return years;
   })();
 
-  if (!hasFeeTerms(agent)) {
+  if (!agreement || !hasFeeTerms(agreement)) {
     return (
       <div className="text-sm text-muted-foreground">
-        {agent.name} has no management-agreement fee terms on file yet — upload the signed agreement above (or enter
-        the fees manually) to enable verification.
+        {provider.name} has no management-agreement fee terms on file yet — upload the signed agreement above (or
+        enter the fees manually) to enable verification.
       </div>
     );
   }
+  const agreementTerms: AgreementFeeTerms = agreement;
 
   const { start, end } = fy === "all" ? { start: "0000-01-01", end: "9999-12-31" } : fyRange(fy);
   const tenantIds = state.tenants.filter((t) => t.propertyId === propertyId).map((t) => t.id);
@@ -4945,15 +5197,28 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
     (e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end,
   );
   const expensesInRange = state.expenses.filter(
-    (e) => e.propertyId === propertyId && e.date >= start && e.date <= end && isAgentFeeExpense(e, agent.name),
+    (e) => e.propertyId === propertyId && e.date >= start && e.date <= end && isAgentFeeExpense(e, provider.name),
   );
+  // "Per Statement" admin-fee annualization needs how many rent statements actually came in over
+  // the span — every real statement gets uploaded/emailed in as a rent_ledger proposal.
+  const statementCount = state.aiProposals.filter((p) => {
+    if (p.propertyId !== propertyId || p.kind !== "rent_ledger" || p.status === "dismissed") return false;
+    const date = (p.payload as RentLedgerProposalPayload).periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
+    return date >= start && date <= end;
+  }).length;
 
   const monthKeys = [...new Set([...rentInRange.map((e) => e.date.slice(0, 7)), ...expensesInRange.map((e) => e.date.slice(0, 7))])].sort();
 
   const monthRows = monthKeys.map((key) => {
     const rentCollected = rentInRange.filter((e) => e.date.slice(0, 7) === key).reduce((s, e) => s + e.credit, 0);
     const lines = collectAgentFeeLines(expensesInRange.filter((e) => e.date.slice(0, 7) === key));
-    const results = verifyAgentFees({ provider: agent, rentCollected, lines });
+    const results = verifyAgentFees({
+      agentName: provider.name,
+      agreement: agreementTerms,
+      rentCollected,
+      lines,
+      feeTypes: ["Management Fee", "Letting Fee"],
+    });
     return {
       key,
       rentCollected,
@@ -4962,17 +5227,35 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
       totalExpected: results.reduce((s, r) => s + (r.expected ?? 0), 0),
     };
   });
+  // Admin/Lease Renewal/Inspection Fee — flat contracted amounts reconciled once for the whole
+  // selected span (see the function doc comment above), not accumulated per month.
+  const flatFeeResults = reconcileFlatFees({
+    agentName: provider.name,
+    agreement: agreementTerms,
+    lines: collectAgentFeeLines(expensesInRange),
+    statementCount,
+  });
 
   const totalRent = monthRows.reduce((s, m) => s + m.rentCollected, 0);
-  const totalActual = monthRows.reduce((s, m) => s + m.totalActual, 0);
-  const totalExpected = monthRows.reduce((s, m) => s + m.totalExpected, 0);
+  // Headline tiles are scoped to Management Fee alone — the per-type breakdown below already
+  // covers letting/admin/renewal/inspection, and mixing every fee type into one "agent fees"
+  // number made it read as the management fee being wildly over/under-charged when it was really
+  // a one-off letting or admin fee skewing the total.
+  const mgmtRowsOnly = monthRows.map((m) => m.results.filter((r) => r.type === "Management Fee"));
+  const totalActual = mgmtRowsOnly.reduce((s, rs) => s + rs.reduce((s2, r) => s2 + r.actual, 0), 0);
+  const totalExpected = mgmtRowsOnly.reduce((s, rs) => s + rs.reduce((s2, r) => s2 + (r.expected ?? 0), 0), 0);
+  // Combined Management + Letting Fee total across every period — the monthly table's own column
+  // totals, distinct from the Management-Fee-only headline tiles above.
+  const monthlyTotalActual = monthRows.reduce((s, m) => s + m.totalActual, 0);
+  const monthlyTotalExpected = monthRows.reduce((s, m) => s + m.totalExpected, 0);
   const flaggedMonths = monthRows.filter((m) =>
     m.results.some((r) => r.status === "overcharge" || r.status === "not_charged" || r.status === "unspecified"),
   );
-  // Same per-type comparison used for each month, rolled up to one flag per fee category for the
-  // whole selected span — answers "was the admin fee / inspection fee / etc. right this year"
-  // without having to expand every month and add it up by hand.
-  const categoryTotals = summarizeFeeChecksByType(monthRows.map((m) => m.results));
+  // Management/Letting Fee rolled up from the per-month rows (mathematically identical to
+  // computing them once for the span), plus the once-per-span flat-fee results — one flag per fee
+  // category for the whole selected span, answers "was the admin fee / inspection fee / etc. right
+  // this year" without having to expand every month and add it up by hand.
+  const categoryTotals = [...summarizeFeeChecksByType(monthRows.map((m) => m.results)), ...flatFeeResults];
 
   const toggleMonth = (key: string) =>
     setExpandedMonths((prev) => {
@@ -4986,7 +5269,7 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
     <div className="space-y-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground">
-          Checks rent collected and every posted agent-fee expense, period by period, against {agent.name}'s
+          Checks rent collected and every posted agent-fee expense, period by period, against {provider.name}'s
           management agreement.
         </div>
         <Select value={fy} onValueChange={setFy}>
@@ -5010,11 +5293,11 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
           <div className="text-lg font-semibold">{fmtCurrency(totalRent)}</div>
         </div>
         <div className="rounded border p-3">
-          <div className="text-xs text-muted-foreground">Agent fees charged</div>
+          <div className="text-xs text-muted-foreground">Management fees charged</div>
           <div className="text-lg font-semibold">{fmtCurrency(totalActual)}</div>
         </div>
         <div className="rounded border p-3">
-          <div className="text-xs text-muted-foreground">Agreed (expected)</div>
+          <div className="text-xs text-muted-foreground">Management fees agreed</div>
           <div className="text-lg font-semibold">{fmtCurrency(totalExpected)}</div>
         </div>
       </div>
@@ -5022,7 +5305,7 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
       {categoryTotals.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-xs font-medium">
-            By fee category — {fy === "all" ? "all time" : `FY ${fy}`} total vs. {agent.name}'s agreement
+            By fee category — {fy === "all" ? "all time" : `FY ${fy}`} total vs. {provider.name}'s agreement
           </div>
           <div className="space-y-1">
             {categoryTotals.map((r) => (
@@ -5085,8 +5368,8 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
               <tr className="border-t bg-muted/30 font-medium">
                 <td className="px-2 py-1.5">{fy === "all" ? "All time" : `FY ${fy}`} total</td>
                 <td className="px-2 py-1.5 text-right">{fmtCurrency(totalRent)}</td>
-                <td className="px-2 py-1.5 text-right">{fmtCurrency(totalActual)}</td>
-                <td className="px-2 py-1.5 text-right text-muted-foreground">{fmtCurrency(totalExpected)}</td>
+                <td className="px-2 py-1.5 text-right">{fmtCurrency(monthlyTotalActual)}</td>
+                <td className="px-2 py-1.5 text-right text-muted-foreground">{fmtCurrency(monthlyTotalExpected)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -5106,7 +5389,10 @@ export function PropertyFeeVerificationTab({ propertyId, agent }: { propertyId: 
 
 export function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
-  const providers = state.providers.filter((p) => p.propertyId === propertyId);
+  const taggedProviderIds = new Set(
+    state.providerProperties.filter((pp) => pp.propertyId === propertyId).map((pp) => pp.providerId),
+  );
+  const providers = state.providers.filter((p) => taggedProviderIds.has(p.id));
   return (
     <div className="space-y-2 text-sm">
       <div className="flex items-center justify-between">
@@ -5123,7 +5409,12 @@ export function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
       {providers.length === 0 && <div className="text-xs text-muted-foreground">No contacts yet.</div>}
       <div className="space-y-2">
         {providers.map((p) => (
-          <ProviderRow key={p.id} provider={p} />
+          <ProviderRow
+            key={p.id}
+            provider={p}
+            propertyId={propertyId}
+            agreement={latestAgreementFor(state.providerAgreements, p.id, propertyId)}
+          />
         ))}
       </div>
     </div>
@@ -5214,7 +5505,7 @@ export function DeletePropertyDialog({ property, trigger, onDeleted }: { propert
   const billCount = state.bills.filter((b) => b.propertyId === property.id).length;
   const expenseCount = state.expenses.filter((e) => e.propertyId === property.id).length;
   const loanCount = state.loans.filter((l) => l.propertyId === property.id).length;
-  const providerCount = state.providers.filter((p) => p.propertyId === property.id).length;
+  const providerCount = state.providerProperties.filter((pp) => pp.propertyId === property.id).length;
   const inspectionCount = state.inspections.filter((i) => i.propertyId === property.id).length;
   const maintenanceCount = state.maintenanceRequests.filter((m) => m.propertyId === property.id).length;
 

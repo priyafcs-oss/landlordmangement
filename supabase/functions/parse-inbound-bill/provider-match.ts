@@ -19,6 +19,19 @@ function normalizeAbn(abn: string): string {
   return abn.replace(/[^0-9]/g, "");
 }
 
+/** Common legal-suffix/filler tokens that carry no identifying weight on their own — dropped
+ * (along with anything ≤2 chars) before the Tier 3 word-boundary comparison, same reasoning as
+ * property-match.ts stripping "unit"/"lot"/etc. */
+const STOPWORD_TOKENS = new Set(["and", "the", "pty", "ltd"]);
+
+/** Lowercases, strips punctuation and splits on whitespace into significant tokens (drops ≤2-char
+ * and stopword tokens) — used by Tier 3's word-boundary match below. */
+function significantTokens(s: string): string[] {
+  return normalize(s)
+    .split(" ")
+    .filter((t) => t.length > 2 && !STOPWORD_TOKENS.has(t));
+}
+
 /**
  * Matches a bill/transaction vendor to an existing Provider directory record. Tiers, in order of
  * confidence (mirrors property-match.ts's tiered, hand-rolled style — no fuzzy-matching library
@@ -28,9 +41,13 @@ function normalizeAbn(abn: string): string {
  * 2. Case-insensitive EXACT name match (no wildcards) — "Origin Energy" must equal "origin energy"
  *    exactly, not merely contain it, to avoid false positives between unrelated similarly-named
  *    vendors.
- * 3. Normalized-token substring match — punctuation/whitespace stripped from both sides, then one
- *    contains the other (handles a legal-suffix difference like "Jones Plumbing" vs. "Jones
- *    Plumbing Pty Ltd").
+ * 3. Word-boundary token match — punctuation/whitespace stripped from both sides and tokenized,
+ *    short/generic tokens dropped, then every significant token of the SHORTER name's token set
+ *    must appear as a WHOLE token in the longer name's token set (handles a legal-suffix
+ *    difference like "Jones Plumbing" vs. "Jones Plumbing Pty Ltd") — not a raw substring test,
+ *    which previously let a short existing provider name (e.g. something containing "aircon")
+ *    falsely match an unrelated new vendor like "BGS Airconditioning and Electricals" merely
+ *    because one string appeared inside the other.
  */
 export async function matchProvider(
   supabase: SupabaseClient,
@@ -66,11 +83,15 @@ export function matchProviderInRows(
   const byExactName = rows.find((p) => p.name.trim().toLowerCase() === lowerName);
   if (byExactName) return byExactName.id;
 
-  const normalizedName = normalize(name);
-  if (!normalizedName) return undefined;
-  const byNormalized = rows.find((p) => {
-    const n = normalize(p.name);
-    return n.length > 0 && (n.includes(normalizedName) || normalizedName.includes(n));
+  const candidateTokens = significantTokens(name);
+  if (candidateTokens.length === 0) return undefined;
+  const byWordBoundary = rows.find((p) => {
+    const existingTokens = significantTokens(p.name);
+    if (existingTokens.length === 0) return false;
+    const [shorter, longer] =
+      existingTokens.length <= candidateTokens.length ? [existingTokens, candidateTokens] : [candidateTokens, existingTokens];
+    const longerSet = new Set(longer);
+    return shorter.every((t) => longerSet.has(t));
   });
-  return byNormalized?.id;
+  return byWordBoundary?.id;
 }

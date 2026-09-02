@@ -496,10 +496,17 @@ export type ProviderRole = "Council" | "Agent" | "Insurer" | "Trade" | "Other";
 
 export type FeeFrequency = "Per Statement" | "Monthly" | "Quarterly" | "Annually";
 
-/** A vendor/contact linked to a property — council, managing agent, insurer, tradesperson, etc. */
+/** A vendor/contact — council, managing agent, insurer, tradesperson, etc. Portfolio-wide identity
+ * only (name, contact details, ABN); per-property management-agreement fee terms live on
+ * `ProviderAgreement` instead (see that type) so the same real-world agency can hold different
+ * terms at different properties without duplicating its identity row. `propertyId` is kept only
+ * because the underlying DB column still exists for legacy rows written before that split — new
+ * code must not read or write it; use `ProviderProperty`/`ProviderAgreement` instead. */
 export interface Provider {
   id: string;
   created_at?: string;
+  /** @deprecated Legacy single-property scoping, predating the provider/agreement split — left on
+   * old rows for reference only. New code links a provider to a property via `ProviderProperty`. */
   propertyId?: string;
   /** Which PropertyUnit (dwelling) this contact belongs to — lets one dwelling on a multi-unit
    * property have its own managing agent distinct from the whole property's. Unset means it
@@ -516,10 +523,39 @@ export interface Provider {
   portalUrl?: string;
   portalUsername?: string;
   passwordNote?: string;
-  /** The signed Property Management Agreement — only meaningful when role === "Agent". Kept
-   * alongside the fee terms read off it so a rent statement's agent deductions can be checked
-   * against what was actually agreed, the same pairing pattern as every other extracted document
-   * in this app (source file + the fields read off it). */
+  /** The ATO category most often confirmed on bills/expenses from this provider — suggested (not
+   * forced) on future bills that resolve to this provider via provider-match.ts, the same way a
+   * council's bills are always "Council Rates". */
+  defaultCategory?: ExpenseCategory;
+}
+
+/** A property a provider is associated with — a lightweight tag, separate from any formal
+ * agreement, so a contact that doesn't have (or doesn't need) fee terms on file — a plumber, an
+ * insurer, a council — still shows up on that property's Providers tab. Auto-created whenever a
+ * `ProviderAgreement` is added for the same (providerId, propertyId) pair, or when the landlord
+ * explicitly adds an existing portfolio provider to a property. */
+export interface ProviderProperty {
+  id: string;
+  created_at?: string;
+  providerId: string;
+  propertyId: string;
+}
+
+/** One property's signed Property Management Agreement with one provider — the fee terms and
+ * contract file that used to live directly on `Provider`, now scoped per (providerId, propertyId)
+ * so the same agency can hold different terms at different properties. Multiple rows can exist for
+ * the same pair over time (a renewed agreement); callers pick the most recent by
+ * `contractStartDate` when they need "the current one". Only meaningful when the provider's
+ * `role === "Agent"`. */
+export interface ProviderAgreement {
+  id: string;
+  created_at?: string;
+  providerId: string;
+  propertyId: string;
+  /** The signed Property Management Agreement file itself, kept alongside the fee terms read off
+   * it so a rent statement's agent deductions can be checked against what was actually agreed —
+   * the same pairing pattern as every other extracted document in this app (source file + the
+   * fields read off it). */
   contractFileName?: string;
   contractFileData?: string;
   /** Ongoing management fee, as a % of rent collected each period. */
@@ -544,10 +580,11 @@ export interface Provider {
   /** When the agreement is next up for renewal/review, if stated. */
   contractReviewDate?: string;
   contractNotes?: string;
-  /** The ATO category most often confirmed on bills/expenses from this provider — suggested (not
-   * forced) on future bills that resolve to this provider via provider-match.ts, the same way a
-   * council's bills are always "Council Rates". */
-  defaultCategory?: ExpenseCategory;
+  /** Whether GST is added on top of every fee above — a GST-registered agency charges GST on all
+   * its fees, not selectively, so this is one flag for the whole agreement rather than a separate
+   * GST amount per fee field. feeVerification.ts multiplies any computed "expected" amount by 1.1
+   * when this is true, before comparing to the actual (GST-inclusive) charge. */
+  gstApplicable: boolean;
 }
 
 /** A document held against a Provider directory record rather than a specific property — a
@@ -1036,6 +1073,8 @@ export interface AppState {
   properties: Property[];
   tenants: Tenant[];
   providers: Provider[];
+  providerAgreements: ProviderAgreement[];
+  providerProperties: ProviderProperty[];
   entities: Entity[];
   assets: Asset[];
   goldDetails: GoldDetails[];

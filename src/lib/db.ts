@@ -16,6 +16,8 @@ export const TABLES = {
   aiProposals: "ai_intake_proposals",
   emailInboxLog: "email_inbox_log",
   providers: "providers",
+  providerAgreements: "provider_agreements",
+  providerProperties: "provider_properties",
   entities: "entities",
   assets: "assets",
   goldDetails: "gold_details",

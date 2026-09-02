@@ -20,14 +20,15 @@ import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleA
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
-import type { AssetType, CategoryGroup } from "@/lib/types";
+import type { AssetType, CategoryGroup, RentLedgerProposalPayload } from "@/lib/types";
+import { latestAgreementFor } from "@/lib/providerAgreements";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { DocumentLink } from "@/components/DocumentLink";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { ExpenseDialog } from "@/components/ExpenseDialog";
 import { FeeCheckRow } from "@/components/PropertyShared";
-import { verifyAgentFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
+import { verifyAgentFees, reconcileFlatFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
 
 function pdfSafe(s: string): string {
@@ -209,8 +210,11 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   /** Rent collected via an uploaded agent statement shows the agent as the provider (that's who
    * actually handled the money); rent recorded any other way is assumed paid directly by the
    * tenant. Left blank rather than guessing when neither is on file. */
-  const agentNameFor = (propertyId?: string) =>
-    propertyId ? state.providers.find((p) => p.propertyId === propertyId && p.role === "Agent")?.name : undefined;
+  const agentNameFor = (propertyId?: string) => {
+    if (!propertyId) return undefined;
+    const taggedIds = new Set(state.providerProperties.filter((pp) => pp.propertyId === propertyId).map((pp) => pp.providerId));
+    return state.providers.find((p) => taggedIds.has(p.id) && p.role === "Agent")?.name;
+  };
 
   const allRows: TxRow[] = [
     ...state.ledger
@@ -822,13 +826,32 @@ function EofyReport() {
       const loan = state.loans.find((l) => l.propertyId === prop.id);
       if (loan) interest += (loan.totalBalance * loan.interestRate) / 100;
 
-      const agent = state.providers.find((p) => p.propertyId === prop.id && p.role === "Agent");
-      if (agent && hasFeeTerms(agent)) {
+      const agentProviderIds = new Set(
+        state.providerProperties.filter((pp) => pp.propertyId === prop.id).map((pp) => pp.providerId),
+      );
+      const agent = state.providers.find((p) => agentProviderIds.has(p.id) && p.role === "Agent");
+      const agreement = agent ? latestAgreementFor(state.providerAgreements, agent.id, prop.id) : undefined;
+      if (agent && agreement && hasFeeTerms(agreement)) {
         // Only expenses actually tied to the agent — its dedicated fee category, or paid to the
         // agent by name — count toward fee verification; every other expense in the property's
         // full FY list (repairs, insurance, rates, etc.) has nothing to do with the agreement.
         const agentExpenses = expenses.filter((e) => isAgentFeeExpense(e, agent.name));
-        const results = verifyAgentFees({ provider: agent, rentCollected, lines: collectAgentFeeLines(agentExpenses) });
+        const lines = collectAgentFeeLines(agentExpenses);
+        // "Per Statement" admin-fee annualization needs how many rent statements actually came in
+        // over the FY — every real statement gets uploaded/emailed in as a rent_ledger proposal.
+        const statementCount = state.aiProposals.filter((p) => {
+          if (p.propertyId !== prop.id || p.kind !== "rent_ledger" || p.status === "dismissed") return false;
+          const date = (p.payload as RentLedgerProposalPayload).periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
+          return date >= start && date <= end;
+        }).length;
+        // Management/Letting Fee are genuinely per-transaction, computed here over the whole FY in
+        // one call (mathematically identical to summing per-period); Admin/Lease Renewal/
+        // Inspection Fee are flat contracted amounts reconciled once for the FY instead — see
+        // feeVerification.ts's doc comments for why mixing the two overstated the flat fees.
+        const results = [
+          ...verifyAgentFees({ agentName: agent.name, agreement, rentCollected, lines, feeTypes: ["Management Fee", "Letting Fee"] }),
+          ...reconcileFlatFees({ agentName: agent.name, agreement, lines, statementCount }),
+        ];
         if (results.length > 0) {
           feeChecksByProperty.push({ propertyLabel: prop.alias || prop.address, agentName: agent.name, results });
         }

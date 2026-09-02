@@ -14,12 +14,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Pencil, Trash2, Eye, Plus, Receipt, FileWarning, FolderOpen } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, Eye, Plus, Receipt, FileWarning, FolderOpen, FileSignature } from "lucide-react";
 import { fmtCurrency, daysUntil } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
-import { ProviderDialog, ProviderRow } from "@/components/PropertyShared";
+import { ProviderDialog, ProviderRow, ProviderAgreementDialog } from "@/components/PropertyShared";
+import { agreementsForProvider } from "@/lib/providerAgreements";
+import { hasFeeTerms } from "@/lib/feeVerification";
 import { toast } from "sonner";
-import type { ProviderDocument } from "@/lib/types";
+import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
 
 export const Route = createFileRoute("/providers_/$providerId")({
   head: () => ({
@@ -172,6 +174,65 @@ function ProviderDocumentRow({ doc }: { doc: ProviderDocument }) {
   );
 }
 
+function AgreementRow({ agreement }: { agreement: ProviderAgreement }) {
+  const { state, deleteProviderAgreement } = useStore();
+  const property = state.properties.find((p) => p.id === agreement.propertyId);
+  return (
+    <div className="flex items-start justify-between gap-2 rounded border p-2 text-xs">
+      <div className="min-w-0">
+        <div className="font-medium">{property?.alias || property?.address || "Unknown property"}</div>
+        {agreement.contractStartDate && (
+          <div className="text-muted-foreground">
+            From {agreement.contractStartDate}
+            {agreement.contractReviewDate ? ` · reviews ${agreement.contractReviewDate}` : ""}
+          </div>
+        )}
+        {hasFeeTerms(agreement) && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
+            {agreement.managementFeePercent !== undefined && <span>Mgmt fee {agreement.managementFeePercent}%</span>}
+            {agreement.lettingFeeAmount !== undefined && <span>Letting {fmtCurrency(agreement.lettingFeeAmount)}</span>}
+            {agreement.lettingFeeWeeksRent !== undefined && <span>Letting {agreement.lettingFeeWeeksRent} wk rent</span>}
+            {agreement.adminFeeAmount !== undefined && <span>Admin {fmtCurrency(agreement.adminFeeAmount)}</span>}
+            {agreement.leaseRenewalFeeAmount !== undefined && <span>Renewal {fmtCurrency(agreement.leaseRenewalFeeAmount)}</span>}
+            {agreement.inspectionFeeAmount !== undefined && <span>Inspection {fmtCurrency(agreement.inspectionFeeAmount)}</span>}
+            {agreement.advertisingFeeAmount !== undefined && <span>Advertising {fmtCurrency(agreement.advertisingFeeAmount)}</span>}
+            {agreement.gstApplicable && <span>+GST</span>}
+          </div>
+        )}
+        {agreement.contractFileData && (
+          <button
+            type="button"
+            onClick={() => openBillDocument(agreement.contractFileName, agreement.contractFileData)}
+            className="mt-1 inline-flex items-center gap-1 text-primary underline"
+          >
+            <Eye className="h-3 w-3" /> View agreement
+          </button>
+        )}
+      </div>
+      <div className="flex shrink-0 gap-1">
+        <ProviderAgreementDialog providerId={agreement.providerId} agreement={agreement}>
+          <Button size="icon" variant="ghost" className="h-6 w-6">
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </ProviderAgreementDialog>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6"
+          onClick={() => {
+            if (confirm(`Delete this agreement for ${property?.alias || property?.address || "this property"}?`)) {
+              deleteProviderAgreement(agreement.id);
+              toast.success("Agreement deleted");
+            }
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 type PaymentRow = {
   id: string;
   date: string;
@@ -232,6 +293,7 @@ function ProviderProfilePage() {
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
   const documents = state.providerDocuments.filter((d) => d.providerId === provider.id);
+  const agreements = agreementsForProvider(state.providerAgreements, provider.id);
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -244,7 +306,6 @@ function ProviderProfilePage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">{provider.name}</h1>
             <Badge variant="secondary">{provider.role}</Badge>
-            {!provider.propertyId && <Badge variant="outline">Portfolio-wide</Badge>}
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-muted-foreground">
             {provider.phone && <span>{provider.phone}</span>}
@@ -254,7 +315,7 @@ function ProviderProfilePage() {
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
-          <ProviderDialog propertyId={provider.propertyId} provider={provider}>
+          <ProviderDialog provider={provider}>
             <Button size="sm" variant="outline" className="gap-1">
               <Pencil className="h-4 w-4" /> Edit
             </Button>
@@ -279,6 +340,31 @@ function ProviderProfilePage() {
       <div className="rounded-md border p-3">
         <ProviderRow provider={provider} />
       </div>
+
+      <Card>
+        <CardContent className="space-y-2 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <FileSignature className="h-4 w-4" /> Agreements
+            </div>
+            <ProviderAgreementDialog providerId={provider.id}>
+              <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
+                <Plus className="h-3 w-3" /> Add agreement
+              </Button>
+            </ProviderAgreementDialog>
+          </div>
+          {agreements.length === 0 && (
+            <div className="text-xs text-muted-foreground">
+              No management agreement on file for this provider at any property yet.
+            </div>
+          )}
+          <div className="space-y-2">
+            {agreements.map((a) => (
+              <AgreementRow key={a.id} agreement={a} />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-3 p-4">

@@ -1399,6 +1399,94 @@ export type Database = {
         }
         Relationships: []
       }
+      provider_agreements: {
+        Row: {
+          adminFeeAmount: number | null
+          adminFeeFrequency: string | null
+          advertisingFeeAmount: number | null
+          contractFileData: string | null
+          contractFileName: string | null
+          contractNotes: string | null
+          contractReviewDate: string | null
+          contractStartDate: string | null
+          created_at: string
+          gstApplicable: boolean
+          id: string
+          inspectionFeeAmount: number | null
+          leaseRenewalFeeAmount: number | null
+          lettingFeeAmount: number | null
+          lettingFeeWeeksRent: number | null
+          managementFeePercent: number | null
+          noticePeriodDays: number | null
+          propertyId: string
+          providerId: string
+        }
+        Insert: {
+          adminFeeAmount?: number | null
+          adminFeeFrequency?: string | null
+          advertisingFeeAmount?: number | null
+          contractFileData?: string | null
+          contractFileName?: string | null
+          contractNotes?: string | null
+          contractReviewDate?: string | null
+          contractStartDate?: string | null
+          created_at?: string
+          gstApplicable?: boolean
+          id: string
+          inspectionFeeAmount?: number | null
+          leaseRenewalFeeAmount?: number | null
+          lettingFeeAmount?: number | null
+          lettingFeeWeeksRent?: number | null
+          managementFeePercent?: number | null
+          noticePeriodDays?: number | null
+          propertyId: string
+          providerId: string
+        }
+        Update: {
+          adminFeeAmount?: number | null
+          adminFeeFrequency?: string | null
+          advertisingFeeAmount?: number | null
+          contractFileData?: string | null
+          contractFileName?: string | null
+          contractNotes?: string | null
+          contractReviewDate?: string | null
+          contractStartDate?: string | null
+          created_at?: string
+          gstApplicable?: boolean
+          id?: string
+          inspectionFeeAmount?: number | null
+          leaseRenewalFeeAmount?: number | null
+          lettingFeeAmount?: number | null
+          lettingFeeWeeksRent?: number | null
+          managementFeePercent?: number | null
+          noticePeriodDays?: number | null
+          propertyId?: string
+          providerId?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_agreements_propertyId_fkey"
+            columns: ["propertyId"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_agreements_propertyId_fkey"
+            columns: ["propertyId"]
+            isOneToOne: false
+            referencedRelation: "properties_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_agreements_providerId_fkey"
+            columns: ["providerId"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       provider_documents: {
         Row: {
           created_at: string
@@ -1430,6 +1518,49 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "provider_documents_providerId_fkey"
+            columns: ["providerId"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      provider_properties: {
+        Row: {
+          created_at: string
+          id: string
+          propertyId: string
+          providerId: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          propertyId: string
+          providerId: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          propertyId?: string
+          providerId?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_properties_propertyId_fkey"
+            columns: ["propertyId"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_properties_propertyId_fkey"
+            columns: ["propertyId"]
+            isOneToOne: false
+            referencedRelation: "properties_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "provider_properties_providerId_fkey"
             columns: ["providerId"]
             isOneToOne: false
             referencedRelation: "providers"

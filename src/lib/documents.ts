@@ -237,22 +237,25 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
           emailBody: p.sourceEmailBody,
         };
       }),
-    // The signed Property Management Agreement on an Agent provider — has nowhere else to live
-    // as a document, and its fee terms are directly tied to a period (start → next review).
-    ...state.providers
-      .filter((p) => p.contractFileData)
-      .map((p) => ({
-        id: `${p.id}-agreement`,
-        kind: "Management Agreement" as const,
-        date: p.contractStartDate ?? p.created_at?.slice(0, 10) ?? "",
-        dateAdded: p.created_at,
-        period: p.contractStartDate
-          ? `${p.contractStartDate} → ${p.contractReviewDate || "ongoing"}`
-          : undefined,
-        propertyId: p.propertyId,
-        label: `${p.name} — management agreement`,
-        fileName: p.contractFileName,
-        fileData: p.contractFileData,
-      })),
+    // The signed Property Management Agreement on a (provider, property) agreement — has nowhere
+    // else to live as a document, and its fee terms are directly tied to a period (start → next
+    // review). One entry per provider_agreements row now (a provider can hold a different signed
+    // agreement, and file, at each property it manages), not one per provider.
+    ...state.providerAgreements
+      .filter((a) => a.contractFileData)
+      .map((a) => {
+        const provider = state.providers.find((p) => p.id === a.providerId);
+        return {
+          id: `${a.id}-agreement`,
+          kind: "Management Agreement" as const,
+          date: a.contractStartDate ?? a.created_at?.slice(0, 10) ?? "",
+          dateAdded: a.created_at,
+          period: a.contractStartDate ? `${a.contractStartDate} → ${a.contractReviewDate || "ongoing"}` : undefined,
+          propertyId: a.propertyId,
+          label: `${provider?.name ?? "Managing agent"} — management agreement`,
+          fileName: a.contractFileName,
+          fileData: a.contractFileData,
+        };
+      }),
   ].sort((a, b) => (a.date < b.date ? 1 : -1));
 }

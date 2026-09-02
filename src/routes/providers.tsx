@@ -5,9 +5,21 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Users2, Plus, ChevronRight } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Users2, Plus, ChevronRight, GitMerge } from "lucide-react";
 import { ProviderDialog } from "@/components/PropertyShared";
 import type { AppState, Provider } from "@/lib/types";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/providers")({
   head: () => ({
@@ -51,11 +63,6 @@ function ProviderListRow({ provider }: { provider: Provider }) {
           <Badge variant="secondary" className="text-[10px]">
             {provider.role}
           </Badge>
-          {!provider.propertyId && (
-            <Badge variant="outline" className="text-[10px]">
-              Portfolio-wide
-            </Badge>
-          )}
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
           {details && <span>{details}</span>}
@@ -67,6 +74,117 @@ function ProviderListRow({ provider }: { provider: Provider }) {
       </div>
       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
     </Link>
+  );
+}
+
+/**
+ * Fixes a duplicate real-world business that ended up as two separate Provider rows — the same
+ * agency added from two different properties' Providers tabs before findOrCreateProvider deduped
+ * portfolio-wide, or a name typed two slightly different ways. Picks a survivor, re-points every
+ * reference (provider_agreements, provider_properties, expenses, property_bills,
+ * maintenance_items, provider_documents) from the other row onto the survivor via
+ * store.mergeProviders, then deletes the duplicate. Deliberately simple — a landlord tool for a
+ * rare cleanup, not a polished flow — but the underlying merge is done correctly and safely (see
+ * mergeProviders in store.tsx).
+ */
+function MergeProvidersDialog() {
+  const { state, mergeProviders } = useStore();
+  const [open, setOpen] = useState(false);
+  const [aId, setAId] = useState("");
+  const [bId, setBId] = useState("");
+  const [survivor, setSurvivor] = useState<"a" | "b">("a");
+
+  const a = state.providers.find((p) => p.id === aId);
+  const b = state.providers.find((p) => p.id === bId);
+  const sorted = [...state.providers].sort((x, y) => x.name.localeCompare(y.name));
+
+  const merge = () => {
+    if (!a || !b) return toast.error("Pick both providers to merge");
+    if (a.id === b.id) return toast.error("Pick two different providers");
+    const survivorId = survivor === "a" ? a.id : b.id;
+    const duplicateId = survivor === "a" ? b.id : a.id;
+    mergeProviders(survivorId, duplicateId);
+    toast.success(`Merged "${survivor === "a" ? b.name : a.name}" into "${survivor === "a" ? a.name : b.name}"`);
+    setOpen(false);
+    setAId("");
+    setBId("");
+    setSurvivor("a");
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="gap-1">
+          <GitMerge className="h-4 w-4" /> Merge providers
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Merge two providers</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          Use this when the same real-world business ended up as two separate contacts. Every agreement, property tag,
+          expense, bill, maintenance item and document on the one you don't keep moves onto the one you do, then the
+          duplicate is deleted. This can't be undone.
+        </p>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Provider A</Label>
+            <Select value={aId} onValueChange={setAId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a provider…" />
+              </SelectTrigger>
+              <SelectContent>
+                {sorted.map((p) => (
+                  <SelectItem key={p.id} value={p.id} disabled={p.id === bId}>
+                    {p.name} ({p.role})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Provider B</Label>
+            <Select value={bId} onValueChange={setBId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a provider…" />
+              </SelectTrigger>
+              <SelectContent>
+                {sorted.map((p) => (
+                  <SelectItem key={p.id} value={p.id} disabled={p.id === aId}>
+                    {p.name} ({p.role})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {a && b && (
+            <div className="space-y-1">
+              <Label className="text-xs">Keep which one?</Label>
+              <RadioGroup value={survivor} onValueChange={(v) => setSurvivor(v as "a" | "b")}>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="a" id="survivor-a" />
+                  <Label htmlFor="survivor-a" className="text-sm font-normal">
+                    {a.name} — delete {b.name}
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="b" id="survivor-b" />
+                  <Label htmlFor="survivor-b" className="text-sm font-normal">
+                    {b.name} — delete {a.name}
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="destructive" disabled={!a || !b} onClick={merge}>
+            Merge
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -93,11 +211,14 @@ export function ProvidersContent() {
             regardless of which property they were on.
           </p>
         </div>
-        <ProviderDialog>
-          <Button size="sm" className="gap-1">
-            <Plus className="h-4 w-4" /> Add provider
-          </Button>
-        </ProviderDialog>
+        <div className="flex shrink-0 gap-2">
+          <MergeProvidersDialog />
+          <ProviderDialog>
+            <Button size="sm" className="gap-1">
+              <Plus className="h-4 w-4" /> Add provider
+            </Button>
+          </ProviderDialog>
+        </div>
       </div>
 
       <Input placeholder="Search by name, role, or ABN…" value={search} onChange={(e) => setSearch(e.target.value)} />

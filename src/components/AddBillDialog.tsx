@@ -126,7 +126,7 @@ export function AddBillDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { state, addBill, addProvider, updateProvider, updateProperty, addInvoice, markProposalApplied, dismissProposal } =
+  const { state, addBill, addProvider, updateProvider, ensureProviderProperty, updateProperty, addInvoice, markProposalApplied, dismissProposal } =
     useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -194,7 +194,10 @@ export function AddBillDialog({
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
 
   const propertyId = form.propertyId || lockedPropertyId || "";
-  const providersForProperty = state.providers.filter((p) => p.propertyId === propertyId);
+  const providersForProperty = (() => {
+    const taggedIds = new Set(state.providerProperties.filter((pp) => pp.propertyId === propertyId).map((pp) => pp.providerId));
+    return state.providers.filter((p) => taggedIds.has(p.id));
+  })();
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === propertyId);
   const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
 
@@ -475,10 +478,14 @@ export function AddBillDialog({
       }
     }
 
-    const existingProvider = providersForProperty.find(
+    // Matched portfolio-wide (not just providersForProperty) so a vendor already on file at
+    // another property gets tagged onto this one instead of creating a duplicate identity row —
+    // the same portfolio-wide dedup findOrCreateProvider applies elsewhere.
+    const existingProvider = state.providers.find(
       (p) => p.name.trim().toLowerCase() === form.providerName.trim().toLowerCase(),
     );
     if (existingProvider) {
+      ensureProviderProperty(existingProvider.id, propertyId);
       const patch: Partial<Provider> = {};
       if (form.portalUrl) patch.portalUrl = form.portalUrl;
       if (form.portalUsername) patch.portalUsername = form.portalUsername;
@@ -495,8 +502,7 @@ export function AddBillDialog({
       }
       if (Object.keys(patch).length > 0) updateProvider(existingProvider.id, patch);
     } else {
-      addProvider({
-        propertyId,
+      const newProviderId = addProvider({
         name: form.providerName.trim(),
         role: payload && form.billType === "Council Rates" ? "Council" : "Other",
         portalUrl: form.portalUrl || undefined,
@@ -508,6 +514,7 @@ export function AddBillDialog({
         abn: payload?.vendorAbn,
         address: payload?.vendorAddress,
       });
+      ensureProviderProperty(newProviderId, propertyId);
     }
 
     if (initialProposal && payload) {
