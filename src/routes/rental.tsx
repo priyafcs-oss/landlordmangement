@@ -977,7 +977,7 @@ function TemplateModal({
  * everywhere else it's used (real HTML, where the browser renders Unicode fine).
  */
 function pdfSafe(s: string): string {
-  return s.replace(/−/g, "-").replace(/ /g, " ");
+  return s.replace(/−/g, "-").replace(/\u00a0/g, " ");
 }
 
 function sourceTag(r: LedgerRow): string {
