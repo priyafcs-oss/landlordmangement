@@ -59,8 +59,10 @@ import {
   paidUpToDetails,
   ausFinancialYear,
   fyRange,
+  buildFyOptions,
   type LedgerRow,
 } from "@/lib/calculations";
+import { bucketBy } from "@/lib/group";
 import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
@@ -635,12 +637,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const propertyAddress = tenant.unitAddress || state.properties.find((p) => p.id === tenant.propertyId)?.address || "";
   const paidUpTo = paidUpToDetails(tenant, state.ledger, state.rentChanges);
 
-  const fyOptions = useMemo(() => {
-    const years: string[] = [];
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 5; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
-    return years;
-  }, []);
+  const fyOptions = useMemo(() => buildFyOptions(5), []);
 
   // Filtering/grouping only affects what's displayed/exported — arrears Stats above always
   // reflect the tenant's full unfiltered history.
@@ -661,12 +658,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = new Map<string, LedgerRow[]>();
-    for (const r of filteredRows) {
-      const key = groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(r);
-    }
+    const map = bucketBy(filteredRows, (r) => (groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date)));
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
   }, [filteredRows, groupBy]);
 

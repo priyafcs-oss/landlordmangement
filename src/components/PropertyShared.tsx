@@ -47,7 +47,7 @@ import {
   Eye,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord } from "@/lib/billMatch";
 import {
@@ -113,6 +113,7 @@ import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUr
 import { DocumentLink } from "@/components/DocumentLink";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
+import { bucketBy } from "@/lib/group";
 import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
 
@@ -5258,12 +5259,7 @@ function AgentStatementsSection({
   const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
 
-  const fys = (() => {
-    const years: string[] = [];
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
-    return years;
-  })();
+  const fys = buildFyOptions();
 
   const periodOf = (p: AiIntakeProposal) =>
     (p.payload as RentLedgerProposalPayload).periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
@@ -5284,13 +5280,10 @@ function AgentStatementsSection({
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = new Map<string, AiIntakeProposal[]>();
-    for (const p of filtered) {
+    const map = bucketBy(filtered, (p) => {
       const date = periodOf(p);
-      const key = !date ? "unknown" : groupBy === "month" ? date.slice(0, 7) : ausFinancialYear(date);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(p);
-    }
+      return !date ? "unknown" : groupBy === "month" ? date.slice(0, 7) : ausFinancialYear(date);
+    });
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [filtered, groupBy]);
 
@@ -5449,12 +5442,7 @@ export function PropertyFeeVerificationTab({
   const [fy, setFy] = useState(currentFY);
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
 
-  const fys = (() => {
-    const years: string[] = [];
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
-    return years;
-  })();
+  const fys = buildFyOptions();
 
   if (!agreement || !hasFeeTerms(agreement)) {
     return (

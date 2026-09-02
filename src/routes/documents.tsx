@@ -4,7 +4,8 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ausFinancialYear, fyRange } from "@/lib/calculations";
+import { ausFinancialYear, fyRange, buildFyOptions } from "@/lib/calculations";
+import { bucketBy } from "@/lib/group";
 import {
   DocTable,
   DocGroupSection,
@@ -62,12 +63,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
   const [query, setQuery] = useState("");
   const propertyId = lockedPropertyId ?? propertyFilter;
 
-  const fys = useMemo(() => {
-    const years: string[] = [];
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
-    return years;
-  }, []);
+  const fys = useMemo(() => buildFyOptions(), []);
 
   const entries = buildDocumentEntries(state);
 
@@ -95,12 +91,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = new Map<string, DocumentEntry[]>();
-    for (const d of filtered) {
-      const key = !d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(d);
-    }
+    const map = bucketBy(filtered, (d) => (!d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date)));
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [filtered, groupBy]);
 

@@ -438,6 +438,16 @@ export function fyRange(fy: string): { start: string; end: string } {
   return { start: `${start}-07-01`, end: `${start + 1}-06-30` };
 }
 
+/** Financial-year dropdown options, oldest first — "2023-2024", "2024-2025", ... one year ahead
+ * of the current FY. `spanBack` controls how many past years are included (most lists only need
+ * a handful; a full ledger view may want more). */
+export function buildFyOptions(spanBack = 3): string[] {
+  const currentYear = new Date().getFullYear();
+  const years: string[] = [];
+  for (let y = currentYear - spanBack; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
+  return years;
+}
+
 export interface DepreciationScheduleYear {
   fy: string;
   div40: number;

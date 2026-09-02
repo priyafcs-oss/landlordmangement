@@ -8,7 +8,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DocumentLink } from "@/components/DocumentLink";
 import { useStore } from "@/lib/store";
-import { daysUntil, fmtCurrency, ausFinancialYear, fyRange } from "@/lib/calculations";
+import { daysUntil, fmtCurrency, ausFinancialYear, fyRange, buildFyOptions } from "@/lib/calculations";
+import { bucketBy } from "@/lib/group";
 import { matchesDocumentQuery, type DocumentEntry } from "@/lib/documents";
 
 /**
@@ -303,12 +304,7 @@ export function DocumentsPanel({
 
   const kindOptions = useMemo(() => [...new Set(entries.map((e) => e.kind))], [entries]);
 
-  const fys = useMemo(() => {
-    const years: string[] = [];
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
-    return years;
-  }, []);
+  const fys = useMemo(() => buildFyOptions(), []);
 
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
 
@@ -326,12 +322,7 @@ export function DocumentsPanel({
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = new Map<string, DocumentEntry[]>();
-    for (const d of filtered) {
-      const key = !d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(d);
-    }
+    const map = bucketBy(filtered, (d) => (!d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date)));
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [filtered, groupBy]);
 

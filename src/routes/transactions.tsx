@@ -19,8 +19,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
+import { bucketBy } from "@/lib/group";
 import { toast } from "sonner";
 import type { AssetType, CategoryGroup, RentLedgerProposalPayload } from "@/lib/types";
 import { latestAgreementFor } from "@/lib/providerAgreements";
@@ -204,12 +205,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     setUnitId("__all__");
   }, [singlePropertyId]);
 
-  const fys = useMemo(() => {
-    const years: string[] = [];
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 3; y <= currentYear + 1; y++) years.push(`${y}-${y + 1}`);
-    return years;
-  }, []);
+  const fys = useMemo(() => buildFyOptions(), []);
 
   // Every bill that's ever marked Paid is guaranteed a paired Expense (markBillPaid creates one
   // the first time, the email-intake path pairs one at creation) — so state.expenses alone already
@@ -339,19 +335,15 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = new Map<string, TxRow[]>();
-    for (const r of filtered) {
-      const key =
-        groupBy === "month"
-          ? r.date.slice(0, 7)
-          : groupBy === "fy"
-            ? ausFinancialYear(r.date)
-            : groupBy === "provider"
-              ? r.providerName || "No provider"
-              : r.category;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(r);
-    }
+    const map = bucketBy(filtered, (r) =>
+      groupBy === "month"
+        ? r.date.slice(0, 7)
+        : groupBy === "fy"
+          ? ausFinancialYear(r.date)
+          : groupBy === "provider"
+            ? r.providerName || "No provider"
+            : r.category,
+    );
     // Date-keyed groups (month/FY) read newest-first, matching the flat list's own sort order;
     // provider/category groups have no inherent chronology, so those read alphabetically instead.
     const dateKeyed = groupBy === "month" || groupBy === "fy";

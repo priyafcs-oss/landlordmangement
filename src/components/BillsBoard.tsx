@@ -18,6 +18,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoreVertical, Panel
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
+import { bucketBy } from "@/lib/group";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
@@ -160,12 +161,7 @@ export function BillsBoard({
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = new Map<string, PropertyBill[]>();
-    for (const b of filtered) {
-      const key = groupBy === "provider" ? b.providerName || "No provider" : b.category || "Uncategorised";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(b);
-    }
+    const map = bucketBy(filtered, (b) => (groupBy === "provider" ? b.providerName || "No provider" : b.category || "Uncategorised"));
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered, groupBy]);
 
