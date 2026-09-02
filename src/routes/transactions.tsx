@@ -27,7 +27,6 @@ import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { DocumentLink } from "@/components/DocumentLink";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
-import { ExpenseDialog } from "@/components/ExpenseDialog";
 import { FeeCheckRow } from "@/components/PropertyShared";
 import { verifyAgentFees, reconcileFlatFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
@@ -758,7 +757,7 @@ function TxTable({
                 <td className="px-2 py-2">
                   {expense && (
                     <div className="flex items-center justify-end gap-0.5">
-                      <ExpenseDialog
+                      <AddTransactionDialog
                         expense={expense}
                         trigger={
                           <Button size="icon" variant="ghost" className="h-6 w-6">

@@ -385,8 +385,16 @@ export interface Expense {
    * (not zero) for rows where GST was never captured, so a Transactions GST total can tell "no GST
    * on this line" apart from "GST unknown/not entered". */
   gst?: number;
+  /** The primary invoice/receipt file, if any — kept for backward compatibility with every
+   * existing reader (Transactions row link, Documents, markBillPaid, ...). A transaction that
+   * genuinely needs more than one file (e.g. the agent statement that first reported a deduction,
+   * PLUS the actual bill PDF forwarded later) puts the rest in additionalFiles below rather than
+   * overwriting this one. */
   invoiceFileName?: string;
   invoiceFileData?: string;
+  /** Extra files/photos beyond the primary invoice above — same (fileName, fileData) shape,
+   * shown/managed alongside it in AddTransactionDialog. */
+  additionalFiles?: { fileName: string; fileData: string }[];
   hasWarranty: boolean;
   warrantyExpiry?: string;
   rechargeToTenant: boolean;

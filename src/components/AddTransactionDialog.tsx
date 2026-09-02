@@ -31,7 +31,7 @@ import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
-import type { AiIntakeProposal, ExpenseProposalPayload } from "@/lib/types";
+import type { AiIntakeProposal, Expense, ExpenseProposalPayload } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -123,6 +123,8 @@ interface ExtractResult {
 export function AddTransactionDialog({
   propertyId: lockedPropertyId,
   initialProposal,
+  expense,
+  trigger,
   open: openProp,
   onOpenChange: onOpenChangeProp,
 }: {
@@ -131,10 +133,19 @@ export function AddTransactionDialog({
    * transaction the duplicate/price-spike guardrail flagged) instead of losing the original
    * entry — reviewing it here reuses the exact same save path as a fresh entry. */
   initialProposal?: AiIntakeProposal;
+  /** Edits an existing Expense in place instead of creating a new one — same document pane +
+   * fields as adding, so editing a transaction isn't a stripped-down experience compared to
+   * adding one. Locks the form to a single line item on one property (splitting/adding further
+   * line items only makes sense when creating something new). */
+  expense?: Expense;
+  /** Custom open trigger (e.g. an edit-pencil icon button) — falls back to the default "+ Add
+   * Transaction" button when omitted and this isn't a proposal review. */
+  trigger?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 } = {}) {
-  const { state, addExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal, findOrCreateProvider } = useStore();
+  const { state, addExpense, updateExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal, findOrCreateProvider } =
+    useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
@@ -164,16 +175,29 @@ export function AddTransactionDialog({
 
   const [form, setForm] = useState(blankForm());
   const [lineItems, setLineItems] = useState<LineItemRow[]>([blankLineItem()]);
+  const [additionalFiles, setAdditionalFiles] = useState<{ fileName: string; fileData: string }[]>([]);
 
   const reset = () => {
     setForm(blankForm());
     setLineItems([blankLineItem()]);
+    setAdditionalFiles([]);
     setConfidence(null);
     setExtractSummary(null);
     setExtractEmpty(false);
     setSplitting(false);
     setPeriodOpen(false);
     setNotesOpen(false);
+  };
+
+  const addAdditionalFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      const base64 = dataUrl.split(",")[1] ?? "";
+      setAdditionalFiles((v) => [...v, { fileName: file.name, fileData: base64 }]);
+    };
+    reader.onerror = () => toast.error(`Couldn't read ${file.name}`);
+    reader.readAsDataURL(file);
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (li.direction === "Income" ? 1 : -1) * (parseFloat(li.amount) || 0), 0);
@@ -245,6 +269,43 @@ export function AddTransactionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProposal?.id]);
 
+  // Editing an existing transaction — pre-fill everything from it, including its primary invoice
+  // file (left-pane preview) and any additional files already attached.
+  useEffect(() => {
+    if (!expense) return;
+    setForm((f) => ({
+      ...f,
+      propertyId: expense.propertyId ?? f.propertyId,
+      unitId: expense.unitId ?? f.unitId,
+      payee: expense.providerName || expense.itemName,
+      referenceNumber: expense.referenceNumber ?? "",
+      date: expense.date,
+      periodStart: expense.periodStart ?? "",
+      periodEnd: expense.periodEnd ?? "",
+      notes: expense.notes ?? "",
+      sourceFileName: expense.invoiceFileName,
+      sourceFileData: expense.invoiceFileData,
+    }));
+    setLineItems([
+      {
+        key: uid("li"),
+        description: expense.itemName,
+        category: (expense.category ?? "Sundry Rental Expenses") as ExpenseCategory,
+        direction: expense.direction === "Income" ? "Income" : "Expense",
+        amount: String(expense.cost),
+        gst: expense.gst !== undefined ? String(expense.gst) : "",
+        rechargeToTenant: !!expense.rechargeToTenant,
+        tenantId: expense.tenantId ?? "",
+        hasWarranty: !!expense.hasWarranty,
+        warrantyExpiry: expense.warrantyExpiry ?? "",
+      },
+    ]);
+    setAdditionalFiles(expense.additionalFiles ?? []);
+    if (expense.periodStart || expense.periodEnd) setPeriodOpen(true);
+    if (expense.notes) setNotesOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expense?.id]);
+
   const extract = async (file: File) => {
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return toast.error(
@@ -303,6 +364,10 @@ export function AddTransactionDialog({
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
+    // Editing skips the duplicate check entirely — it's not a new record being created, and
+    // findDuplicateRecord would otherwise just find this very row and flag itself.
+    if (expense) return commitEdit();
+
     const match = findDuplicateRecord(state.bills, state.expenses, {
       propertyId: form.propertyId,
       vendorOrDescription: form.payee,
@@ -315,6 +380,54 @@ export function AddTransactionDialog({
       return;
     }
     commitSave();
+  };
+
+  /** Locked to exactly one line item on one property — splitting/adding further line items only
+   * makes sense when creating something new, not editing an existing single Expense row. */
+  const commitEdit = () => {
+    if (!expense) return;
+    const li = lineItems[0];
+    const amount = parseFloat(li.amount) || 0;
+    if (form.payee.trim()) findOrCreateProvider(form.payee.trim(), form.propertyId);
+    if (li.rechargeToTenant && li.tenantId && !expense.recharged) {
+      addInvoice({
+        tenantId: li.tenantId,
+        chargeType: billTypeToChargeType(li.category === "Water Charges" ? "Water" : "Other"),
+        amountDue: amount,
+        dateIssued: todayISO(),
+        dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+        status: "Unpaid",
+        description: li.description || form.payee,
+      });
+    }
+    updateExpense(expense.id, {
+      itemName: li.description || form.payee,
+      cost: amount,
+      date: form.date,
+      propertyId: form.propertyId,
+      unitId: form.unitId && form.unitId !== SHARED_UNIT ? form.unitId : undefined,
+      taxCategory: li.direction === "Income" ? "Immediate Deduction" : expenseCategoryToTaxCategory(li.category),
+      category: li.category,
+      providerName: form.payee.trim() || undefined,
+      gst: li.gst ? parseFloat(li.gst) || 0 : undefined,
+      direction: li.direction === "Income" ? "Income" : undefined,
+      hasWarranty: li.hasWarranty,
+      warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
+      rechargeToTenant: !!(li.rechargeToTenant && li.tenantId),
+      tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+      recharged: li.rechargeToTenant && li.tenantId ? true : expense.recharged,
+      referenceNumber: form.referenceNumber || undefined,
+      periodStart: form.periodStart || undefined,
+      periodEnd: form.periodEnd || undefined,
+      notes: form.notes || undefined,
+      // Never overwritten by "source" — editing doesn't change how this transaction originally
+      // arrived (manual/email/upload), only its own fields.
+      invoiceFileName: form.sourceFileName,
+      invoiceFileData: form.sourceFileData,
+      additionalFiles: additionalFiles.length > 0 ? additionalFiles : undefined,
+    });
+    setOpen(false);
+    toast.success("Transaction updated");
   };
 
   const commitSave = () => {
@@ -394,11 +507,12 @@ export function AddTransactionDialog({
           source: form.sourceFileData ? "upload" : "manual",
           invoiceFileName: form.sourceFileName,
           invoiceFileData: form.sourceFileData,
+          additionalFiles: additionalFiles.length > 0 ? additionalFiles : undefined,
         });
       }
     }
 
-    if (initialProposal) markProposalApplied(initialProposal.id);
+    if (initialProposal) markProposalApplied(initialProposal.id, { propertyId: form.propertyId });
     setOpen(false);
     reset();
     if (flaggedCount > 0) {
@@ -419,18 +533,22 @@ export function AddTransactionDialog({
     >
       {!initialProposal && (
         <DialogTrigger asChild>
-          <Button size="sm" className="gap-1">
-            <Plus className="h-3 w-3" /> Add Transaction
-          </Button>
+          {trigger ?? (
+            <Button size="sm" className="gap-1">
+              <Plus className="h-3 w-3" /> Add Transaction
+            </Button>
+          )}
         </DialogTrigger>
       )}
       <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{initialProposal ? "Review transaction" : "New transaction"}</DialogTitle>
+          <DialogTitle>{expense ? "Edit transaction" : initialProposal ? "Review transaction" : "New transaction"}</DialogTitle>
           <div className="text-xs text-muted-foreground">
-            {initialProposal
-              ? "Flagged for review — check the details before saving."
-              : "Upload a receipt for AI extraction, or enter the details manually."}
+            {expense
+              ? "Update the details, or attach/replace the invoice files below."
+              : initialProposal
+                ? "Flagged for review — check the details before saving."
+                : "Upload a receipt for AI extraction, or enter the details manually."}
           </div>
         </DialogHeader>
 
@@ -498,6 +616,52 @@ export function AddTransactionDialog({
             </div>
 
             <BillDocumentViewer fileName={form.sourceFileName} fileData={form.sourceFileData} />
+
+            <div className="space-y-1 rounded-md border p-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium">Additional files / photos</div>
+                <label className="cursor-pointer text-xs text-primary underline">
+                  + Add file
+                  <input
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) addAdditionalFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              {additionalFiles.length === 0 ? (
+                <div className="text-xs text-muted-foreground">
+                  None — the box above is the primary document; add more here if this transaction needs several (e.g.
+                  the agent statement that first reported it, plus the actual bill).
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {additionalFiles.map((f, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
+                      <span className="truncate text-xs">{f.fileName}</span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button size="sm" variant="ghost" className="h-6 gap-1 text-xs" onClick={() => openBillDocument(f.fileName, f.fileData)}>
+                          <Eye className="h-3 w-3" /> View
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6"
+                          onClick={() => setAdditionalFiles((v) => v.filter((_, j) => j !== i))}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -556,13 +720,13 @@ export function AddTransactionDialog({
                       </SelectContent>
                     </Select>
                   </Field>
-                ) : (
+                ) : !expense ? (
                   <div className="flex items-end">
                     <button type="button" className="text-xs text-primary underline" onClick={() => setSplitting(true)}>
                       + Split across a second property
                     </button>
                   </div>
-                )}
+                ) : null}
                 <div className="sm:col-span-2">
                   <Field label="Payee / vendor">
                     <Input value={form.payee} onChange={(e) => setForm((f) => ({ ...f, payee: e.target.value }))} />
@@ -655,9 +819,11 @@ export function AddTransactionDialog({
                     >
                       {li.direction}
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => setLineItems((rows) => rows.filter((r) => r.key !== li.key))}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {!expense && (
+                      <Button size="icon" variant="ghost" onClick={() => setLineItems((rows) => rows.filter((r) => r.key !== li.key))}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                   {li.direction === "Expense" && !splitting && (
                     <div className="flex flex-wrap items-center gap-2">
@@ -698,9 +864,11 @@ export function AddTransactionDialog({
                   )}
                 </div>
               ))}
-              <Button size="sm" variant="outline" className="gap-1" onClick={() => setLineItems((rows) => [...rows, blankLineItem()])}>
-                <Plus className="h-3 w-3" /> Add line item
-              </Button>
+              {!expense && (
+                <Button size="sm" variant="outline" className="gap-1" onClick={() => setLineItems((rows) => [...rows, blankLineItem()])}>
+                  <Plus className="h-3 w-3" /> Add line item
+                </Button>
+              )}
             </div>
 
             <div>
