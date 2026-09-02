@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import type { NormalizedBillInput, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 /**
  * Stages a document Gemini couldn't classify into any known type (a trust deed, a compliance
@@ -40,7 +41,13 @@ export async function stageUnclassifiedDocument(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }

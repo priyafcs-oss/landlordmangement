@@ -3,6 +3,7 @@ import { matchProperty } from "./property-match.ts";
 import { matchProviderInRows } from "./provider-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedBankStatementFields, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 const PROMPT = `You are extracting transactions from a landlord's own personal or business bank/transaction account statement — NOT a managing agent's rent statement (that's a different document type).
 Extract the fields defined in the response schema as strict JSON.
@@ -114,7 +115,13 @@ export async function parseBankStatement(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }

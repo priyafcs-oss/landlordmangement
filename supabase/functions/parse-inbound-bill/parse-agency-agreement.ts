@@ -2,6 +2,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 const AGREEMENT_PROMPT = `You are extracting fee terms from an Australian Property Management Agreement (PMA) / agency agreement between a landlord and a real estate agency.
 Extract the fields defined in the response schema as strict JSON.
@@ -195,7 +196,13 @@ export async function stageAgencyAgreementProposal(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }

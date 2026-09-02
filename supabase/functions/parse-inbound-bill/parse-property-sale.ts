@@ -2,6 +2,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedPropertySaleFields, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 const PROMPT = `You are extracting disposal details from a document where the LANDLORD is the SELLER — a Contract of Sale on disposal, a real estate agent's commission invoice for a sale, or a settlement statement on sale. This is NOT a purchase document (where the landlord is the buyer).
 Extract the fields defined in the response schema as strict JSON.
@@ -86,7 +87,13 @@ export async function parsePropertySale(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }

@@ -22,7 +22,14 @@ export type AgreementFeeTerms = Pick<
   | "advertisingFeeGstInclusive"
 >;
 
-export type FeeCheckType = "Management Fee" | "Letting Fee" | "Admin Fee" | "Lease Renewal Fee" | "Inspection Fee" | "Other Fee";
+export type FeeCheckType =
+  | "Management Fee"
+  | "Letting Fee"
+  | "Admin Fee"
+  | "Lease Renewal Fee"
+  | "Inspection Fee"
+  | "Advertising Fee"
+  | "Other Fee";
 export type FeeCheckStatus = "match" | "overcharge" | "undercharge" | "not_charged" | "unspecified";
 
 export interface FeeCheckResult {
@@ -58,6 +65,7 @@ export interface FeeLine {
 const CLASSIFY_PATTERNS: [FeeCheckType, RegExp][] = [
   ["Lease Renewal Fee", /renew/i],
   ["Letting Fee", /letting|leasing|new\s*tenant|tenant\s*placement/i],
+  ["Advertising Fee", /adverti|marketing|listing/i],
   ["Inspection Fee", /inspect/i],
   ["Admin Fee", /admin|statement\s*fee/i],
   ["Management Fee", /manag/i],
@@ -208,14 +216,14 @@ function effectiveRate(rate: number, gstInclusive: boolean | undefined): number 
  * actually charged on this statement/period; a letting fee never being charged in a given month is
  * normal, not a discrepancy, so it's simply not reported on.
  *
- * Admin Fee, Lease Renewal Fee and Inspection Fee are flat contracted amounts, not a per-period
- * charge — comparing the raw contracted amount against every period it happens to recur in (e.g.
- * a $66/year admin fee charged on every monthly statement) re-adds the full amount as "expected"
- * each time and overstates the true annual figure once summed across many calls. Callers that sum
- * results across more than one call (the Fee Verification tab, EOFY) should pass
- * `feeTypes: ["Management Fee", "Letting Fee"]` here to restrict this function to the two fee
- * types that genuinely are per-period/per-transaction, and use `reconcileFlatFees` separately,
- * once per FY, for the other three. A single-statement review (RentLedgerProposalCard) isn't
+ * Admin Fee, Lease Renewal Fee, Inspection Fee and Advertising Fee are flat contracted amounts,
+ * not a per-period charge — comparing the raw contracted amount against every period it happens
+ * to recur in (e.g. a $66/year admin fee charged on every monthly statement) re-adds the full
+ * amount as "expected" each time and overstates the true annual figure once summed across many
+ * calls. Callers that sum results across more than one call (the Fee Verification tab, EOFY)
+ * should pass `feeTypes: ["Management Fee", "Letting Fee"]` here to restrict this function to the
+ * two fee types that genuinely are per-period/per-transaction, and use `reconcileFlatFees`
+ * separately, once per FY, for the other four. A single-statement review (RentLedgerProposalCard) isn't
  * summed anywhere, so it can safely omit `feeTypes` and see every fee type this one statement
  * actually charged.
  */
@@ -315,6 +323,21 @@ export function verifyAgentFees(params: {
     }
   }
 
+  if (wants("Advertising Fee")) {
+    const advertisingActual = actualByType.get("Advertising Fee") ?? 0;
+    if (advertisingActual > 0) {
+      const expected =
+        agreement.advertisingFeeAmount !== undefined
+          ? effectiveRate(agreement.advertisingFeeAmount, agreement.advertisingFeeGstInclusive)
+          : undefined;
+      const calculation =
+        agreement.advertisingFeeAmount !== undefined
+          ? `Flat advertising fee ${fmtCurrency(agreement.advertisingFeeAmount)}${gstSuffix(agreement.advertisingFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+          : undefined;
+      results.push(buildResult("Advertising Fee", expected, advertisingActual, false, calculation));
+    }
+  }
+
   // No agreement field could ever supply an expected amount for an unrecognised charge — always
   // reported as "unspecified" so it stays visible rather than silently vanishing from every total.
   if (wants("Other Fee")) {
@@ -347,8 +370,8 @@ function annualizeFlatFee(amount: number, frequency: FeeFrequency | undefined, s
 }
 
 /**
- * Reconciles the flat/infrequent agreement fees — Admin Fee, Lease Renewal Fee, Inspection Fee —
- * plus unrecognised "Other Fee" charges, once for a whole FY (or other span), rather than once per
+ * Reconciles the flat/infrequent agreement fees — Admin Fee, Lease Renewal Fee, Inspection Fee,
+ * Advertising Fee — plus unrecognised "Other Fee" charges, once for a whole FY (or other span), rather than once per
  * calling period. This is the counterpart to verifyAgentFees's per-period Management/Letting Fee
  * handling: those two scale naturally with how often they're charged (a % of rent, a fee per new
  * tenancy), but a flat contracted admin fee doesn't — comparing the same raw contracted amount
@@ -409,6 +432,19 @@ export function reconcileFlatFees(params: {
         ? `Flat inspection fee ${fmtCurrency(agreement.inspectionFeeAmount)}${gstSuffix(agreement.inspectionFeeGstInclusive)} = ${fmtCurrency(expected!)}`
         : undefined;
     results.push(buildResult("Inspection Fee", expected, inspectionActual, false, calculation));
+  }
+
+  const advertisingActual = actualByType.get("Advertising Fee") ?? 0;
+  if (advertisingActual > 0) {
+    const expected =
+      agreement.advertisingFeeAmount !== undefined
+        ? effectiveRate(agreement.advertisingFeeAmount, agreement.advertisingFeeGstInclusive)
+        : undefined;
+    const calculation =
+      agreement.advertisingFeeAmount !== undefined
+        ? `Flat advertising fee ${fmtCurrency(agreement.advertisingFeeAmount)}${gstSuffix(agreement.advertisingFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+        : undefined;
+    results.push(buildResult("Advertising Fee", expected, advertisingActual, false, calculation));
   }
 
   // Reconciled here rather than in verifyAgentFees's per-period call (callers that sum across

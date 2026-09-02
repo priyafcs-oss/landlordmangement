@@ -2,6 +2,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedLeaseFields, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 const LEASE_PROMPT = `You are extracting structured tenancy data from a residential lease/rent agreement (or lease renewal) email for an Australian rental property.
 Extract the fields defined in the response schema as strict JSON.
@@ -99,7 +100,13 @@ export async function parseLeaseAgreement(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }

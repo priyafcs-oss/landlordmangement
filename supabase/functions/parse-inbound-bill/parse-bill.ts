@@ -11,6 +11,7 @@ import {
   validateParsedBill,
 } from "./core-parser.ts";
 import type { NormalizedBillInput, ParsedBillFields, ParseResult, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
@@ -362,6 +363,10 @@ async function writeApprovedBill(
     tenantRebillStatus: billType === "Water" ? "pending" : undefined,
   });
   if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "property_bills", emailMessageId);
+      if (existing) return { ok: true, billId: existing.id, status: "approved", reviewReason: null, matchedPropertyId };
+    }
     return { ok: false, error: error.message };
   }
 
@@ -446,7 +451,13 @@ async function stageBillProposal(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }

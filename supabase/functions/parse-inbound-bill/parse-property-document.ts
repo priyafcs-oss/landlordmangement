@@ -2,6 +2,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { matchProperty } from "./property-match.ts";
 import { buildDocumentParts, callGeminiJSON } from "./gemini.ts";
 import type { NormalizedBillInput, ParsedPropertyDocumentFields, ProposalParseResult } from "./types.ts";
+import { isDuplicateEmailMessageId, findByEmailMessageId } from "./idempotency.ts";
 
 const PROMPT = `You are extracting property ownership/policy details from a document forwarded to an Australian landlord — this is NOT a bill to be paid now. It's one of: a settlement statement, an insurance certificate/policy schedule, a strata/owners-corporation notice, or a purchase Contract of Sale (where the landlord is the buyer — the vendor/purchaser agreement itself, before or after settlement).
 Extract the fields defined in the response schema as strict JSON. Every field except document_category, property_address and confidence is nullable — only fill in what this specific document actually states, leave the rest null. Do not guess or invent values.
@@ -158,7 +159,13 @@ export async function parsePropertyDocument(
   };
 
   const { error } = await supabase.from("ai_intake_proposals").insert(row);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (emailMessageId && isDuplicateEmailMessageId(error)) {
+      const existing = await findByEmailMessageId(supabase, "ai_intake_proposals", emailMessageId);
+      if (existing) return { ok: true, proposalId: existing.id };
+    }
+    return { ok: false, error: error.message };
+  }
 
   return { ok: true, proposalId: row.id };
 }
