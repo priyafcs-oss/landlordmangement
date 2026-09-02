@@ -1095,6 +1095,12 @@ export interface EmailInboxLogEntry {
   id: string;
   created_at?: string;
   emailId?: string;
+  /** Distinguishes which attachment this row is for, when an email carried more than one — each
+   * gets its own row now instead of only the single "most likely" attachment being processed and
+   * the rest silently ignored. A fixed sentinel (not the attachment's real id) for a text-only
+   * email with no attachment, so the (emailId, attachmentId) uniqueness still dedupes webhook
+   * retries for that case the same way a single emailId column used to. */
+  attachmentId?: string;
   fromAddress?: string;
   subject?: string;
   hasAttachment: boolean;

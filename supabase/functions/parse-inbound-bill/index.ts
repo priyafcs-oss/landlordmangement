@@ -27,6 +27,12 @@ interface ResendAttachmentDownload {
 
 const RESEND_BASE_URL = "https://api.resend.com/emails/receiving";
 
+/** Sentinel attachmentId for the text-only case (no attachment at all) — a fixed non-null value
+ * so the (emailId, attachmentId) uniqueness on email_inbox_log still dedupes a Svix webhook retry
+ * for that case, the same way a plain emailId column used to before an email could produce more
+ * than one logged row. */
+const NO_ATTACHMENT_ID = "text-only";
+
 /**
  * GET /emails/receiving/{id} — email metadata + text/html body. Attachments here are metadata
  * only (id/filename/content_type), never inline content — confirmed against Resend's docs
@@ -70,17 +76,18 @@ async function fetchAttachmentBase64(emailId: string, attachmentId: string, apiK
 }
 
 /**
- * Every email this webhook is invoked for gets exactly one row here, regardless of outcome —
- * unlike ai_intake_proposals, which only ever gets a row when classification/extraction
- * actually succeeds. Upserts on emailId so a Svix webhook retry overwrites the same row with
- * the latest outcome instead of duplicating it. Best-effort: a logging failure is reported to
- * the function log but never fails the request — the email itself has already been processed
- * (or failed) by the time this runs.
+ * Every (email, attachment) pair this webhook processes gets exactly one row here, regardless of
+ * outcome — unlike ai_intake_proposals, which only ever gets a row when classification/extraction
+ * actually succeeds. Upserts on (emailId, attachmentId) so a Svix webhook retry overwrites the
+ * same row with the latest outcome instead of duplicating it — see NO_ATTACHMENT_ID for the
+ * text-only case. Best-effort: a logging failure is reported to the function log but never fails
+ * the request — the document itself has already been processed (or failed) by the time this runs.
  */
 async function logEmailInbox(
   supabase: SupabaseClient,
   fields: {
     emailId: string;
+    attachmentId: string;
     fromAddress?: string;
     subject?: string;
     hasAttachment: boolean;
@@ -95,6 +102,7 @@ async function logEmailInbox(
   const row = {
     id: `eml_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     emailId: fields.emailId,
+    attachmentId: fields.attachmentId,
     fromAddress: fields.fromAddress ?? null,
     subject: fields.subject ?? null,
     hasAttachment: fields.hasAttachment,
@@ -105,7 +113,7 @@ async function logEmailInbox(
     billId: fields.billId ?? null,
     errorMessage: fields.errorMessage ?? null,
   };
-  const { error } = await supabase.from("email_inbox_log").upsert(row, { onConflict: "emailId" });
+  const { error } = await supabase.from("email_inbox_log").upsert(row, { onConflict: "emailId,attachmentId" });
   if (error) console.error("[parse-inbound-bill] failed to write email_inbox_log", error);
 }
 
@@ -115,31 +123,28 @@ function isSupportedAttachment(contentType: string): boolean {
 }
 
 /**
- * Picks the attachment most likely to actually BE the bill, not just the first supported one.
- * Forwarded emails often carry inline images (signature logos, tracking pixels) ahead of the
- * real document in the attachments array — a naive "first supported" pick grabs those instead
- * of the PDF, feeding Gemini a signature image and getting a correctly-empty extraction back.
- * Preference order: non-inline PDF > non-inline image > any PDF > any image.
+ * Picks every attachment worth processing as its own document — an email can carry several
+ * genuine attachments (e.g. three separate water bills batched into one forward), and each one
+ * now gets classified/extracted/staged independently, same as selecting multiple files at once in
+ * the manual Upload dialog. Forwarded emails often also carry inline images (signature logos,
+ * tracking pixels) ahead of or alongside the real document(s) — those are excluded whenever at
+ * least one non-inline supported attachment exists. Only when EVERY supported attachment is
+ * marked inline (some mail clients mark everything that way) does this fall back to a single
+ * best-guess pick, to avoid risking a signature logo being processed as its own document.
  */
-function pickAttachment(attachments: ResendAttachmentMeta[]): ResendAttachmentMeta | undefined {
+function pickAttachments(attachments: ResendAttachmentMeta[]): ResendAttachmentMeta[] {
   const supported = attachments.filter((a) => isSupportedAttachment(a.content_type));
   const notInline = supported.filter((a) => a.content_disposition !== "inline");
-  return (
-    notInline.find((a) => a.content_type === "application/pdf") ??
-    notInline[0] ??
-    supported.find((a) => a.content_type === "application/pdf") ??
-    supported[0]
-  );
+  if (notInline.length > 0) return notInline;
+  const bestInline = supported.find((a) => a.content_type === "application/pdf") ?? supported[0];
+  return bestInline ? [bestInline] : [];
 }
 
-async function normalize(email: ResendReceivedEmail, apiKey: string): Promise<NormalizedBillInput> {
-  const attachmentMeta = pickAttachment(email.attachments ?? []);
-  const unsupported = email.attachments?.filter((a) => !isSupportedAttachment(a.content_type)) ?? [];
-  if (unsupported.length > 0) {
-    console.warn(
-      `[parse-inbound-bill] skipping unsupported attachment type(s): ${unsupported.map((a) => `${a.filename} (${a.content_type})`).join(", ")} — only PDF and image attachments can be read`,
-    );
-  }
+async function normalizeOne(
+  email: ResendReceivedEmail,
+  apiKey: string,
+  attachmentMeta: ResendAttachmentMeta | undefined,
+): Promise<NormalizedBillInput> {
   const pdfBase64 = attachmentMeta ? await fetchAttachmentBase64(email.id, attachmentMeta.id, apiKey) : undefined;
   return {
     fromEmail: email.from,
@@ -198,14 +203,20 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // Populated once fetchReceivedEmail succeeds — kept outside the try block so the catch below
-  // can still log a from/subject-bearing row if something later throws.
   let email: ResendReceivedEmail | undefined;
   try {
     email = await fetchReceivedEmail(emailId, apiKey);
-    const input = await normalize(email, apiKey);
 
-    if (!input.pdfBase64 && !input.textBody?.trim()) {
+    const unsupported = (email.attachments ?? []).filter((a) => !isSupportedAttachment(a.content_type));
+    if (unsupported.length > 0) {
+      console.warn(
+        `[parse-inbound-bill] skipping unsupported attachment type(s): ${unsupported.map((a) => `${a.filename} (${a.content_type})`).join(", ")} — only PDF and image attachments can be read`,
+      );
+    }
+
+    const attachmentMetas = pickAttachments(email.attachments ?? []);
+
+    if (attachmentMetas.length === 0 && !email.text?.trim()) {
       const attachmentSummary = email.attachments?.length
         ? email.attachments.map((a) => `${a.filename} (${a.content_type})`).join(", ")
         : "none";
@@ -213,6 +224,7 @@ Deno.serve(async (req) => {
       console.error(`[parse-inbound-bill] ${error}`);
       await logEmailInbox(supabase, {
         emailId,
+        attachmentId: NO_ATTACHMENT_ID,
         fromAddress: email.from,
         subject: email.subject,
         hasAttachment: (email.attachments?.length ?? 0) > 0,
@@ -225,75 +237,104 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (input.pdfBase64 && isOversizedUpload(input.pdfBase64)) {
-      const error = `Attachment too large for the AI reader (limit ~${Math.round((MAX_AI_UPLOAD_BASE64_CHARS * 0.75) / (1024 * 1024))}MB) — a scanned multi-page document likely needs to be compressed or split before forwarding.`;
-      console.error(`[parse-inbound-bill] ${error}`);
-      await logEmailInbox(supabase, {
-        emailId,
-        fromAddress: email.from,
-        subject: email.subject,
-        hasAttachment: true,
-        attachmentFileName: input.pdfFileName,
-        status: "failed",
-        errorMessage: error,
-      });
-      return new Response(JSON.stringify({ error }), {
-        status: 413,
-        headers: { "Content-Type": "application/json" },
-      });
+    // Text-only email (no attachment at all) processes exactly like before — one input, keyed by
+    // the plain emailId for idempotency, same as every row already on file predates this change.
+    // One or more real attachments each become their own document, keyed by (emailId, attachment
+    // id) so a Svix retry of the same webhook still dedupes per attachment rather than per email.
+    const jobs: { attachmentMeta: ResendAttachmentMeta | undefined; attachmentId: string; emailMessageId: string }[] =
+      attachmentMetas.length === 0
+        ? [{ attachmentMeta: undefined, attachmentId: NO_ATTACHMENT_ID, emailMessageId: emailId }]
+        : attachmentMetas.map((a) => ({ attachmentMeta: a, attachmentId: a.id, emailMessageId: `${emailId}:${a.id}` }));
+
+    // Sequential — same reasoning as the manual bulk-upload dialog: avoids a burst of concurrent
+    // Gemini calls when one email carries several attachments.
+    const results: { ok: boolean; error?: string }[] = [];
+    for (const job of jobs) {
+      try {
+        const input = await normalizeOne(email, apiKey, job.attachmentMeta);
+
+        if (input.pdfBase64 && isOversizedUpload(input.pdfBase64)) {
+          const error = `Attachment too large for the AI reader (limit ~${Math.round((MAX_AI_UPLOAD_BASE64_CHARS * 0.75) / (1024 * 1024))}MB) — a scanned multi-page document likely needs to be compressed or split before forwarding.`;
+          console.error(`[parse-inbound-bill] ${error}`);
+          await logEmailInbox(supabase, {
+            emailId,
+            attachmentId: job.attachmentId,
+            fromAddress: email.from,
+            subject: email.subject,
+            hasAttachment: true,
+            attachmentFileName: input.pdfFileName,
+            status: "failed",
+            errorMessage: error,
+          });
+          results.push({ ok: false, error });
+          continue;
+        }
+
+        const result = await routeInboundDocument(supabase, input, job.emailMessageId);
+        const documentType = "documentType" in result ? result.documentType : undefined;
+        const proposalId = "proposalId" in result ? result.proposalId : undefined;
+        const billId = "billId" in result ? result.billId : undefined;
+
+        if (!result.ok) {
+          console.error("[parse-inbound-bill] parse failed", result.error);
+          await logEmailInbox(supabase, {
+            emailId,
+            attachmentId: job.attachmentId,
+            fromAddress: email.from,
+            subject: email.subject,
+            hasAttachment: !!input.pdfBase64,
+            attachmentFileName: input.pdfFileName,
+            status: "failed",
+            documentType,
+            errorMessage: result.error,
+          });
+          results.push({ ok: false, error: result.error });
+          continue;
+        }
+
+        await logEmailInbox(supabase, {
+          emailId,
+          attachmentId: job.attachmentId,
+          fromAddress: email.from,
+          subject: email.subject,
+          hasAttachment: !!input.pdfBase64,
+          attachmentFileName: input.pdfFileName,
+          status: result.skipped ? "skipped" : proposalId ? "staged" : "processed",
+          documentType,
+          proposalId,
+          billId,
+        });
+        results.push({ ok: true });
+      } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : "Internal error";
+        console.error("[parse-inbound-bill] attachment processing failed", errorMessage);
+        await logEmailInbox(supabase, {
+          emailId,
+          attachmentId: job.attachmentId,
+          fromAddress: email.from,
+          subject: email.subject,
+          hasAttachment: !!job.attachmentMeta,
+          attachmentFileName: job.attachmentMeta?.filename,
+          status: "failed",
+          errorMessage,
+        });
+        results.push({ ok: false, error: errorMessage });
+      }
     }
 
-    const result = await routeInboundDocument(supabase, input, emailId);
-    const documentType = "documentType" in result ? result.documentType : undefined;
-    const proposalId = "proposalId" in result ? result.proposalId : undefined;
-    const billId = "billId" in result ? result.billId : undefined;
-
-    if (!result.ok) {
-      console.error("[parse-inbound-bill] parse failed", result.error);
-      await logEmailInbox(supabase, {
-        emailId,
-        fromAddress: email.from,
-        subject: email.subject,
-        hasAttachment: !!input.pdfBase64,
-        attachmentFileName: input.pdfFileName,
-        status: "failed",
-        documentType,
-        errorMessage: result.error,
-      });
-      return new Response(JSON.stringify({ error: result.error }), {
-        status: 422,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    await logEmailInbox(supabase, {
-      emailId,
-      fromAddress: email.from,
-      subject: email.subject,
-      hasAttachment: !!input.pdfBase64,
-      attachmentFileName: input.pdfFileName,
-      status: result.skipped ? "skipped" : proposalId ? "staged" : "processed",
-      documentType,
-      proposalId,
-      billId,
+    // Resend only cares about the HTTP status (200 = don't retry) — every job already has its own
+    // outcome recorded in email_inbox_log, so a partial failure among several attachments still
+    // returns 200 rather than causing Resend to retry the ones that already succeeded.
+    return new Response(JSON.stringify({ results }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
-
-    return new Response(
-      JSON.stringify({
-        skipped: result.skipped,
-        billId,
-        proposalId,
-        status: "status" in result ? result.status : undefined,
-        reviewReason: "reviewReason" in result ? result.reviewReason : undefined,
-        matchedPropertyId: "matchedPropertyId" in result ? result.matchedPropertyId : undefined,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
   } catch (e) {
     console.error("[parse-inbound-bill] unhandled error", e);
     const errorMessage = e instanceof Error ? e.message : "Internal error";
     await logEmailInbox(supabase, {
       emailId,
+      attachmentId: NO_ATTACHMENT_ID,
       fromAddress: email?.from,
       subject: email?.subject,
       hasAttachment: (email?.attachments?.length ?? 0) > 0,
