@@ -139,15 +139,20 @@ export function UploadDocumentDialog() {
               agreement, signed management/agency agreement, settlement statement, insurance certificate or strata
               notice. It's matched to a property and staged for your review the same way an emailed document would be.
             </p>
+            <p className="text-xs font-medium text-foreground">
+              You can select several files at once — in the file picker that opens, hold Ctrl (Windows) or Cmd (Mac)
+              and click each file, or drag a group of files in together.
+            </p>
             <Input
               type="file"
               accept="application/pdf,image/*"
               multiple
               onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
             />
-            {files.length > 1 && (
+            {files.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {files.length} files selected — each is read and matched individually, one after another.
+                {files.length} file{files.length === 1 ? "" : "s"} selected
+                {files.length > 1 ? " — each is read and matched individually, one after another." : "."}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
