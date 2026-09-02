@@ -61,3 +61,19 @@ export function openBillDocument(fileName: string | undefined, base64: string | 
   if (!base64) return;
   window.open(base64ToBlobUrl(base64, mimeForFileName(fileName)), "_blank");
 }
+
+/** Reads a File into a full `data:<mime>;base64,<data>` string. */
+export function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Reads a File into just its base64 payload, with the `data:...;base64,` prefix already stripped. */
+export async function readFileAsBase64(file: File): Promise<string> {
+  const dataUrl = await readFileAsDataUrl(file);
+  return dataUrl.slice(dataUrl.indexOf(",") + 1);
+}

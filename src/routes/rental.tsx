@@ -64,7 +64,7 @@ import {
 import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
-import { MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
@@ -1184,13 +1184,7 @@ function BankFeedDialog() {
     }
     setExtracting(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Couldn't read file"));
-        reader.readAsDataURL(f);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
+      const base64 = await readFileAsBase64(f);
       const { data, error } = await supabase.functions.invoke<{
         ok: boolean;
         transactions?: BankStatementTransaction[];

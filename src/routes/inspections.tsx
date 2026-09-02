@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
+import { readFileAsDataUrl } from "@/lib/files";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -551,23 +552,18 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
 
   const handleReportFile = (f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+    readFileAsDataUrl(f).then((data) => {
       const name = f.name;
-      const data = String(reader.result);
       setFileFileName(name);
       setFileData(data);
       persist({ fileFileName: name, fileData: data });
       toast.success("Report attached");
-    };
-    reader.readAsDataURL(f);
+    });
   };
 
   const handleIssuePhoto = (f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => setNewIssuePhoto({ name: f.name, data: String(reader.result) });
-    reader.readAsDataURL(f);
+    readFileAsDataUrl(f).then((data) => setNewIssuePhoto({ name: f.name, data }));
   };
 
   const addIssue = () => {
@@ -650,9 +646,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
   const removeItem = (ri: number, ii: number) => setRooms((rs) => rs.map((r, i) => (i === ri ? { ...r, items: r.items.filter((_, j) => j !== ii) } : r)));
   const itemPhoto = (ri: number, ii: number, f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => updateItem(ri, ii, { photoName: f.name, photoData: String(reader.result) });
-    reader.readAsDataURL(f);
+    readFileAsDataUrl(f).then((data) => updateItem(ri, ii, { photoName: f.name, photoData: data }));
   };
   const analysePhoto = async (ri: number, ii: number) => {
     const item = rooms[ri]?.items[ii];

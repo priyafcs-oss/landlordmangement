@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
+import { readFileAsDataUrl } from "@/lib/files";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -62,15 +63,6 @@ function UnitScopeField({ prop, unitId, onChange }: { prop: Property; unitId: st
       </Select>
     </Field>
   );
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Couldn't read file"));
-    reader.readAsDataURL(file);
-  });
 }
 
 /* ------------------------------------------------------------------------------------------- */

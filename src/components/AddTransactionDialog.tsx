@@ -28,7 +28,7 @@ import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, Ch
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType, mapExpenseCategory } from "@/lib/calculations";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
@@ -193,14 +193,9 @@ export function AddTransactionDialog({
   };
 
   const addAdditionalFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      const base64 = dataUrl.split(",")[1] ?? "";
-      setAdditionalFiles((v) => [...v, { fileName: file.name, fileData: base64 }]);
-    };
-    reader.onerror = () => toast.error(`Couldn't read ${file.name}`);
-    reader.readAsDataURL(file);
+    readFileAsBase64(file)
+      .then((base64) => setAdditionalFiles((v) => [...v, { fileName: file.name, fileData: base64 }]))
+      .catch(() => toast.error(`Couldn't read ${file.name}`));
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (li.direction === "Income" ? 1 : -1) * (parseFloat(li.amount) || 0), 0);
@@ -329,13 +324,7 @@ export function AddTransactionDialog({
     setExtractSummary(null);
     setExtractEmpty(false);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Couldn't read file"));
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
+      const base64 = await readFileAsBase64(file);
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
       const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-bill", {

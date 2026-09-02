@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { selectPublicProperties, type PublicProperty } from "@/lib/db";
+import { readFileAsDataUrl } from "@/lib/files";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,17 +59,13 @@ function MaintenancePage() {
     if (!files) return;
     const arr = Array.from(files).slice(0, 3 - photos.length);
     arr.forEach((f) => {
-      const reader = new FileReader();
-      reader.onload = () => setPhotos((p) => [...p, { name: f.name, data: String(reader.result) }]);
-      reader.readAsDataURL(f);
+      readFileAsDataUrl(f).then((data) => setPhotos((p) => [...p, { name: f.name, data }]));
     });
   };
   const onVideo = (f: File | undefined) => {
     if (!f) return;
     if (f.size > 15 * 1024 * 1024) return toast.error("Video must be under 15MB");
-    const reader = new FileReader();
-    reader.onload = () => setVideo({ name: f.name, data: String(reader.result) });
-    reader.readAsDataURL(f);
+    readFileAsDataUrl(f).then((data) => setVideo({ name: f.name, data }));
   };
 
   const validEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);

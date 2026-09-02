@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
+import { readFileAsDataUrl } from "@/lib/files";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -172,12 +173,10 @@ function TenantInfoStatementSettings() {
   const handleUpload = (f: File | undefined) => {
     if (!f) return;
     if (f.type !== "application/pdf") return toast.error("Please upload a PDF file");
-    const reader = new FileReader();
-    reader.onload = () => {
-      updateTenantInfoStatement({ fileName: f.name, fileData: String(reader.result), uploadedAt: new Date().toISOString() });
+    readFileAsDataUrl(f).then((fileData) => {
+      updateTenantInfoStatement({ fileName: f.name, fileData, uploadedAt: new Date().toISOString() });
       toast.success("Tenant Information Statement uploaded");
-    };
-    reader.readAsDataURL(f);
+    });
   };
 
   return (
@@ -226,9 +225,7 @@ function LeaseTemplateSettings() {
   const handleUpload = (f: File | undefined) => {
     if (!f) return;
     if (f.type !== "application/pdf") return toast.error("Please upload a PDF file");
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const fileData = String(reader.result);
+    readFileAsDataUrl(f).then(async (fileData) => {
       setBusy(true);
       try {
         const fields = await inspectLeaseTemplate(fileData);
@@ -260,8 +257,7 @@ function LeaseTemplateSettings() {
       } finally {
         setBusy(false);
       }
-    };
-    reader.readAsDataURL(f);
+    });
   };
 
   const setFieldMapping = (ourKey: string, pdfField: string) => {

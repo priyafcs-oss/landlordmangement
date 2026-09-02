@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { DepreciationItem } from "@/lib/types";
 
@@ -102,13 +102,7 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     setExtractOk(false);
     setExtractEmpty(false);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Couldn't read file"));
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
+      const base64 = await readFileAsBase64(file);
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
       const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-depreciation-report", {

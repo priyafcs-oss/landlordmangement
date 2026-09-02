@@ -13,7 +13,7 @@ import { FileUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useStore } from "@/lib/store";
 import { ProposalReviewDialog } from "@/components/PropertyShared";
-import { MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { toast } from "sonner";
 
 interface UploadResult {
@@ -55,13 +55,9 @@ export function UploadDocumentDialog() {
         error: `${file.name} is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
       };
     }
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error(`Couldn't read ${file.name}`));
-      reader.readAsDataURL(file);
+    const base64 = await readFileAsBase64(file).catch(() => {
+      throw new Error(`Couldn't read ${file.name}`);
     });
-    const base64 = dataUrl.split(",")[1] ?? "";
     const { data, error } = await supabase.functions.invoke<UploadResult>("upload-document", {
       body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
     });

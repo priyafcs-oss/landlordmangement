@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
+import { readFileAsDataUrl } from "@/lib/files";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -74,11 +75,7 @@ export function ExpenseDialog({
 
   const handleFile = (f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setForm((s) => ({ ...s, invoiceFileName: f.name, invoiceFileData: String(reader.result) }));
-    };
-    reader.readAsDataURL(f);
+    readFileAsDataUrl(f).then((data) => setForm((s) => ({ ...s, invoiceFileName: f.name, invoiceFileData: data })));
   };
 
   const submit = () => {

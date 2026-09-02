@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Pencil, Trash2, Eye, Plus, Receipt, FileWarning, FolderOpen, FileSignature } from "lucide-react";
 import { fmtCurrency, daysUntil } from "@/lib/calculations";
-import { openBillDocument } from "@/lib/files";
+import { openBillDocument, readFileAsDataUrl } from "@/lib/files";
 import { ProviderDialog, ProviderRow, ProviderAgreementDialog } from "@/components/PropertyShared";
 import { agreementsForProvider } from "@/lib/providerAgreements";
 import { hasFeeTerms } from "@/lib/feeVerification";
@@ -30,15 +30,6 @@ export const Route = createFileRoute("/providers_/$providerId")({
   }),
   component: ProviderProfilePage,
 });
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Couldn't read file"));
-    reader.readAsDataURL(file);
-  });
-}
 
 function ProviderDocumentDialog({ providerId, doc, trigger }: { providerId: string; doc?: ProviderDocument; trigger?: React.ReactNode }) {
   const { addProviderDocument, updateProviderDocument } = useStore();

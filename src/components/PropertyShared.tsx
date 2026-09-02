@@ -109,7 +109,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64 } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
@@ -120,15 +120,6 @@ const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 /** Sentinel for "no specific dwelling" in a Dwelling Select — Radix Select item values can't be
  * an empty string, and shared/whole-property genuinely needs its own selectable option. */
 const SHARED_UNIT = "__shared__";
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Couldn't read file"));
-    reader.readAsDataURL(file);
-  });
-}
 
 interface DomainSuggestResult {
   ok?: boolean;
@@ -4406,13 +4397,7 @@ async function extractAgreementFile(
   setExtractSummary(null);
   let agencyName: string | undefined;
   try {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Couldn't read file"));
-      reader.readAsDataURL(file);
-    });
-    const base64 = dataUrl.split(",")[1] ?? "";
+    const base64 = await readFileAsBase64(file);
     setForm((f) => ({ ...f, contractFileName: file.name, contractFileData: base64 }));
 
     const { data, error } = await supabase.functions.invoke<AgencyAgreementExtractResult>("extract-agency-agreement", {
@@ -6013,12 +5998,10 @@ export function RenewLeaseDialog({ tenant, trigger }: { tenant: Tenant; trigger?
   };
   const onDocFile = (f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+    readFileAsDataUrl(f).then((data) => {
       setDocFileName(f.name);
-      setDocFileData(String(reader.result));
-    };
-    reader.readAsDataURL(f);
+      setDocFileData(data);
+    });
   };
 
   return (
@@ -6184,10 +6167,9 @@ export function TenantDialog({
   };
   const onFile = (key: "leaseDocument" | "idProof" | "bondTransfer", f: File | undefined) => {
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () =>
-      setForm((s) => ({ ...s, [`${key}FileName`]: f.name, [`${key}FileData`]: String(reader.result) } as typeof s));
-    reader.readAsDataURL(f);
+    readFileAsDataUrl(f).then((data) =>
+      setForm((s) => ({ ...s, [`${key}FileName`]: f.name, [`${key}FileData`]: data } as typeof s)),
+    );
   };
   const onLeaseFile = (f: File | undefined) => onFile("leaseDocument", f);
 

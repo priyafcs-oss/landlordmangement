@@ -36,7 +36,7 @@ import {
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
-import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
+import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -336,13 +336,7 @@ export function AddBillDialog({
     setExtractSummary(null);
     setExtractEmpty(false);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("Couldn't read file"));
-        reader.readAsDataURL(file);
-      });
-      const base64 = dataUrl.split(",")[1] ?? "";
+      const base64 = await readFileAsBase64(file);
       // Attach immediately so the document pane shows the file even if extraction fails below.
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
