@@ -36,7 +36,7 @@ of GST" -> weeks_rent 1, gst_inclusive true.
 - inspections_per_year is how many routine inspections per year the agreement commits the agent to (e.g. "quarterly inspections" -> 4, "twice yearly" -> 2). Null if not stated.
 - advertising_fee_amount / advertising_fee_gst_inclusive is a flat marketing/advertising fee charged when the property is listed for a new tenant, separate from the letting fee itself (sometimes called a "marketing fee" or "sign board fee"). Null if not stated.
 - lease_preparation_fee_amount / lease_preparation_fee_gst_inclusive is a flat fee for preparing/drawing up the tenancy agreement document itself — may be called "lease preparation fee", "tenancy agreement fee", "lease document fee", "new lease fee", or "agreement preparation fee" — separate from the letting/leasing fee itself (the fee for FINDING a tenant). Null if not stated as its own line item.
-- ncat_fee_amount / ncat_fee_gst_inclusive is a flat fee (or hourly rate) for the agent attending/lodging an NCAT (or other state tribunal) matter on the owner's behalf. Null if not stated.
+- ncat_fee_amount is text (not a number) describing the fee for the agent attending/lodging an NCAT (or other state tribunal) matter on the owner's behalf, copied close to how the contract states it (e.g. "$50/hour", "$50 per hour or flat $200", "as per current scale of fees"). Null if not stated. ncat_fee_gst_inclusive is the GST wording for it, using the same rule as every other fee above — only set if a specific dollar figure is actually stated.
 - agent_pays_water_usage: true if the agreement says the agent pays/manages water usage charges on the owner's behalf from rental proceeds, false if the agreement says the owner/landlord handles this directly, null if not stated either way.
 - agent_pays_land_tax: same as above, for land tax. Null if not stated either way.
 - agent_pays_council_rates: same as above, for council rates. Null if not stated either way.
@@ -68,7 +68,7 @@ const AGREEMENT_SCHEMA = {
     advertising_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
     lease_preparation_fee_amount: { type: "NUMBER", nullable: true },
     lease_preparation_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
-    ncat_fee_amount: { type: "NUMBER", nullable: true },
+    ncat_fee_amount: { type: "STRING", nullable: true },
     ncat_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
     agent_pays_water_usage: { type: "BOOLEAN", nullable: true },
     agent_pays_land_tax: { type: "BOOLEAN", nullable: true },
@@ -102,7 +102,7 @@ export interface ParsedAgencyAgreementFields {
   advertising_fee_gst_inclusive: boolean | null;
   lease_preparation_fee_amount: number | null;
   lease_preparation_fee_gst_inclusive: boolean | null;
-  ncat_fee_amount: number | null;
+  ncat_fee_amount: string | null;
   ncat_fee_gst_inclusive: boolean | null;
   agent_pays_water_usage: boolean | null;
   agent_pays_land_tax: boolean | null;

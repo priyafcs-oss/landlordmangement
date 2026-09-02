@@ -575,8 +575,10 @@ export interface ProviderAgreement {
   advertisingFeeAmount?: number;
   /** One-off fee for preparing a new lease, separate from the letting fee itself. */
   leasePreparationFeeAmount?: number;
-  /** Fee for attending/lodging an NCAT (or other tribunal) matter on the owner's behalf. */
-  ncatFeeAmount?: number;
+  /** Fee for attending/lodging an NCAT (or other tribunal) matter on the owner's behalf — free
+   * text rather than a number since these are often quoted as a rate ("$50/hour") rather than a
+   * flat amount. */
+  ncatFeeAmount?: string;
   /** How many routine inspections per year the agreement commits the agent to — a count, distinct
    * from `inspectionFeeAmount` (the $ charged per inspection, if billed separately). */
   inspectionsPerYear?: number;
@@ -1066,7 +1068,7 @@ export interface AgencyAgreementProposalPayload {
   advertisingFeeGstInclusive?: boolean;
   leasePreparationFeeAmount?: number;
   leasePreparationFeeGstInclusive?: boolean;
-  ncatFeeAmount?: number;
+  ncatFeeAmount?: string;
   ncatFeeGstInclusive?: boolean;
   inspectionsPerYear?: number;
   agentPaysWaterUsage?: boolean;

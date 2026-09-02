@@ -4209,7 +4209,7 @@ interface AgencyAgreementExtractResult {
   advertising_fee_gst_inclusive?: boolean | null;
   lease_preparation_fee_amount?: number | null;
   lease_preparation_fee_gst_inclusive?: boolean | null;
-  ncat_fee_amount?: number | null;
+  ncat_fee_amount?: string | null;
   ncat_fee_gst_inclusive?: boolean | null;
   agent_pays_water_usage?: boolean | null;
   agent_pays_land_tax?: boolean | null;
@@ -4275,7 +4275,7 @@ function agreementFormFrom(agreement?: Partial<ProviderAgreement>): AgreementFor
     advertisingFeeGstInclusive: agreement?.advertisingFeeGstInclusive ?? false,
     leasePreparationFeeAmount: agreement?.leasePreparationFeeAmount !== undefined ? String(agreement.leasePreparationFeeAmount) : "",
     leasePreparationFeeGstInclusive: agreement?.leasePreparationFeeGstInclusive ?? false,
-    ncatFeeAmount: agreement?.ncatFeeAmount !== undefined ? String(agreement.ncatFeeAmount) : "",
+    ncatFeeAmount: agreement?.ncatFeeAmount ?? "",
     ncatFeeGstInclusive: agreement?.ncatFeeGstInclusive ?? false,
     agentPaysWaterUsage: agreement?.agentPaysWaterUsage ?? false,
     agentPaysLandTax: agreement?.agentPaysLandTax ?? false,
@@ -4309,7 +4309,7 @@ function agreementPayloadFrom(form: AgreementFormState) {
     advertisingFeeGstInclusive: form.advertisingFeeGstInclusive,
     leasePreparationFeeAmount: num(form.leasePreparationFeeAmount),
     leasePreparationFeeGstInclusive: form.leasePreparationFeeGstInclusive,
-    ncatFeeAmount: num(form.ncatFeeAmount),
+    ncatFeeAmount: form.ncatFeeAmount.trim() || undefined,
     ncatFeeGstInclusive: form.ncatFeeGstInclusive,
     agentPaysWaterUsage: form.agentPaysWaterUsage,
     agentPaysLandTax: form.agentPaysLandTax,
@@ -4414,7 +4414,7 @@ async function extractAgreementFile(
         fieldsFound++;
       }
       if (data.ncat_fee_amount !== undefined && data.ncat_fee_amount !== null) {
-        next.ncatFeeAmount = String(data.ncat_fee_amount);
+        next.ncatFeeAmount = data.ncat_fee_amount;
         next.ncatFeeGstInclusive = data.ncat_fee_gst_inclusive ?? false;
         fieldsFound++;
       }
@@ -4470,6 +4470,7 @@ function FeeAmountField({
   gstInclusive,
   onGstInclusiveChange,
   placeholder,
+  inputType = "number",
 }: {
   label: string;
   value: string;
@@ -4477,10 +4478,13 @@ function FeeAmountField({
   gstInclusive: boolean;
   onGstInclusiveChange: (v: boolean) => void;
   placeholder?: string;
+  /** "text" for a fee that isn't always a flat number (e.g. an hourly-rate NCAT fee like
+   * "$50/hour"), where forcing a numeric input would make it impossible to type. */
+  inputType?: "number" | "text";
 }) {
   return (
     <Field label={label}>
-      <Input type="number" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      <Input type={inputType} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
       <label className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <Checkbox
           checked={gstInclusive}
@@ -4627,11 +4631,13 @@ function AgreementFields({
           onGstInclusiveChange={(v) => setForm((f) => ({ ...f, leasePreparationFeeGstInclusive: v }))}
         />
         <FeeAmountField
-          label="NCAT / tribunal fee ($)"
+          label="NCAT / tribunal fee"
           value={form.ncatFeeAmount}
           onChange={(v) => setForm((f) => ({ ...f, ncatFeeAmount: v }))}
           gstInclusive={form.ncatFeeGstInclusive}
           onGstInclusiveChange={(v) => setForm((f) => ({ ...f, ncatFeeGstInclusive: v }))}
+          inputType="text"
+          placeholder="e.g. $50/hour, or $50/hr or flat $200"
         />
         <Field label="Notice period (days)">
           <Input
