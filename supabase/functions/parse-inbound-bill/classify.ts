@@ -16,20 +16,31 @@ const CLASSIFY_PROMPT_BASE = `You are triaging an email forwarded to a landlord'
 
 Respond with your best-guess document_type and a 0-1 confidence.`;
 
-/** A Contract of Sale reads identically whichever side you're on — "Vendor" and "Purchaser" are
- * just document roles, they don't say which one is *this* landlord. Cross-referencing the
- * landlord's own known legal names against those roles is a far more reliable signal than asking
- * the model to guess from document content alone (which otherwise defaults toward "sale"). */
+/** A Contract of Sale (or a settlement statement/statement of adjustments — either side of a deal
+ * can be handed one, worded almost identically) reads the same whichever side you're on —
+ * "Vendor" and "Purchaser" are just document roles, they don't say which one is *this* landlord.
+ * Cross-referencing the landlord's own known legal names against those roles, and content-based
+ * tells when no name match is available, are far more reliable than asking the model to guess
+ * from a generic "settlement" label alone (which otherwise defaults toward "sale" — the failure
+ * mode that misfiled a purchase settlement letter instead of landing it on Purchase & Acquisition). */
 function buildClassifyPrompt(knownEntityNames: string[]): string {
-  if (knownEntityNames.length === 0) return CLASSIFY_PROMPT_BASE;
-  return `${CLASSIFY_PROMPT_BASE}
-
-For "property_sale" vs. "property_document" specifically: this landlord's own known legal
-names/entities are: ${knownEntityNames.join(", ")}. On a Contract of Sale, check which side —
+  const nameGuidance =
+    knownEntityNames.length > 0
+      ? `this landlord's own known legal names/entities are: ${knownEntityNames.join(", ")}. Check which side —
 Vendor/Seller or Purchaser/Buyer — matches (even loosely/partially) one of these names, and
 classify accordingly: matches the Vendor/Seller side → "property_sale"; matches the
-Purchaser/Buyer side → "property_document" (a purchase). If neither side clearly matches, fall
-back to your best judgement from context.`;
+Purchaser/Buyer side → "property_document" (a purchase).`
+      : `No known legal name is on file for this landlord to match against, so rely on the content tells below.`;
+  return `${CLASSIFY_PROMPT_BASE}
+
+For "property_sale" vs. "property_document" specifically — this applies to a Contract of Sale
+AND to a settlement statement / statement of adjustments / settlement letter, which use near
+identical wording regardless of which side of the deal they're for: ${nameGuidance}
+If that's inconclusive, fall back to these content tells: a document showing a deposit paid, a
+balance due AT settlement, stamp duty payable, or a new loan being drawn down to fund the
+purchase is purchase-side → "property_document". A document showing net proceeds TO the vendor,
+selling agent commission deducted, or an existing mortgage being discharged is sale-side →
+"property_sale". Only fall back to your best overall judgement if none of these tells apply.`;
 }
 
 const CLASSIFY_SCHEMA = {

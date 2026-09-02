@@ -3,19 +3,22 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { FileText, FolderOpen, ChevronDown, ChevronUp } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange } from "@/lib/calculations";
-import { DocumentLink } from "@/components/DocumentLink";
+import { ausFinancialYear, fyRange } from "@/lib/calculations";
+import {
+  DocTable,
+  DocGroupSection,
+  fileFormatOf,
+  formatDocMonthLabel,
+  FILE_FORMATS,
+  type FileFormat,
+} from "@/components/DocumentEntryRow";
 import { buildDocumentEntries, matchesDocumentQuery, type DocumentEntry } from "@/lib/documents";
 
 export const Route = createFileRoute("/documents")({
   head: () => ({
     meta: [
-      { title: "Documents — Landlord OS" },
+      { title: "Other documents — Landlord OS" },
       { name: "description", content: "Condition reports, bank statements and unrecognised documents that don't yet have a dedicated home on a property's own tabs." },
     ],
   }),
@@ -27,45 +30,11 @@ export const Route = createFileRoute("/documents")({
  * agreements) now surfaces on the tab that actually owns that data instead of only here. */
 const DOCUMENTS_TAB_KINDS: DocumentEntry["kind"][] = ["Condition Report", "Bank Statement", "Unrecognised"];
 
-function formatDocMonthLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
-}
-
-type FileFormat = "PDF" | "Image" | "Spreadsheet" | "Document" | "Email / web" | "Other";
-const FILE_FORMATS: FileFormat[] = ["PDF", "Image", "Spreadsheet", "Document", "Email / web", "Other"];
-
-/** File format is inferred from the extension since nothing stores it explicitly — falls back to
- * "Email / web" for an entry that only ever carried the source email (no attachment), and "Other"
- * for an unrecognised extension that still has an actual file attached. */
-function fileFormatOf(d: Pick<DocumentEntry, "fileName" | "fileData" | "emailBody">): FileFormat | undefined {
-  if (d.fileData) {
-    const ext = d.fileName?.split(".").pop()?.toLowerCase() ?? "";
-    if (ext === "pdf") return "PDF";
-    if (["png", "jpg", "jpeg", "gif", "webp", "heic"].includes(ext)) return "Image";
-    if (["xls", "xlsx", "csv"].includes(ext)) return "Spreadsheet";
-    if (["doc", "docx"].includes(ext)) return "Document";
-    return "Other";
-  }
-  if (d.emailBody) return "Email / web";
-  return undefined;
-}
-
-/** Rough size from the base64 payload — nothing stores an actual byte count. */
-function estimateFileSize(dataUrl?: string): string {
-  if (!dataUrl) return "—";
-  const base64 = dataUrl.includes(",") ? dataUrl.slice(dataUrl.indexOf(",") + 1) : dataUrl;
-  const bytes = (base64.length * 3) / 4;
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function DocumentsPage() {
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Other documents</h1>
         <p className="text-sm text-muted-foreground">
           Condition reports, bank statements and anything unrecognised, kept here for reference.
           Leases, purchase documents, loan documents, depreciation reports and maintenance
@@ -257,7 +226,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
 
           <Card>
             {groupBy === "none" || !groups ? (
-              <DocTable rows={filtered} lockedPropertyId={lockedPropertyId} />
+              <DocTable rows={filtered} showProperty={!lockedPropertyId} />
             ) : (
               <div className="space-y-2 p-2">
                 {groups.length === 0 && (
@@ -268,7 +237,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
                     key={key}
                     label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatDocMonthLabel(key) : `FY ${key}`}
                     rows={groupRows}
-                    lockedPropertyId={lockedPropertyId}
+                    showProperty={!lockedPropertyId}
                   />
                 ))}
               </div>
@@ -322,136 +291,3 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
   );
 }
 
-function DocTable({ rows, lockedPropertyId }: { rows: DocumentEntry[]; lockedPropertyId?: string }) {
-  const { state } = useStore();
-  if (rows.length === 0) {
-    return (
-      <div className="p-6 text-center text-sm text-muted-foreground">
-        <FolderOpen className="mx-auto mb-2 h-6 w-6" />
-        No documents in this period.
-      </div>
-    );
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-xs text-muted-foreground">
-            <th className="px-3 py-2 font-medium">Name</th>
-            <th className="px-3 py-2 font-medium">Type</th>
-            <th className="px-3 py-2 font-medium">Period</th>
-            <th className="px-3 py-2 font-medium">Date added</th>
-            <th className="px-3 py-2 font-medium">Size</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((d) => {
-            const property = state.properties.find((p) => p.id === d.propertyId);
-            return (
-              <tr key={`${d.kind}-${d.id}`} className="border-b last:border-0 hover:bg-muted/30">
-                <td className="px-3 py-2">
-                  <DocumentNameCell d={d} showProperty={!lockedPropertyId} property={property} />
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{d.kind}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.period ?? d.date ?? "—"}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.dateAdded?.slice(0, 10) ?? "—"}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{estimateFileSize(d.fileData)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function DocGroupSection({
-  label,
-  rows,
-  lockedPropertyId,
-}: {
-  label: string;
-  rows: DocumentEntry[];
-  lockedPropertyId?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
-      <CollapsibleTrigger asChild>
-        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
-          <span className="flex items-center gap-2 font-medium">
-            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {label}
-          </span>
-          <Badge variant="outline" className="font-normal">
-            {rows.length} document{rows.length === 1 ? "" : "s"}
-          </Badge>
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">
-        <DocTable rows={rows} lockedPropertyId={lockedPropertyId} />
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function DocumentNameCell({
-  d,
-  showProperty,
-  property,
-}: {
-  d: DocumentEntry;
-  showProperty: boolean;
-  property?: { alias?: string; address: string };
-}) {
-  const [showEmail, setShowEmail] = useState(false);
-  const primaryName = d.fileName || d.label;
-  const showLabelSubtitle = !!d.fileName && !!d.label && d.label !== d.fileName;
-
-  const inner = (
-    <div className="flex items-center gap-2">
-      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-1.5 font-medium">
-          <span className="truncate">{primaryName}</span>
-          {d.amount !== undefined && <span className="font-normal text-muted-foreground">{fmtCurrency(d.amount)}</span>}
-          {d.status && (
-            <Badge variant="secondary" className="font-normal">
-              {d.status}
-            </Badge>
-          )}
-        </div>
-        {showLabelSubtitle && <div className="truncate text-xs text-muted-foreground">{d.label}</div>}
-        {showProperty && property && (
-          <div className="truncate text-xs text-muted-foreground">{property.alias || property.address}</div>
-        )}
-      </div>
-    </div>
-  );
-
-  if (d.fileData) {
-    return (
-      <DocumentLink fileName={d.fileName} fileData={d.fileData} className="inline-flex items-center hover:underline">
-        {inner}
-      </DocumentLink>
-    );
-  }
-  if (d.emailBody) {
-    return (
-      <>
-        <button type="button" onClick={() => setShowEmail(true)} className="inline-flex items-center text-left hover:underline">
-          {inner}
-        </button>
-        <Dialog open={showEmail} onOpenChange={setShowEmail}>
-          <DialogContent className="max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{d.subject || "Email"}</DialogTitle>
-            </DialogHeader>
-            <pre className="whitespace-pre-wrap text-xs">{d.emailBody}</pre>
-          </DialogContent>
-        </Dialog>
-      </>
-    );
-  }
-  return inner;
-}

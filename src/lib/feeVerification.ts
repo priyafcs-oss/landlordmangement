@@ -13,6 +13,12 @@ export type AgreementFeeTerms = Pick<
   | "leaseRenewalFeeAmount"
   | "inspectionFeeAmount"
   | "advertisingFeeAmount"
+  | "managementFeeGstInclusive"
+  | "lettingFeeGstInclusive"
+  | "adminFeeGstInclusive"
+  | "leaseRenewalFeeGstInclusive"
+  | "inspectionFeeGstInclusive"
+  | "advertisingFeeGstInclusive"
 > & {
   /** Optional here (unlike the DB row, where it's required) so an ad hoc terms object built from
    * an AI-extracted proposal not yet saved — which has no GST flag yet — can still be passed in. */
@@ -180,10 +186,14 @@ function actualTotalsByType(lines: FeeLine[], agentName: string): Map<FeeCheckTy
   return totals;
 }
 
-/** GST multiplier applied to any computed "expected" amount before it's compared against the
- * actual (GST-inclusive) charge — see ProviderAgreement.gstApplicable. */
-function gstMultiplierOf(agreement: Pick<AgreementFeeTerms, "gstApplicable">): number {
-  return agreement.gstApplicable ? 1.1 : 1;
+/** Applies GST to a single fee's stated rate, if it needs it — the master gstApplicable switch
+ * has to be on AND this specific fee's own rate has to be GST-exclusive ("plus GST") for the 1.1
+ * multiplier to apply. A rate already marked GST-inclusive is used as-is even when the agency is
+ * GST-registered, since GST is already folded into that number — applying the multiplier there
+ * too is exactly the double-count this per-fee flag exists to prevent (see ProviderAgreement's
+ * gstApplicable/`*GstInclusive` doc comments). */
+function effectiveRate(rate: number, gstInclusive: boolean | undefined, gstApplicable: boolean | undefined): number {
+  return gstApplicable && !gstInclusive ? rate * 1.1 : rate;
 }
 
 /**
@@ -219,7 +229,6 @@ export function verifyAgentFees(params: {
 }): FeeCheckResult[] {
   const { agentName, agreement, rentCollected, lines, tenantRent, feeTypes } = params;
   const wants = (t: FeeCheckType) => !feeTypes || feeTypes.includes(t);
-  const gstMultiplier = gstMultiplierOf(agreement);
   const actualByType = actualTotalsByType(lines, agentName);
   const results: FeeCheckResult[] = [];
 
@@ -230,7 +239,8 @@ export function verifyAgentFees(params: {
       // in a different month than the rent it was deducted from) still surfaces the actual charge
       // rather than silently dropping it — there's just nothing to compute an expected amount
       // against, so it reads as "unspecified" instead of a computed variance.
-      const expected = rentCollected > 0 ? rentCollected * (agreement.managementFeePercent / 100) * gstMultiplier : undefined;
+      const rate = effectiveRate(agreement.managementFeePercent, agreement.managementFeeGstInclusive, agreement.gstApplicable);
+      const expected = rentCollected > 0 ? rentCollected * (rate / 100) : undefined;
       results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0));
     }
   }
@@ -241,14 +251,19 @@ export function verifyAgentFees(params: {
       const weeklyRent = tenantRent ? weeklyRentOf(tenantRent.amount, tenantRent.frequency) : undefined;
       const rawExpected =
         agreement.lettingFeeAmount ?? (agreement.lettingFeeWeeksRent && weeklyRent ? agreement.lettingFeeWeeksRent * weeklyRent : undefined);
-      results.push(buildResult("Letting Fee", rawExpected !== undefined ? rawExpected * gstMultiplier : undefined, lettingActual, false));
+      const expected =
+        rawExpected !== undefined ? effectiveRate(rawExpected, agreement.lettingFeeGstInclusive, agreement.gstApplicable) : undefined;
+      results.push(buildResult("Letting Fee", expected, lettingActual, false));
     }
   }
 
   if (wants("Admin Fee")) {
     const adminActual = actualByType.get("Admin Fee") ?? 0;
     if (adminActual > 0) {
-      const expected = agreement.adminFeeAmount !== undefined ? agreement.adminFeeAmount * gstMultiplier : undefined;
+      const expected =
+        agreement.adminFeeAmount !== undefined
+          ? effectiveRate(agreement.adminFeeAmount, agreement.adminFeeGstInclusive, agreement.gstApplicable)
+          : undefined;
       results.push(buildResult("Admin Fee", expected, adminActual, false));
     }
   }
@@ -256,7 +271,10 @@ export function verifyAgentFees(params: {
   if (wants("Lease Renewal Fee")) {
     const renewalActual = actualByType.get("Lease Renewal Fee") ?? 0;
     if (renewalActual > 0) {
-      const expected = agreement.leaseRenewalFeeAmount !== undefined ? agreement.leaseRenewalFeeAmount * gstMultiplier : undefined;
+      const expected =
+        agreement.leaseRenewalFeeAmount !== undefined
+          ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive, agreement.gstApplicable)
+          : undefined;
       results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
     }
   }
@@ -264,7 +282,10 @@ export function verifyAgentFees(params: {
   if (wants("Inspection Fee")) {
     const inspectionActual = actualByType.get("Inspection Fee") ?? 0;
     if (inspectionActual > 0) {
-      const expected = agreement.inspectionFeeAmount !== undefined ? agreement.inspectionFeeAmount * gstMultiplier : undefined;
+      const expected =
+        agreement.inspectionFeeAmount !== undefined
+          ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive, agreement.gstApplicable)
+          : undefined;
       results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
     }
   }
@@ -325,7 +346,6 @@ export function reconcileFlatFees(params: {
   statementCount: number;
 }): FeeCheckResult[] {
   const { agentName, agreement, lines, statementCount } = params;
-  const gstMultiplier = gstMultiplierOf(agreement);
   const actualByType = actualTotalsByType(lines, agentName);
   const results: FeeCheckResult[] = [];
 
@@ -333,20 +353,30 @@ export function reconcileFlatFees(params: {
   if (adminActual > 0) {
     const expected =
       agreement.adminFeeAmount !== undefined
-        ? annualizeFlatFee(agreement.adminFeeAmount, agreement.adminFeeFrequency, statementCount) * gstMultiplier
+        ? effectiveRate(
+            annualizeFlatFee(agreement.adminFeeAmount, agreement.adminFeeFrequency, statementCount),
+            agreement.adminFeeGstInclusive,
+            agreement.gstApplicable,
+          )
         : undefined;
     results.push(buildResult("Admin Fee", expected, adminActual, false));
   }
 
   const renewalActual = actualByType.get("Lease Renewal Fee") ?? 0;
   if (renewalActual > 0) {
-    const expected = agreement.leaseRenewalFeeAmount !== undefined ? agreement.leaseRenewalFeeAmount * gstMultiplier : undefined;
+    const expected =
+      agreement.leaseRenewalFeeAmount !== undefined
+        ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive, agreement.gstApplicable)
+        : undefined;
     results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
   }
 
   const inspectionActual = actualByType.get("Inspection Fee") ?? 0;
   if (inspectionActual > 0) {
-    const expected = agreement.inspectionFeeAmount !== undefined ? agreement.inspectionFeeAmount * gstMultiplier : undefined;
+    const expected =
+      agreement.inspectionFeeAmount !== undefined
+        ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive, agreement.gstApplicable)
+        : undefined;
     results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
   }
 

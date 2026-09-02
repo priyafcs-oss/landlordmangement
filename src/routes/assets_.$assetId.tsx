@@ -86,7 +86,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "maintenance", label: "Maintenance", icon: Wrench, group: "Property" },
   { section: "compliance", label: "Compliance", icon: ShieldCheck, group: "Property" },
   { section: "details", label: "Details", icon: Building2, group: "Property" },
-  { section: "documents", label: "Documents", icon: FolderOpen, group: "Property" },
+  { section: "documents", label: "Other documents", icon: FolderOpen, group: "Property" },
   { section: "photos", label: "Photos", icon: ImageIcon, group: "Property" },
   { section: "notes", label: "Notes", icon: StickyNote, group: "Property" },
 ];

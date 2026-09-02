@@ -48,7 +48,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
-import { findMatchingUnpaidBill, findDuplicateLedgerEntry } from "@/lib/billMatch";
+import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord } from "@/lib/billMatch";
 import {
   verifyAgentFees,
   reconcileFlatFees,
@@ -110,7 +110,7 @@ import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
-import { DocumentsSection } from "@/components/DocumentEntryRow";
+import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
 import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
@@ -493,23 +493,23 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
           {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">No property matched — assign one:</span>
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger className="h-7 w-[220px] text-xs">
-                <SelectValue placeholder="Assign property" />
-              </SelectTrigger>
-              <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`text-xs ${proposal.propertyId ? "text-muted-foreground" : "text-destructive"}`}>
+            {proposal.propertyId ? "Property (wrong match? change it):" : "No property matched — assign one:"}
+          </span>
+          <Select value={propertyId} onValueChange={setPropertyId}>
+            <SelectTrigger className="h-7 w-[220px] text-xs">
+              <SelectValue placeholder="Assign property" />
+            </SelectTrigger>
+            <SelectContent>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.alias || p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         {payload.ownerName && (
           <div className="space-y-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs">
@@ -669,7 +669,30 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const ledgerDuplicates = txRows.map((tx, i) =>
     txTenantIds[i] ? findDuplicateLedgerEntry(state.ledger, { tenantId: txTenantIds[i], amount: tx.amount, date: tx.date }) : null,
   );
-  const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() => expenseLines.map(() => true));
+  // Rows that already look like a duplicate of a Bill/Expense that exists at mount time start
+  // unchecked too — same guardrail as the rent-income rows above (findDuplicateLedgerEntry),
+  // just against Bills/Expenses via findDuplicateRecord since a deduction posts as an Expense,
+  // not a ledger entry. Previously this array always defaulted to true with no check at all,
+  // so re-approving the same statement (or an overlapping one) silently double-booked agent fees.
+  const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() =>
+    expenseLines.map(
+      (e) =>
+        !findDuplicateRecord(state.bills, state.expenses, {
+          propertyId: propertyId || undefined,
+          vendorOrDescription: e.vendor,
+          amount: e.amount,
+          date: e.date,
+        }),
+    ),
+  );
+  const expenseDuplicates = expRows.map((e) =>
+    findDuplicateRecord(state.bills, state.expenses, {
+      propertyId: propertyId || undefined,
+      vendorOrDescription: e.vendor,
+      amount: e.amount,
+      date: e.date,
+    }),
+  );
   // Deductions default to the one tenant every included payment is already going to (the common
   // single-tenant case) — left "shared" whenever more than one tenant is actually involved, since
   // which tenant (if any) a given fee line relates to isn't something to guess at.
@@ -1115,6 +1138,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                       ` (bill is ${fmtCurrency(billMatches[i]!.amount)}, statement says ${fmtCurrency(e.amount)})`}
                   </span>
                 </label>
+              )}
+              {expenseDuplicates[i] && (
+                <div className="ml-6 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  Possible duplicate — {fmtCurrency(expenseDuplicates[i]!.amount)} {expenseDuplicates[i]!.kind} already
+                  on file dated {expenseDuplicates[i]!.date}
+                  {expenseDuplicates[i]!.label ? ` ("${expenseDuplicates[i]!.label}")` : ""}. Left unchecked — tick
+                  the box above to add it anyway.
+                </div>
               )}
             </div>
           ))}
@@ -2531,7 +2562,7 @@ export function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loa
         <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
         <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
       </div>
-      <DocumentsSection title="Documents" entries={documents} />
+      <DocumentsPanel title="Documents" entries={documents} />
     </div>
   );
 }
@@ -2540,8 +2571,12 @@ export function PropertyCostBaseTab({ prop, expenses }: { prop: Property; expens
   const [query, setQuery] = useState("");
   const capitalTx = expenses.filter((e) => e.taxCategory === "Capital Works");
   const capitalWorks = capitalTx.reduce((s, e) => s + e.cost, 0);
-  const purchasePrice = prop.purchasePrice + (prop.stampDuty ?? 0);
-  const costBase = purchasePrice + capitalWorks;
+  const stampDuty = prop.stampDuty ?? 0;
+  // Only used for the cost-base total and the purchase-vs-capital-works split below — every
+  // on-screen "Purchase price" label shows prop.purchasePrice on its own, with stamp duty broken
+  // out as its own line, instead of silently folding stamp duty into "purchase price".
+  const purchaseCost = prop.purchasePrice + stampDuty;
+  const costBase = purchaseCost + capitalWorks;
 
   const byCategory = capitalTx.reduce<Record<string, number>>((acc, e) => {
     acc[e.itemName] = (acc[e.itemName] ?? 0) + e.cost;
@@ -2553,7 +2588,7 @@ export function PropertyCostBaseTab({ prop, expenses }: { prop: Property; expens
     .filter((e) => !query || e.itemName.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
-  const purchasePct = costBase > 0 ? Math.round((purchasePrice / costBase) * 100) : 0;
+  const purchasePct = costBase > 0 ? Math.round((purchaseCost / costBase) * 100) : 0;
 
   return (
     <div className="space-y-4 text-sm">
@@ -2570,7 +2605,8 @@ export function PropertyCostBaseTab({ prop, expenses }: { prop: Property; expens
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <Stat label="Purchase price" value={fmtCurrency(purchasePrice)} />
+                <Stat label="Purchase price" value={fmtCurrency(prop.purchasePrice)} />
+                <Stat label="Stamp duty" value={fmtCurrency(stampDuty)} />
                 <Stat label="Capital costs" value={fmtCurrency(capitalWorks)} />
                 <Stat label="Total cost base" value={fmtCurrency(costBase)} />
               </div>
@@ -2663,7 +2699,11 @@ export function PropertyCostBaseTab({ prop, expenses }: { prop: Property; expens
               <div className="border-t pt-2 text-xs">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Purchase price</span>
-                  <span className="font-medium">{fmtCurrency(purchasePrice)}</span>
+                  <span className="font-medium">{fmtCurrency(prop.purchasePrice)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Stamp duty</span>
+                  <span className="font-medium">{fmtCurrency(stampDuty)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Capital costs</span>
@@ -4170,13 +4210,27 @@ interface AgencyAgreementExtractResult {
   ok?: boolean;
   error?: string;
   management_fee_percent?: number | null;
+  management_fee_gst_inclusive?: boolean | null;
   letting_fee_amount?: number | null;
   letting_fee_weeks_rent?: number | null;
+  letting_fee_gst_inclusive?: boolean | null;
   admin_fee_amount?: number | null;
   admin_fee_frequency?: string | null;
+  admin_fee_gst_inclusive?: boolean | null;
   lease_renewal_fee_amount?: number | null;
+  lease_renewal_fee_gst_inclusive?: boolean | null;
   inspection_fee_amount?: number | null;
+  inspection_fee_gst_inclusive?: boolean | null;
+  inspections_per_year?: number | null;
   advertising_fee_amount?: number | null;
+  advertising_fee_gst_inclusive?: boolean | null;
+  lease_preparation_fee_amount?: number | null;
+  lease_preparation_fee_gst_inclusive?: boolean | null;
+  ncat_fee_amount?: number | null;
+  ncat_fee_gst_inclusive?: boolean | null;
+  agent_pays_water_usage?: boolean | null;
+  agent_pays_land_tax?: boolean | null;
+  agent_pays_council_rates?: boolean | null;
   notice_period_days?: number | null;
   agency_name?: string | null;
   contract_start_date?: string | null;
@@ -4190,13 +4244,27 @@ interface AgreementFormState {
   contractFileName: string;
   contractFileData: string;
   managementFeePercent: string;
+  managementFeeGstInclusive: boolean;
   lettingFeeAmount: string;
   lettingFeeWeeksRent: string;
+  lettingFeeGstInclusive: boolean;
   adminFeeAmount: string;
   adminFeeFrequency: string;
+  adminFeeGstInclusive: boolean;
   leaseRenewalFeeAmount: string;
+  leaseRenewalFeeGstInclusive: boolean;
   inspectionFeeAmount: string;
+  inspectionFeeGstInclusive: boolean;
+  inspectionsPerYear: string;
   advertisingFeeAmount: string;
+  advertisingFeeGstInclusive: boolean;
+  leasePreparationFeeAmount: string;
+  leasePreparationFeeGstInclusive: boolean;
+  ncatFeeAmount: string;
+  ncatFeeGstInclusive: boolean;
+  agentPaysWaterUsage: boolean;
+  agentPaysLandTax: boolean;
+  agentPaysCouncilRates: boolean;
   noticePeriodDays: string;
   contractStartDate: string;
   contractReviewDate: string;
@@ -4209,13 +4277,27 @@ function agreementFormFrom(agreement?: ProviderAgreement): AgreementFormState {
     contractFileName: agreement?.contractFileName ?? "",
     contractFileData: agreement?.contractFileData ?? "",
     managementFeePercent: agreement?.managementFeePercent !== undefined ? String(agreement.managementFeePercent) : "",
+    managementFeeGstInclusive: agreement?.managementFeeGstInclusive ?? false,
     lettingFeeAmount: agreement?.lettingFeeAmount !== undefined ? String(agreement.lettingFeeAmount) : "",
     lettingFeeWeeksRent: agreement?.lettingFeeWeeksRent !== undefined ? String(agreement.lettingFeeWeeksRent) : "",
+    lettingFeeGstInclusive: agreement?.lettingFeeGstInclusive ?? false,
     adminFeeAmount: agreement?.adminFeeAmount !== undefined ? String(agreement.adminFeeAmount) : "",
     adminFeeFrequency: agreement?.adminFeeFrequency ?? "",
+    adminFeeGstInclusive: agreement?.adminFeeGstInclusive ?? false,
     leaseRenewalFeeAmount: agreement?.leaseRenewalFeeAmount !== undefined ? String(agreement.leaseRenewalFeeAmount) : "",
+    leaseRenewalFeeGstInclusive: agreement?.leaseRenewalFeeGstInclusive ?? false,
     inspectionFeeAmount: agreement?.inspectionFeeAmount !== undefined ? String(agreement.inspectionFeeAmount) : "",
+    inspectionFeeGstInclusive: agreement?.inspectionFeeGstInclusive ?? false,
+    inspectionsPerYear: agreement?.inspectionsPerYear !== undefined ? String(agreement.inspectionsPerYear) : "",
     advertisingFeeAmount: agreement?.advertisingFeeAmount !== undefined ? String(agreement.advertisingFeeAmount) : "",
+    advertisingFeeGstInclusive: agreement?.advertisingFeeGstInclusive ?? false,
+    leasePreparationFeeAmount: agreement?.leasePreparationFeeAmount !== undefined ? String(agreement.leasePreparationFeeAmount) : "",
+    leasePreparationFeeGstInclusive: agreement?.leasePreparationFeeGstInclusive ?? false,
+    ncatFeeAmount: agreement?.ncatFeeAmount !== undefined ? String(agreement.ncatFeeAmount) : "",
+    ncatFeeGstInclusive: agreement?.ncatFeeGstInclusive ?? false,
+    agentPaysWaterUsage: agreement?.agentPaysWaterUsage ?? false,
+    agentPaysLandTax: agreement?.agentPaysLandTax ?? false,
+    agentPaysCouncilRates: agreement?.agentPaysCouncilRates ?? false,
     noticePeriodDays: agreement?.noticePeriodDays !== undefined ? String(agreement.noticePeriodDays) : "",
     contractStartDate: agreement?.contractStartDate ?? "",
     contractReviewDate: agreement?.contractReviewDate ?? "",
@@ -4230,13 +4312,27 @@ function agreementPayloadFrom(form: AgreementFormState) {
     contractFileName: form.contractFileName || undefined,
     contractFileData: form.contractFileData || undefined,
     managementFeePercent: num(form.managementFeePercent),
+    managementFeeGstInclusive: form.managementFeeGstInclusive,
     lettingFeeAmount: num(form.lettingFeeAmount),
     lettingFeeWeeksRent: num(form.lettingFeeWeeksRent),
+    lettingFeeGstInclusive: form.lettingFeeGstInclusive,
     adminFeeAmount: num(form.adminFeeAmount),
     adminFeeFrequency: (form.adminFeeFrequency || undefined) as FeeFrequency | undefined,
+    adminFeeGstInclusive: form.adminFeeGstInclusive,
     leaseRenewalFeeAmount: num(form.leaseRenewalFeeAmount),
+    leaseRenewalFeeGstInclusive: form.leaseRenewalFeeGstInclusive,
     inspectionFeeAmount: num(form.inspectionFeeAmount),
+    inspectionFeeGstInclusive: form.inspectionFeeGstInclusive,
+    inspectionsPerYear: num(form.inspectionsPerYear),
     advertisingFeeAmount: num(form.advertisingFeeAmount),
+    advertisingFeeGstInclusive: form.advertisingFeeGstInclusive,
+    leasePreparationFeeAmount: num(form.leasePreparationFeeAmount),
+    leasePreparationFeeGstInclusive: form.leasePreparationFeeGstInclusive,
+    ncatFeeAmount: num(form.ncatFeeAmount),
+    ncatFeeGstInclusive: form.ncatFeeGstInclusive,
+    agentPaysWaterUsage: form.agentPaysWaterUsage,
+    agentPaysLandTax: form.agentPaysLandTax,
+    agentPaysCouncilRates: form.agentPaysCouncilRates,
     noticePeriodDays: num(form.noticePeriodDays),
     contractStartDate: form.contractStartDate || undefined,
     contractReviewDate: form.contractReviewDate || undefined,
@@ -4291,18 +4387,22 @@ async function extractAgreementFile(
       const next = { ...f };
       if (data.management_fee_percent !== undefined && data.management_fee_percent !== null) {
         next.managementFeePercent = String(data.management_fee_percent);
+        next.managementFeeGstInclusive = data.management_fee_gst_inclusive ?? false;
         fieldsFound++;
       }
       if (data.letting_fee_amount !== undefined && data.letting_fee_amount !== null) {
         next.lettingFeeAmount = String(data.letting_fee_amount);
+        next.lettingFeeGstInclusive = data.letting_fee_gst_inclusive ?? false;
         fieldsFound++;
       }
       if (data.letting_fee_weeks_rent !== undefined && data.letting_fee_weeks_rent !== null) {
         next.lettingFeeWeeksRent = String(data.letting_fee_weeks_rent);
+        next.lettingFeeGstInclusive = data.letting_fee_gst_inclusive ?? false;
         fieldsFound++;
       }
       if (data.admin_fee_amount !== undefined && data.admin_fee_amount !== null) {
         next.adminFeeAmount = String(data.admin_fee_amount);
+        next.adminFeeGstInclusive = data.admin_fee_gst_inclusive ?? false;
         fieldsFound++;
       }
       if (data.admin_fee_frequency) {
@@ -4311,14 +4411,43 @@ async function extractAgreementFile(
       }
       if (data.lease_renewal_fee_amount !== undefined && data.lease_renewal_fee_amount !== null) {
         next.leaseRenewalFeeAmount = String(data.lease_renewal_fee_amount);
+        next.leaseRenewalFeeGstInclusive = data.lease_renewal_fee_gst_inclusive ?? false;
         fieldsFound++;
       }
       if (data.inspection_fee_amount !== undefined && data.inspection_fee_amount !== null) {
         next.inspectionFeeAmount = String(data.inspection_fee_amount);
+        next.inspectionFeeGstInclusive = data.inspection_fee_gst_inclusive ?? false;
+        fieldsFound++;
+      }
+      if (data.inspections_per_year !== undefined && data.inspections_per_year !== null) {
+        next.inspectionsPerYear = String(data.inspections_per_year);
         fieldsFound++;
       }
       if (data.advertising_fee_amount !== undefined && data.advertising_fee_amount !== null) {
         next.advertisingFeeAmount = String(data.advertising_fee_amount);
+        next.advertisingFeeGstInclusive = data.advertising_fee_gst_inclusive ?? false;
+        fieldsFound++;
+      }
+      if (data.lease_preparation_fee_amount !== undefined && data.lease_preparation_fee_amount !== null) {
+        next.leasePreparationFeeAmount = String(data.lease_preparation_fee_amount);
+        next.leasePreparationFeeGstInclusive = data.lease_preparation_fee_gst_inclusive ?? false;
+        fieldsFound++;
+      }
+      if (data.ncat_fee_amount !== undefined && data.ncat_fee_amount !== null) {
+        next.ncatFeeAmount = String(data.ncat_fee_amount);
+        next.ncatFeeGstInclusive = data.ncat_fee_gst_inclusive ?? false;
+        fieldsFound++;
+      }
+      if (data.agent_pays_water_usage !== undefined && data.agent_pays_water_usage !== null) {
+        next.agentPaysWaterUsage = data.agent_pays_water_usage;
+        fieldsFound++;
+      }
+      if (data.agent_pays_land_tax !== undefined && data.agent_pays_land_tax !== null) {
+        next.agentPaysLandTax = data.agent_pays_land_tax;
+        fieldsFound++;
+      }
+      if (data.agent_pays_council_rates !== undefined && data.agent_pays_council_rates !== null) {
+        next.agentPaysCouncilRates = data.agent_pays_council_rates;
         fieldsFound++;
       }
       if (data.notice_period_days !== undefined && data.notice_period_days !== null) {
@@ -4348,6 +4477,40 @@ async function extractAgreementFile(
     setBusy(false);
   }
   return agencyName;
+}
+
+/** One fee amount input plus its own "rate already includes GST" checkbox — a management
+ * agreement can state some fees as "X% plus GST" and others as "$Y inclusive of GST" in the same
+ * document, so each fee needs its own flag rather than one setting for the whole agreement (see
+ * ProviderAgreement's `*GstInclusive` fields and feeVerification.ts's effectiveRate). */
+function FeeAmountField({
+  label,
+  value,
+  onChange,
+  gstInclusive,
+  onGstInclusiveChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  gstInclusive: boolean;
+  onGstInclusiveChange: (v: boolean) => void;
+  placeholder?: string;
+}) {
+  return (
+    <Field label={label}>
+      <Input type="number" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      <label className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Checkbox
+          checked={gstInclusive}
+          onCheckedChange={(v) => onGstInclusiveChange(v === true)}
+          className="h-3.5 w-3.5"
+        />
+        Rate already includes GST (unchecked = plus GST)
+      </label>
+    </Field>
+  );
 }
 
 /** The fee-term fields + GST flag + contract upload, shared between ProviderDialog's Agreement
@@ -4403,21 +4566,21 @@ function AgreementFields({
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Management fee (%)">
-          <Input
-            type="number"
-            value={form.managementFeePercent}
-            onChange={(e) => setForm((f) => ({ ...f, managementFeePercent: e.target.value }))}
-            placeholder="e.g. 6.6"
-          />
-        </Field>
-        <Field label="Letting fee ($ flat)">
-          <Input
-            type="number"
-            value={form.lettingFeeAmount}
-            onChange={(e) => setForm((f) => ({ ...f, lettingFeeAmount: e.target.value }))}
-          />
-        </Field>
+        <FeeAmountField
+          label="Management fee (%)"
+          value={form.managementFeePercent}
+          onChange={(v) => setForm((f) => ({ ...f, managementFeePercent: v }))}
+          gstInclusive={form.managementFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, managementFeeGstInclusive: v }))}
+          placeholder="e.g. 6.6"
+        />
+        <FeeAmountField
+          label="Letting fee ($ flat)"
+          value={form.lettingFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, lettingFeeAmount: v }))}
+          gstInclusive={form.lettingFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, lettingFeeGstInclusive: v }))}
+        />
         <Field label="— or letting fee (weeks' rent)">
           <Input
             type="number"
@@ -4426,13 +4589,13 @@ function AgreementFields({
             placeholder="e.g. 1"
           />
         </Field>
-        <Field label="Admin / statement fee ($)">
-          <Input
-            type="number"
-            value={form.adminFeeAmount}
-            onChange={(e) => setForm((f) => ({ ...f, adminFeeAmount: e.target.value }))}
-          />
-        </Field>
+        <FeeAmountField
+          label="Admin / statement fee ($)"
+          value={form.adminFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, adminFeeAmount: v }))}
+          gstInclusive={form.adminFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, adminFeeGstInclusive: v }))}
+        />
         <Field label="Admin fee frequency">
           <Select value={form.adminFeeFrequency} onValueChange={(v) => setForm((f) => ({ ...f, adminFeeFrequency: v }))}>
             <SelectTrigger>
@@ -4447,27 +4610,49 @@ function AgreementFields({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Lease renewal fee ($)">
+        <FeeAmountField
+          label="Lease renewal fee ($)"
+          value={form.leaseRenewalFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, leaseRenewalFeeAmount: v }))}
+          gstInclusive={form.leaseRenewalFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, leaseRenewalFeeGstInclusive: v }))}
+        />
+        <FeeAmountField
+          label="Inspection fee ($)"
+          value={form.inspectionFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, inspectionFeeAmount: v }))}
+          gstInclusive={form.inspectionFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, inspectionFeeGstInclusive: v }))}
+        />
+        <Field label="Inspections per year">
           <Input
             type="number"
-            value={form.leaseRenewalFeeAmount}
-            onChange={(e) => setForm((f) => ({ ...f, leaseRenewalFeeAmount: e.target.value }))}
+            value={form.inspectionsPerYear}
+            onChange={(e) => setForm((f) => ({ ...f, inspectionsPerYear: e.target.value }))}
+            placeholder="e.g. 4"
           />
         </Field>
-        <Field label="Inspection fee ($)">
-          <Input
-            type="number"
-            value={form.inspectionFeeAmount}
-            onChange={(e) => setForm((f) => ({ ...f, inspectionFeeAmount: e.target.value }))}
-          />
-        </Field>
-        <Field label="Advertising / marketing fee ($)">
-          <Input
-            type="number"
-            value={form.advertisingFeeAmount}
-            onChange={(e) => setForm((f) => ({ ...f, advertisingFeeAmount: e.target.value }))}
-          />
-        </Field>
+        <FeeAmountField
+          label="Advertising / marketing fee ($)"
+          value={form.advertisingFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, advertisingFeeAmount: v }))}
+          gstInclusive={form.advertisingFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, advertisingFeeGstInclusive: v }))}
+        />
+        <FeeAmountField
+          label="Lease preparation fee ($)"
+          value={form.leasePreparationFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, leasePreparationFeeAmount: v }))}
+          gstInclusive={form.leasePreparationFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, leasePreparationFeeGstInclusive: v }))}
+        />
+        <FeeAmountField
+          label="NCAT / tribunal fee ($)"
+          value={form.ncatFeeAmount}
+          onChange={(v) => setForm((f) => ({ ...f, ncatFeeAmount: v }))}
+          gstInclusive={form.ncatFeeGstInclusive}
+          onGstInclusiveChange={(v) => setForm((f) => ({ ...f, ncatFeeGstInclusive: v }))}
+        />
         <Field label="Notice period (days)">
           <Input
             type="number"
@@ -4497,8 +4682,32 @@ function AgreementFields({
             onCheckedChange={(v) => setForm((f) => ({ ...f, gstApplicable: v === true }))}
           />
           <Label htmlFor="agreement-gst" className="text-xs font-normal">
-            Fees are GST-registered — add 10% GST on top of every fee above when checking statement charges
+            Agency is GST-registered — add 10% GST to every fee above whose "includes GST" box isn't ticked
           </Label>
+        </div>
+        <div className="col-span-2 space-y-1.5 rounded border p-2">
+          <div className="text-xs font-medium">Outgoings — does the agent pay these on the owner's behalf?</div>
+          <label className="flex items-center gap-2 text-xs font-normal">
+            <Checkbox
+              checked={form.agentPaysWaterUsage}
+              onCheckedChange={(v) => setForm((f) => ({ ...f, agentPaysWaterUsage: v === true }))}
+            />
+            Water usage
+          </label>
+          <label className="flex items-center gap-2 text-xs font-normal">
+            <Checkbox
+              checked={form.agentPaysLandTax}
+              onCheckedChange={(v) => setForm((f) => ({ ...f, agentPaysLandTax: v === true }))}
+            />
+            Land tax
+          </label>
+          <label className="flex items-center gap-2 text-xs font-normal">
+            <Checkbox
+              checked={form.agentPaysCouncilRates}
+              onCheckedChange={(v) => setForm((f) => ({ ...f, agentPaysCouncilRates: v === true }))}
+            />
+            Council rates
+          </label>
         </div>
         <div className="col-span-2">
           <Field label="Agreement notes">
@@ -4927,6 +5136,9 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
   const tenancyDocuments = buildDocumentEntries(state).filter(
     (e) => e.propertyId === propertyId && (e.kind === "Lease Agreement" || e.kind === "Tenant Document"),
   );
+  const tenantsAtPropertyOptions = state.tenants
+    .filter((t) => t.propertyId === propertyId)
+    .map((t) => ({ id: t.id, name: t.name }));
 
   return (
     <div className="space-y-5 text-sm">
@@ -4986,11 +5198,11 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
       )}
 
       <div className="border-t pt-4">
-        <AgentStatementsSection statements={statements} onReview={setReviewProposalId} />
+        <AgentStatementsSection statements={statements} onReview={setReviewProposalId} tenantOptions={tenantsAtPropertyOptions} />
       </div>
 
       <div className="border-t pt-4">
-        <DocumentsSection title="Lease & tenant documents" entries={tenancyDocuments} />
+        <DocumentsPanel title="Lease & tenant documents" entries={tenancyDocuments} tenantOptions={tenantsAtPropertyOptions} />
       </div>
 
       <ProposalReviewDialog
@@ -5008,10 +5220,20 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
  * search/FY/group-by filters as the portfolio-wide Documents page — kept here too since a
  * statement's own fee-verification relevance makes it worth finding without leaving Tenancy.
  */
-function AgentStatementsSection({ statements, onReview }: { statements: AiIntakeProposal[]; onReview: (proposalId: string) => void }) {
+function AgentStatementsSection({
+  statements,
+  onReview,
+  tenantOptions,
+}: {
+  statements: AiIntakeProposal[];
+  onReview: (proposalId: string) => void;
+  tenantOptions?: { id: string; name: string }[];
+}) {
   const [query, setQuery] = useState("");
   const [fy, setFy] = useState("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+  const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
+  const [tenantId, setTenantId] = useState("__all__");
 
   const fys = (() => {
     const years: string[] = [];
@@ -5027,6 +5249,8 @@ function AgentStatementsSection({ statements, onReview }: { statements: AiIntake
   const filtered = statements.filter((p) => {
     const date = periodOf(p);
     if (fy !== "all" && !(date >= start && date <= end)) return false;
+    if (fileFormat !== "__all__" && fileFormatOf({ fileName: p.sourceFileName, fileData: p.sourceFileData, emailBody: p.sourceEmailBody }) !== fileFormat) return false;
+    if (tenantId !== "__all__" && p.matchedTenantId !== tenantId) return false;
     if (query) {
       const payload = p.payload as RentLedgerProposalPayload;
       const haystack = `${payload.tenantName ?? ""} ${payload.periodStart ?? ""} ${payload.periodEnd ?? ""} ${p.sourceFileName ?? ""}`.toLowerCase();
@@ -5116,6 +5340,34 @@ function AgentStatementsSection({ statements, onReview }: { statements: AiIntake
                 <SelectItem value="fy">By financial year</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={fileFormat} onValueChange={(v) => setFileFormat(v as typeof fileFormat)}>
+              <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectValue placeholder="File" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All files</SelectItem>
+                {FILE_FORMATS.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {tenantOptions && tenantOptions.length > 0 && (
+              <Select value={tenantId} onValueChange={setTenantId}>
+                <SelectTrigger className="h-7 w-[150px] text-xs">
+                  <SelectValue placeholder="All tenants" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All tenants</SelectItem>
+                  {tenantOptions.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {filtered.length === 0 ? (

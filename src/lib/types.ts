@@ -573,6 +573,13 @@ export interface ProviderAgreement {
   /** Marketing/advertising fee charged when a property is listed for a new tenant — flat amount,
    * separate from the letting fee itself. */
   advertisingFeeAmount?: number;
+  /** One-off fee for preparing a new lease, separate from the letting fee itself. */
+  leasePreparationFeeAmount?: number;
+  /** Fee for attending/lodging an NCAT (or other tribunal) matter on the owner's behalf. */
+  ncatFeeAmount?: number;
+  /** How many routine inspections per year the agreement commits the agent to — a count, distinct
+   * from `inspectionFeeAmount` (the $ charged per inspection, if billed separately). */
+  inspectionsPerYear?: number;
   /** Notice period (in days) either side must give to end the agreement, as stated in the
    * agreement's termination clause. */
   noticePeriodDays?: number;
@@ -580,11 +587,27 @@ export interface ProviderAgreement {
   /** When the agreement is next up for renewal/review, if stated. */
   contractReviewDate?: string;
   contractNotes?: string;
-  /** Whether GST is added on top of every fee above — a GST-registered agency charges GST on all
-   * its fees, not selectively, so this is one flag for the whole agreement rather than a separate
-   * GST amount per fee field. feeVerification.ts multiplies any computed "expected" amount by 1.1
-   * when this is true, before comparing to the actual (GST-inclusive) charge. */
+  /** Master "is this agency GST-registered" switch — when false, no fee has GST added regardless
+   * of the per-fee flags below. When true, each fee's effective/expected amount in
+   * feeVerification.ts is `rate * 1.1`, UNLESS that fee's own `*GstInclusive` flag is set, in which
+   * case the stated rate already has GST folded in and is used as-is. Per-fee rather than one
+   * global multiplier because a single agreement can state some fees as "X% plus GST" and others
+   * as "$Y inclusive of GST" — a single flag can't represent both without double- or under-counting. */
   gstApplicable: boolean;
+  managementFeeGstInclusive?: boolean;
+  lettingFeeGstInclusive?: boolean;
+  adminFeeGstInclusive?: boolean;
+  leaseRenewalFeeGstInclusive?: boolean;
+  inspectionFeeGstInclusive?: boolean;
+  advertisingFeeGstInclusive?: boolean;
+  leasePreparationFeeGstInclusive?: boolean;
+  ncatFeeGstInclusive?: boolean;
+  /** Whether the agent pays this outgoing from rental proceeds on the owner's behalf, per the
+   * agreement's terms — distinct from Property's own waterRatesAnnual/landTaxAnnual/
+   * councilRatesAnnual, which just record the amounts, not who actually pays them. */
+  agentPaysWaterUsage?: boolean;
+  agentPaysLandTax?: boolean;
+  agentPaysCouncilRates?: boolean;
 }
 
 /** A document held against a Provider directory record rather than a specific property — a
@@ -1030,13 +1053,27 @@ export interface AiIntakeProposal {
 export interface AgencyAgreementProposalPayload {
   agencyName?: string;
   managementFeePercent?: number;
+  managementFeeGstInclusive?: boolean;
   lettingFeeAmount?: number;
   lettingFeeWeeksRent?: number;
+  lettingFeeGstInclusive?: boolean;
   adminFeeAmount?: number;
   adminFeeFrequency?: FeeFrequency;
+  adminFeeGstInclusive?: boolean;
   leaseRenewalFeeAmount?: number;
+  leaseRenewalFeeGstInclusive?: boolean;
   inspectionFeeAmount?: number;
+  inspectionFeeGstInclusive?: boolean;
   advertisingFeeAmount?: number;
+  advertisingFeeGstInclusive?: boolean;
+  leasePreparationFeeAmount?: number;
+  leasePreparationFeeGstInclusive?: boolean;
+  ncatFeeAmount?: number;
+  ncatFeeGstInclusive?: boolean;
+  inspectionsPerYear?: number;
+  agentPaysWaterUsage?: boolean;
+  agentPaysLandTax?: boolean;
+  agentPaysCouncilRates?: boolean;
   noticePeriodDays?: number;
   contractStartDate?: string;
   contractReviewDate?: string;

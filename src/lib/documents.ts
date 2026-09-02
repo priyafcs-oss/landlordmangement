@@ -15,7 +15,9 @@ export interface DocumentEntry {
     | "Loan Statement"
     | "Bank Statement"
     | "Property Sale"
-    | "Management Agreement";
+    | "Management Agreement"
+    | "Insurance Document"
+    | "Compliance Certificate";
   /** The date this document is anchored to for period filtering/grouping/sorting — the period it
    * covers when there is one (a statement's periodStart, a lease's start date), not necessarily
    * when it was added. */
@@ -249,6 +251,35 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
           emailBody: p.sourceEmailBody,
         };
       }),
+    // Insurance policy certificates/schedules — one entry per policy that actually carries a file.
+    ...state.insurancePolicies
+      .filter((i) => i.fileData)
+      .map((i) => ({
+        id: `${i.id}-insurance`,
+        kind: "Insurance Document" as const,
+        date: i.coverStart ?? i.created_at?.slice(0, 10) ?? "",
+        dateAdded: i.created_at,
+        period: i.coverStart ? `${i.coverStart} → ${i.coverEnd || "ongoing"}` : undefined,
+        propertyId: i.propertyId,
+        label: `${i.insurer} — ${i.coverTypes.join(", ") || "insurance policy"}`,
+        fileName: i.fileName,
+        fileData: i.fileData,
+      })),
+    // Compliance certificates (smoke alarms, pool safety, electrical safety switches, etc.) —
+    // one entry per certificate that carries a file.
+    ...state.complianceCertificates
+      .filter((c) => c.fileData)
+      .map((c) => ({
+        id: `${c.id}-compliance`,
+        kind: "Compliance Certificate" as const,
+        date: c.issueDate ?? c.created_at?.slice(0, 10) ?? "",
+        dateAdded: c.created_at,
+        period: c.issueDate ? `${c.issueDate} → ${c.expiryDate || "no expiry"}` : undefined,
+        propertyId: c.propertyId,
+        label: `${c.certType} certificate`,
+        fileName: c.fileName,
+        fileData: c.fileData,
+      })),
     // The signed Property Management Agreement on a (provider, property) agreement — has nowhere
     // else to live as a document, and its fee terms are directly tied to a period (start → next
     // review). One entry per provider_agreements row now (a provider can hold a different signed

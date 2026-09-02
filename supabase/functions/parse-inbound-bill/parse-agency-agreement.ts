@@ -6,14 +6,28 @@ import type { NormalizedBillInput, ProposalParseResult } from "./types.ts";
 const AGREEMENT_PROMPT = `You are extracting fee terms from an Australian Property Management Agreement (PMA) / agency agreement between a landlord and a real estate agency.
 Extract the fields defined in the response schema as strict JSON.
 - property_address: the address of the property this agreement covers, as printed on the agreement. Null if not stated.
-- management_fee_percent is the ongoing management fee as a percentage of rent collected (e.g. a clause reading "6.6% of rent collected, inclusive of GST" -> 6.6). Use the all-inclusive/effective rate actually charged if both a base rate and a GST-inclusive rate are shown. Null if not stated.
+For every fee amount/percent below, extract the rate EXACTLY as stated in the contract — do not
+combine a base rate and a GST-inclusive rate into one "effective" number. Instead, also set that
+fee's matching "..._gst_inclusive" boolean from the contract's own wording: wording like "inclusive
+of GST", "GST inclusive", or "incl. GST" -> true; wording like "plus GST", "+ GST", "excluding GST",
+or GST not mentioned at all -> false. Getting this flag right matters more than the number itself —
+downstream fee-verification math applies GST on top of an exclusive rate but NOT on top of an
+inclusive one, so a wrong flag silently double-counts or drops GST.
+- management_fee_percent / management_fee_gst_inclusive: the ongoing management fee as a percentage of rent collected (e.g. "6.6% of rent collected, inclusive of GST" -> 6.6 / true; "5% plus GST" -> 5 / false). Null if not stated.
 - letting_fee_amount is a flat dollar letting/leasing fee charged when a new tenant is placed. Null if the agreement instead expresses this as a number of weeks' rent, or doesn't state one.
 - letting_fee_weeks_rent is the letting fee expressed as a number of weeks' rent (e.g. "one week's rent plus GST" -> 1, "2 weeks rent" -> 2). Null if a flat dollar amount is used instead, or not stated.
-- admin_fee_amount is a flat administration/statement fee charged separately from the % management fee (sometimes called a "statement fee" or "admin fee"). Null if not stated.
+- letting_fee_gst_inclusive: the GST wording for whichever of letting_fee_amount/letting_fee_weeks_rent is set.
+- admin_fee_amount / admin_fee_gst_inclusive is a flat administration/statement fee charged separately from the % management fee (sometimes called a "statement fee" or "admin fee"). Null if not stated.
 - admin_fee_frequency is how often the admin fee is charged: one of "Per Statement", "Monthly", "Quarterly", "Annually". Null if admin_fee_amount is null or frequency isn't stated.
-- lease_renewal_fee_amount is a flat fee charged when an existing tenant's lease is renewed/extended. Null if not stated.
-- inspection_fee_amount is a flat fee charged per routine/entry/exit inspection, if billed separately from the management fee. Null if not stated.
-- advertising_fee_amount is a flat marketing/advertising fee charged when the property is listed for a new tenant, separate from the letting fee itself (sometimes called a "marketing fee" or "sign board fee"). Null if not stated.
+- lease_renewal_fee_amount / lease_renewal_fee_gst_inclusive is a flat fee charged when an existing tenant's lease is renewed/extended. Null if not stated.
+- inspection_fee_amount / inspection_fee_gst_inclusive is a flat fee charged per routine/entry/exit inspection, if billed separately from the management fee. Null if not stated.
+- inspections_per_year is how many routine inspections per year the agreement commits the agent to (e.g. "quarterly inspections" -> 4, "twice yearly" -> 2). Null if not stated.
+- advertising_fee_amount / advertising_fee_gst_inclusive is a flat marketing/advertising fee charged when the property is listed for a new tenant, separate from the letting fee itself (sometimes called a "marketing fee" or "sign board fee"). Null if not stated.
+- lease_preparation_fee_amount / lease_preparation_fee_gst_inclusive is a flat fee for preparing a new lease document, separate from the letting fee. Null if not stated.
+- ncat_fee_amount / ncat_fee_gst_inclusive is a flat fee (or hourly rate) for the agent attending/lodging an NCAT (or other state tribunal) matter on the owner's behalf. Null if not stated.
+- agent_pays_water_usage: true if the agreement says the agent pays/manages water usage charges on the owner's behalf from rental proceeds, false if the agreement says the owner/landlord handles this directly, null if not stated either way.
+- agent_pays_land_tax: same as above, for land tax. Null if not stated either way.
+- agent_pays_council_rates: same as above, for council rates. Null if not stated either way.
 - notice_period_days is the notice period (in days) either party must give to terminate the agreement (e.g. "30 days written notice" -> 30, "60 days" -> 60). Null if not stated.
 - agency_name is the real estate agency's registered/trading name as printed on the agreement. Null if not clearly stated.
 - contract_start_date is when the agreement commences, formatted YYYY-MM-DD. Null if not stated.
@@ -26,13 +40,27 @@ const AGREEMENT_SCHEMA = {
   properties: {
     property_address: { type: "STRING", nullable: true },
     management_fee_percent: { type: "NUMBER", nullable: true },
+    management_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
     letting_fee_amount: { type: "NUMBER", nullable: true },
     letting_fee_weeks_rent: { type: "NUMBER", nullable: true },
+    letting_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
     admin_fee_amount: { type: "NUMBER", nullable: true },
     admin_fee_frequency: { type: "STRING", nullable: true },
+    admin_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
     lease_renewal_fee_amount: { type: "NUMBER", nullable: true },
+    lease_renewal_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
     inspection_fee_amount: { type: "NUMBER", nullable: true },
+    inspection_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
+    inspections_per_year: { type: "NUMBER", nullable: true },
     advertising_fee_amount: { type: "NUMBER", nullable: true },
+    advertising_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
+    lease_preparation_fee_amount: { type: "NUMBER", nullable: true },
+    lease_preparation_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
+    ncat_fee_amount: { type: "NUMBER", nullable: true },
+    ncat_fee_gst_inclusive: { type: "BOOLEAN", nullable: true },
+    agent_pays_water_usage: { type: "BOOLEAN", nullable: true },
+    agent_pays_land_tax: { type: "BOOLEAN", nullable: true },
+    agent_pays_council_rates: { type: "BOOLEAN", nullable: true },
     notice_period_days: { type: "NUMBER", nullable: true },
     agency_name: { type: "STRING", nullable: true },
     contract_start_date: { type: "STRING", nullable: true },
@@ -46,13 +74,27 @@ const AGREEMENT_SCHEMA = {
 export interface ParsedAgencyAgreementFields {
   property_address: string | null;
   management_fee_percent: number | null;
+  management_fee_gst_inclusive: boolean | null;
   letting_fee_amount: number | null;
   letting_fee_weeks_rent: number | null;
+  letting_fee_gst_inclusive: boolean | null;
   admin_fee_amount: number | null;
   admin_fee_frequency: string | null;
+  admin_fee_gst_inclusive: boolean | null;
   lease_renewal_fee_amount: number | null;
+  lease_renewal_fee_gst_inclusive: boolean | null;
   inspection_fee_amount: number | null;
+  inspection_fee_gst_inclusive: boolean | null;
+  inspections_per_year: number | null;
   advertising_fee_amount: number | null;
+  advertising_fee_gst_inclusive: boolean | null;
+  lease_preparation_fee_amount: number | null;
+  lease_preparation_fee_gst_inclusive: boolean | null;
+  ncat_fee_amount: number | null;
+  ncat_fee_gst_inclusive: boolean | null;
+  agent_pays_water_usage: boolean | null;
+  agent_pays_land_tax: boolean | null;
+  agent_pays_council_rates: boolean | null;
   notice_period_days: number | null;
   agency_name: string | null;
   contract_start_date: string | null;
@@ -112,13 +154,27 @@ export async function stageAgencyAgreementProposal(
     payload: {
       agencyName: parsed.agency_name ?? undefined,
       managementFeePercent: parsed.management_fee_percent ?? undefined,
+      managementFeeGstInclusive: parsed.management_fee_gst_inclusive ?? undefined,
       lettingFeeAmount: parsed.letting_fee_amount ?? undefined,
       lettingFeeWeeksRent: parsed.letting_fee_weeks_rent ?? undefined,
+      lettingFeeGstInclusive: parsed.letting_fee_gst_inclusive ?? undefined,
       adminFeeAmount: parsed.admin_fee_amount ?? undefined,
       adminFeeFrequency: parsed.admin_fee_frequency ?? undefined,
+      adminFeeGstInclusive: parsed.admin_fee_gst_inclusive ?? undefined,
       leaseRenewalFeeAmount: parsed.lease_renewal_fee_amount ?? undefined,
+      leaseRenewalFeeGstInclusive: parsed.lease_renewal_fee_gst_inclusive ?? undefined,
       inspectionFeeAmount: parsed.inspection_fee_amount ?? undefined,
+      inspectionFeeGstInclusive: parsed.inspection_fee_gst_inclusive ?? undefined,
+      inspectionsPerYear: parsed.inspections_per_year ?? undefined,
       advertisingFeeAmount: parsed.advertising_fee_amount ?? undefined,
+      advertisingFeeGstInclusive: parsed.advertising_fee_gst_inclusive ?? undefined,
+      leasePreparationFeeAmount: parsed.lease_preparation_fee_amount ?? undefined,
+      leasePreparationFeeGstInclusive: parsed.lease_preparation_fee_gst_inclusive ?? undefined,
+      ncatFeeAmount: parsed.ncat_fee_amount ?? undefined,
+      ncatFeeGstInclusive: parsed.ncat_fee_gst_inclusive ?? undefined,
+      agentPaysWaterUsage: parsed.agent_pays_water_usage ?? undefined,
+      agentPaysLandTax: parsed.agent_pays_land_tax ?? undefined,
+      agentPaysCouncilRates: parsed.agent_pays_council_rates ?? undefined,
       noticePeriodDays: parsed.notice_period_days ?? undefined,
       contractStartDate: parsed.contract_start_date ?? undefined,
       contractReviewDate: parsed.contract_review_date ?? undefined,

@@ -20,7 +20,7 @@ import { fmtCurrency, daysUntil } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
 import { toast } from "sonner";
 import { buildDocumentEntries } from "@/lib/documents";
-import { DocumentsSection } from "@/components/DocumentEntryRow";
+import { DocumentsPanel } from "@/components/DocumentEntryRow";
 import type {
   Property,
   InsurancePolicy,
@@ -367,25 +367,34 @@ export function PropertyInsuranceTab({ prop }: { prop: Property }) {
   const policies = state.insurancePolicies
     .filter((p) => p.propertyId === prop.id)
     .sort((a, b) => (b.coverStart ?? "").localeCompare(a.coverStart ?? ""));
+  const insuranceDocuments = buildDocumentEntries(state).filter(
+    (d) => d.kind === "Insurance Document" && d.propertyId === prop.id,
+  );
 
   return (
-    <div className="space-y-3 text-sm">
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-muted-foreground">Every insurance policy held on this property, current and past.</div>
-        <InsurancePolicyDialog prop={prop} />
+    <div className="space-y-5 text-sm">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">Every insurance policy held on this property, current and past.</div>
+          <InsurancePolicyDialog prop={prop} />
+        </div>
+        {policies.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+            <ShieldCheck className="mx-auto mb-2 h-6 w-6" />
+            No insurance policies on file yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {policies.map((p) => (
+              <InsurancePolicyRow key={p.id} policy={p} />
+            ))}
+          </div>
+        )}
       </div>
-      {policies.length === 0 ? (
-        <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          <ShieldCheck className="mx-auto mb-2 h-6 w-6" />
-          No insurance policies on file yet.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {policies.map((p) => (
-            <InsurancePolicyRow key={p.id} policy={p} />
-          ))}
-        </div>
-      )}
+
+      <div className="border-t pt-4">
+        <DocumentsPanel title="Documents" entries={insuranceDocuments} emptyMessage="No insurance documents on file yet." />
+      </div>
     </div>
   );
 }
@@ -765,7 +774,7 @@ export function PropertyMaintenanceTab({ prop }: { prop: Property }) {
         <div className="mb-2 text-xs text-muted-foreground">
           AI-ingested repair/maintenance invoices and anything carrying a warranty.
         </div>
-        <DocumentsSection
+        <DocumentsPanel
           title="Warranties & receipts"
           entries={warrantyDocuments}
           emptyMessage="No warranties or maintenance receipts on file yet."
@@ -958,30 +967,39 @@ export function PropertyCertificatesTab({ prop }: { prop: Property }) {
   const certs = state.complianceCertificates
     .filter((c) => c.propertyId === prop.id)
     .sort((a, b) => (b.issueDate ?? b.created_at ?? "").localeCompare(a.issueDate ?? a.created_at ?? ""));
+  const complianceDocuments = buildDocumentEntries(state).filter(
+    (d) => d.kind === "Compliance Certificate" && d.propertyId === prop.id,
+  );
 
   return (
-    <div className="space-y-4 text-sm">
-      {prop.strataLevyAmount && (
-        <div className="rounded border p-2 text-xs">
-          <span className="text-muted-foreground">Strata levy </span>
-          <span className="font-medium">{fmtCurrency(prop.strataLevyAmount)} / {prop.strataLevyFrequency ?? "—"}</span>
+    <div className="space-y-5 text-sm">
+      <div className="space-y-4">
+        {prop.strataLevyAmount && (
+          <div className="rounded border p-2 text-xs">
+            <span className="text-muted-foreground">Strata levy </span>
+            <span className="font-medium">{fmtCurrency(prop.strataLevyAmount)} / {prop.strataLevyFrequency ?? "—"}</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">Every compliance certificate/inspection result on file for this property.</div>
+          <ComplianceCertificateDialog prop={prop} />
         </div>
-      )}
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-muted-foreground">Every compliance certificate/inspection result on file for this property.</div>
-        <ComplianceCertificateDialog prop={prop} />
+        {certs.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+            No compliance certificates on file yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {certs.map((c) => (
+              <ComplianceCertificateRow key={c.id} cert={c} />
+            ))}
+          </div>
+        )}
       </div>
-      {certs.length === 0 ? (
-        <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          No compliance certificates on file yet.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {certs.map((c) => (
-            <ComplianceCertificateRow key={c.id} cert={c} />
-          ))}
-        </div>
-      )}
+
+      <div className="border-t pt-4">
+        <DocumentsPanel title="Documents" entries={complianceDocuments} emptyMessage="No compliance documents on file yet." />
+      </div>
     </div>
   );
 }

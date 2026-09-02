@@ -588,7 +588,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "forecasts", label: "Forecasts", icon: TrendingUp },
   { section: "buffers", label: "Buffers", icon: ShieldCheck },
   { section: "providers", label: "Providers", icon: Users2 },
-  { section: "documents", label: "Documents", icon: FolderOpen },
+  { section: "documents", label: "Other documents", icon: FolderOpen },
   { section: "inbox", label: "Inbox", icon: InboxIcon },
 ];
 
