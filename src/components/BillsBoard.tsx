@@ -19,6 +19,7 @@ import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { bucketBy } from "@/lib/group";
+import { usePersistedToggle } from "@/lib/hooks";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
@@ -63,24 +64,7 @@ export function BillsBoard({
   const [groupBy, setGroupBy] = useState<"none" | "provider" | "category">("none");
   // Hidden by default so the table gets the full width — the insights sidebar is a nice-to-have,
   // not what a landlord scanning bills is looking at first.
-  const [showInsights, setShowInsights] = useState(() => {
-    try {
-      return localStorage.getItem("billsInsightsVisible") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleInsights = () => {
-    setShowInsights((v) => {
-      const next = !v;
-      try {
-        localStorage.setItem("billsInsightsVisible", next ? "1" : "0");
-      } catch {
-        // best-effort persistence only
-      }
-      return next;
-    });
-  };
+  const [showInsights, toggleInsights] = usePersistedToggle("billsInsightsVisible");
 
   const today = todayISO();
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);

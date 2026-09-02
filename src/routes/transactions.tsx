@@ -22,6 +22,7 @@ import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleA
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { bucketBy } from "@/lib/group";
+import { usePersistedToggle } from "@/lib/hooks";
 import { toast } from "sonner";
 import type { AssetType, CategoryGroup, RentLedgerProposalPayload } from "@/lib/types";
 import { latestAgreementFor } from "@/lib/providerAgreements";
@@ -165,24 +166,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [sort, setSort] = useState<SortState<TxSortField> | null>(null);
   // Hidden by default so the table gets the full width — a landlord scanning transactions cares
   // about the rows, not the summary cards; the toggle remembers whoever last showed/hid it.
-  const [showSummary, setShowSummary] = useState(() => {
-    try {
-      return localStorage.getItem("txSummaryVisible") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleSummary = () => {
-    setShowSummary((v) => {
-      const next = !v;
-      try {
-        localStorage.setItem("txSummaryVisible", next ? "1" : "0");
-      } catch {
-        // best-effort persistence only
-      }
-      return next;
-    });
-  };
+  const [showSummary, toggleSummary] = usePersistedToggle("txSummaryVisible");
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const fyLabel = fy === "all" ? "All time" : `FY ${fy}`;
 
