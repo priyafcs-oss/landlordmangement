@@ -40,7 +40,13 @@ export function UploadDocumentDialog() {
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
-  const [reviewProposalId, setReviewProposalId] = useState<string | null>(null);
+  const [processedCount, setProcessedCount] = useState(0);
+  // Ordered ids of proposals ready to review — reviewing the front one and dismissing/confirming
+  // it (ProposalReviewDialog auto-closes once the proposal leaves "pending") pops it off the
+  // queue and immediately reveals the next one, if it's already finished processing in the
+  // background; otherwise it just appears the moment its own processing completes.
+  const [reviewQueue, setReviewQueue] = useState<string[]>([]);
+  const currentReviewId = reviewQueue[0] ?? null;
 
   const uploadOne = async (file: File): Promise<UploadResult | { ok: false; error: string }> => {
     if (file.size > MAX_AI_UPLOAD_BYTES) {
@@ -65,68 +71,70 @@ export function UploadDocumentDialog() {
 
   // Sequential rather than Promise.all — avoids slamming the AI-extraction edge function with a
   // burst of concurrent invocations when someone selects a whole folder's worth of scans at once.
+  // Runs to completion regardless of whether the Upload dialog itself is still open — as soon as
+  // the FIRST file produces something to review, the upload dialog hands off to the review dialog
+  // and the rest keep processing behind it, landing in reviewQueue as each one finishes instead of
+  // making the landlord manually reopen and re-trigger every remaining file one at a time.
   const upload = async () => {
     if (files.length === 0) return toast.error("Choose at least one file first");
+    const queued = files;
     setBusy(true);
+    setProcessedCount(0);
     try {
-      const results: { file: File; data: UploadResult | { ok: false; error: string } }[] = [];
-      for (const file of files) {
+      const failedFiles: File[] = [];
+      let billedCount = 0;
+      let handedOff = false;
+
+      for (const file of queued) {
+        let data: UploadResult | { ok: false; error: string };
         try {
-          results.push({ file, data: await uploadOne(file) });
+          data = await uploadOne(file);
         } catch (e) {
-          results.push({ file, data: { ok: false, error: e instanceof Error ? e.message : "Upload failed" } });
+          data = { ok: false, error: e instanceof Error ? e.message : "Upload failed" };
+        }
+        setProcessedCount((n) => n + 1);
+
+        if (!data.ok) {
+          toast.error(`${file.name}: ${"error" in data ? data.error : "Couldn't process this document"}`);
+          failedFiles.push(file);
+          continue;
+        }
+        if ("skipped" in data && data.skipped) {
+          toast.info(`${file.name} didn't look like a bill, lease, rent statement or property document — nothing recorded.`);
+          continue;
+        }
+        if ("billId" in data && data.billId) billedCount++;
+        if ("linkedExpenseId" in data && data.linkedExpenseId) {
+          toast.success(`${file.name}: matched an existing expense — invoice attached instead of creating a duplicate`);
+        }
+
+        // The edge function writes rows server-side, so the client store's cached state doesn't
+        // know about this file's result yet — needed now (not batched at the end) since the next
+        // proposal has to actually be in state before the review dialog can find it.
+        await refresh();
+
+        if ("proposalId" in data && data.proposalId) {
+          setReviewQueue((q) => [...q, data.proposalId!]);
+          if (!handedOff) {
+            handedOff = true;
+            setOpen(false);
+          }
         }
       }
 
-      const failed = results.filter((r) => !r.data.ok);
-      const skipped = results.filter((r) => r.data.ok && "skipped" in r.data && r.data.skipped);
-      const billed = results.filter((r) => r.data.ok && "billId" in r.data && r.data.billId);
-      const linked = results.filter((r) => r.data.ok && "linkedExpenseId" in r.data && r.data.linkedExpenseId);
-      const proposals = results.filter((r) => r.data.ok && "proposalId" in r.data && r.data.proposalId);
-
-      failed.forEach((r) => toast.error(`${r.file.name}: ${"error" in r.data ? r.data.error : "Couldn't process this document"}`));
-      if (skipped.length > 0) {
-        toast.info(
-          skipped.length === 1
-            ? `${skipped[0].file.name} didn't look like a bill, lease, rent statement or property document — nothing recorded.`
-            : `${skipped.length} files didn't look like a bill, lease, rent statement or property document — nothing recorded.`,
-        );
-      }
-      if (billed.length > 0) {
-        toast.success(billed.length === 1 ? "Bill uploaded — it'll post to P&L once marked paid" : `${billed.length} bills uploaded — they'll post to P&L once marked paid`);
-      }
-      if (linked.length > 0) {
+      if (billedCount > 0) {
         toast.success(
-          linked.length === 1
-            ? "Matched an existing expense for this charge — invoice attached to it instead of creating a duplicate"
-            : `${linked.length} files matched existing expenses — invoices attached instead of creating duplicates`,
+          billedCount === 1 ? "Bill uploaded — it'll post to P&L once marked paid" : `${billedCount} bills uploaded — they'll post to P&L once marked paid`,
         );
       }
-      if (proposals.length === 1) {
-        toast.success("Uploaded — review it now, or leave it for later on the Dashboard / Assets → All Assets");
-      } else if (proposals.length > 1) {
-        toast.success(`${proposals.length} documents uploaded — review them on the Dashboard / Assets → All Assets`);
-      }
-
-      if (results.some((r) => r.data.ok)) {
-        // The edge function writes rows server-side, so the client store's cached state doesn't
-        // know about them yet — without this, new proposals/bills stay invisible on the
-        // Dashboard/Assets until the next full page load.
-        await refresh();
-      }
-      // Only jump straight into the review dialog for a single-file upload — with several files
-      // at once, each pending proposal already renders as its own stacked review card on the
-      // Dashboard/Assets "needs review" list, so there's no need for a one-at-a-time flow here.
-      if (proposals.length === 1 && "proposalId" in proposals[0].data) {
-        setReviewProposalId(proposals[0].data.proposalId ?? null);
-      }
-      if (failed.length === 0) {
-        setOpen(false);
+      if (failedFiles.length === 0) {
         setFiles([]);
+        if (!handedOff) setOpen(false);
       } else {
         // Keep only the failed files selected so retrying doesn't resubmit ones that already
-        // succeeded.
-        setFiles(failed.map((r) => r.file));
+        // succeeded, and reopen the dialog so they're visible to retry.
+        setFiles(failedFiles);
+        setOpen(true);
       }
     } finally {
       setBusy(false);
@@ -153,18 +161,26 @@ export function UploadDocumentDialog() {
             </p>
             <p className="text-xs font-medium text-foreground">
               You can select several files at once — in the file picker that opens, hold Ctrl (Windows) or Cmd (Mac)
-              and click each file, or drag a group of files in together.
+              and click each file, or drag a group of files in together. The first one ready opens for review
+              immediately; the rest keep processing in the background and appear one after another as you finish
+              each review.
             </p>
             <Input
               type="file"
               accept="application/pdf,image/*"
               multiple
+              disabled={busy}
               onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
             />
-            {files.length > 0 && (
+            {files.length > 0 && !busy && (
               <p className="text-xs text-muted-foreground">
                 {files.length} file{files.length === 1 ? "" : "s"} selected
                 {files.length > 1 ? " — each is read and matched individually, one after another." : "."}
+              </p>
+            )}
+            {busy && (
+              <p className="text-xs text-muted-foreground">
+                Processing {processedCount + 1} of {files.length}…
               </p>
             )}
             <p className="text-xs text-muted-foreground">
@@ -180,9 +196,9 @@ export function UploadDocumentDialog() {
         </DialogContent>
       </Dialog>
       <ProposalReviewDialog
-        proposalId={reviewProposalId}
+        proposalId={currentReviewId}
         onOpenChange={(v) => {
-          if (!v) setReviewProposalId(null);
+          if (!v) setReviewQueue((q) => q.slice(1));
         }}
       />
     </>
