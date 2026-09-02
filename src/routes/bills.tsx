@@ -26,7 +26,7 @@ function BillsPage() {
         <AddBillDialog />
       </div>
 
-      <BillsBoard bills={state.bills} />
+      <BillsBoard />
     </div>
   );
 }

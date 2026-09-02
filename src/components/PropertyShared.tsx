@@ -4081,9 +4081,6 @@ export function LeaseAgreementWizard({
 }
 
 export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
-  const { state } = useStore();
-  const bills = state.bills.filter((b) => b.propertyId === propertyId);
-
   return (
     <div className="space-y-3 text-sm">
       <div className="flex items-center justify-between">
@@ -4093,7 +4090,7 @@ export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
         <AddBillDialog propertyId={propertyId} />
       </div>
 
-      <BillsBoard bills={bills} showPropertyFilter={false} />
+      <BillsBoard propertyId={propertyId} />
     </div>
   );
 }

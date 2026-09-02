@@ -40,19 +40,14 @@ interface RowHelpers {
 /**
  * The Bills table + Insights sidebar — used both portfolio-wide (/bills, every filter shown, a
  * Property column) and scoped to one property (the property detail page's Bills section, no
- * property/asset-type filters or column since it's already implied). `bills` is pre-scoped by the
- * caller; this only ever adds status/type/search filtering on top.
+ * property/asset-type filters or column since it's already implied) via the same lockedPropertyId
+ * pattern as LedgerTab/DocumentsContent — pass `propertyId` to lock, omit it for portfolio-wide.
  */
-export function BillsBoard({
-  bills,
-  showPropertyFilter = true,
-}: {
-  bills: PropertyBill[];
-  /** Show the Property/Asset type filter dropdowns and the Property column. Off for a single-property view. */
-  showPropertyFilter?: boolean;
-}) {
+export function BillsBoard({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state, markBillPaid, deleteBill } = useStore();
-  const [propertyId, setPropertyId] = useState("__all__");
+  const showPropertyFilter = !lockedPropertyId;
+  const scopedBills = lockedPropertyId ? state.bills.filter((b) => b.propertyId === lockedPropertyId) : state.bills;
+  const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [status, setStatus] = useState<(typeof STATUS_OPTIONS)[number]>("__all__");
   const [billType, setBillType] = useState<"__all__" | BillType>("__all__");
@@ -110,8 +105,8 @@ export function BillsBoard({
   // free-text providerName, and a legal-suffix/trading-name variant shouldn't hide a row here.
   const selectedProviderForFilter = providerFilterId !== "__all__" ? state.providers.find((p) => p.id === providerFilterId) : undefined;
 
-  const filtered = bills
-    .filter((b) => !showPropertyFilter || propertyId === "__all__" || b.propertyId === propertyId)
+  const filtered = scopedBills
+    .filter((b) => propertyId === "__all__" || b.propertyId === propertyId)
     .filter((b) => !showPropertyFilter || assetType === "__all__" || assetTypeOf(b) === assetType)
     .filter((b) => billType === "__all__" || b.billType === billType)
     .filter((b) => category === "__all__" || b.category === category)
@@ -152,7 +147,7 @@ export function BillsBoard({
   const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf, markBillPaid, deleteBill };
   const handleSort = (f: SortField) => setSort((s) => toggleSort(s, f));
 
-  const outstanding = bills.filter((b) => b.status !== "Paid");
+  const outstanding = scopedBills.filter((b) => b.status !== "Paid");
   const outstandingTotal = outstanding.reduce((s, b) => s + b.amount, 0);
   const overdueTotal = outstanding.filter(isOverdue).reduce((s, b) => s + b.amount, 0);
   const due30Total = outstanding.filter((b) => !isOverdue(b) && b.dueDate <= in30).reduce((s, b) => s + b.amount, 0);
