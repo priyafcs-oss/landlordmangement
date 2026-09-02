@@ -303,7 +303,14 @@ interface StoreCtx {
   markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
 
   dismissProposal: (id: string) => void;
-  markProposalApplied: (id: string) => void;
+  /** `patch` lets a caller correct the proposal's own propertyId (or other fields) at the same
+   * time it's marked applied — every review card lets the landlord override a wrong/missing
+   * auto-match via a local dropdown, but that correction previously only flowed into whatever
+   * record the confirm button created (a Property, an Expense, ...), never back onto the proposal
+   * row itself. Since buildDocumentEntries files a document under the PROPOSAL's own propertyId,
+   * an uncorrected proposal stayed permanently misfiled (or unfiled) even after a successful,
+   * correctly-targeted confirm. */
+  markProposalApplied: (id: string, patch?: Partial<AiIntakeProposal>) => void;
   updateProposal: (id: string, patch: Partial<AiIntakeProposal>) => void;
   /** Stages a manually-entered transaction flagged by a client-side duplicate/price-spike check
    * (see AddTransactionDialog) — the only proposal kind created client-side rather than by an
@@ -1384,11 +1391,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, status: "dismissed" as const } : x)),
       }));
     },
-    markProposalApplied: (id) => {
-      void updateRow(TABLES.aiProposals, id, { status: "applied" });
+    markProposalApplied: (id, patch) => {
+      void updateRow(TABLES.aiProposals, id, { status: "applied", ...patch });
       set((s) => ({
         ...s,
-        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, status: "applied" as const } : x)),
+        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, ...patch, status: "applied" as const } : x)),
       }));
     },
     updateProposal: (id, patch) => {

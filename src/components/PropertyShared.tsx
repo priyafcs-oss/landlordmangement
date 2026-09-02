@@ -383,7 +383,7 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
               leaseDocumentFileName: proposal.sourceFileName,
               leaseDocumentFileData: proposal.sourceFileData,
             }}
-            onSaved={() => markProposalApplied(proposal.id)}
+            onSaved={() => markProposalApplied(proposal.id, { propertyId })}
           >
             <Button size="sm" disabled={!propertyId}>
               Review &amp; Create Tenant
@@ -482,7 +482,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
         invoiceFileData: proposal.sourceFileData,
       });
     }
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success(ownerChecked && ownerName.trim() ? "Property details updated — entity linked" : "Property details updated");
   };
 
@@ -844,7 +844,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         invoiceFileData: proposal.sourceFileData,
       });
     });
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success(
       expRows.some((_, i) => expensesIncluded[i]) ? "Rent payments and expenses added" : "Rent payments added",
     );
@@ -1024,6 +1024,17 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                       ))}
                     </SelectContent>
                   </Select>
+                )}
+                {multiTenant && !txTenantIds[i] && tx.tenantName && (
+                  <TenantDialog
+                    propertyId={propertyId}
+                    initialValues={{ name: tx.tenantName }}
+                    onSaved={(id) => setTxTenantIds((ids) => ids.map((val, j) => (j === i ? id : val)))}
+                  >
+                    <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={!propertyId}>
+                      Add "{tx.tenantName}" as tenant
+                    </Button>
+                  </TenantDialog>
                 )}
                 <Button
                   size="icon"
@@ -1278,7 +1289,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
       count++;
     });
     if (count === 0) return toast.error("Select at least one item to add");
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success(`Added ${count} depreciation item(s) from report`);
   };
 
@@ -1491,7 +1502,7 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
       monthlyEmi: payload.monthlyRepayment ?? 0,
       status: "Active",
     });
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success("Loan created");
   };
 
@@ -1579,7 +1590,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         invoiceFileData: proposal.sourceFileData,
       });
     }
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success("Loan statement applied");
   };
 
@@ -1699,7 +1710,7 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       count++;
     });
     if (count === 0) return toast.error("Select at least one transaction to import");
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success(`Imported ${count} transaction(s)`);
   };
 
@@ -1782,7 +1793,7 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
       sellingCosts: payload.sellingCosts,
     });
     if (property.assetId) updateAsset(property.assetId, { status: "Sold" });
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success("Property marked sold");
   };
 
@@ -1904,7 +1915,7 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
     } else {
       addProviderAgreement({ providerId, propertyId, gstApplicable: false, ...fields });
     }
-    markProposalApplied(proposal.id);
+    markProposalApplied(proposal.id, { propertyId });
     toast.success(existingAgreement ? "Management agreement applied to existing agent" : "Managing agent added");
   };
 
