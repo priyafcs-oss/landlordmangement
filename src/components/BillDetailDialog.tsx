@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { CheckCircle2, Trash2, Plus, Pencil, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS } from "@/lib/calculations";
+import { buildRechargeInvoice } from "@/lib/recharge";
 import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { base64ToBlob, mimeForFileName } from "@/lib/files";
@@ -170,15 +171,15 @@ export function BillDetailDialog({
         const amount = parseFloat(li.amount) || 0;
         const nowRecharging = li.rechargeToTenant && li.tenantId && !li.recharged;
         if (nowRecharging) {
-          addInvoice({
-            tenantId: li.tenantId,
-            chargeType: billTypeToChargeType(selected.billType),
-            amountDue: amount,
-            dateIssued: todayISO(),
-            dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-            status: "Unpaid",
-            description: li.description || selected.billType,
-          });
+          addInvoice(
+            buildRechargeInvoice({
+              tenantId: li.tenantId,
+              chargeType: billTypeToChargeType(selected.billType),
+              amount,
+              date: form.issueDate || selected.issueDate || todayISO(),
+              description: li.description || selected.billType,
+            }),
+          );
         }
         return {
           description: li.description || selected.billType,

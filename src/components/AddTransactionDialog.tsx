@@ -27,7 +27,8 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType, mapExpenseCategory } from "@/lib/calculations";
+import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory } from "@/lib/calculations";
+import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -392,15 +393,15 @@ export function AddTransactionDialog({
     const amount = parseFloat(li.amount) || 0;
     const providerId = form.payee.trim() ? findOrCreateProvider(form.payee.trim(), form.propertyId) : undefined;
     if (li.rechargeToTenant && li.tenantId && !expense.recharged) {
-      addInvoice({
-        tenantId: li.tenantId,
-        chargeType: billTypeToChargeType(li.category === "Water Charges" ? "Water" : "Other"),
-        amountDue: amount,
-        dateIssued: todayISO(),
-        dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-        status: "Unpaid",
-        description: li.description || form.payee,
-      });
+      addInvoice(
+        buildRechargeInvoice({
+          tenantId: li.tenantId,
+          chargeType: chargeTypeForCategory(li.category),
+          amount,
+          date: form.date,
+          description: li.description || form.payee,
+        }),
+      );
     }
     updateExpense(expense.id, {
       itemName: li.description || form.payee,
@@ -476,15 +477,15 @@ export function AddTransactionDialog({
         }
 
         if (li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1) {
-          addInvoice({
-            tenantId: li.tenantId,
-            chargeType: billTypeToChargeType(li.category === "Water Charges" ? "Water" : "Other"),
-            amountDue: amount,
-            dateIssued: todayISO(),
-            dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-            status: "Unpaid",
-            description: itemName,
-          });
+          addInvoice(
+            buildRechargeInvoice({
+              tenantId: li.tenantId,
+              chargeType: chargeTypeForCategory(li.category),
+              amount,
+              date: form.date,
+              description: itemName,
+            }),
+          );
         }
         addExpense({
           itemName,

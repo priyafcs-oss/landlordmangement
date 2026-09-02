@@ -114,6 +114,7 @@ import { DocumentLink } from "@/components/DocumentLink";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
 import { bucketBy } from "@/lib/group";
+import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
 import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
 
@@ -823,16 +824,17 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       const lineTenantId = expTenantIds[i];
       const realTenantId = lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined;
       const recharge = rechargeIncluded[i] && !!realTenantId;
+      // A statement deduction is only the agent's own fee when it's actually paid to the agent or
+      // reads as one (management/admin/letting/etc.) — a water bill or tradesperson invoice the
+      // agent merely paid on the owner's behalf gets its own real category instead.
+      const lineCategory = categorizeAgentStatementLine(e, agent?.name);
       addExpense({
         itemName: e.vendor,
         cost: e.amount,
         date: e.date,
         propertyId: propertyId || undefined,
         taxCategory: "Immediate Deduction",
-        // A statement deduction is only the agent's own fee when it's actually paid to the agent
-        // or reads as one (management/admin/letting/etc.) — a water bill or tradesperson invoice
-        // the agent merely paid on the owner's behalf gets its own real category instead.
-        category: categorizeAgentStatementLine(e, agent?.name),
+        category: lineCategory,
         providerName: e.vendor,
         providerId: lineProviderId,
         // The AI's raw free-text classification (e.g. "management_fees") — itemName alone is
@@ -852,15 +854,15 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       });
       if (recharge) {
         rechargedCount++;
-        addInvoice({
-          tenantId: realTenantId!,
-          chargeType: "Other",
-          amountDue: e.amount,
-          dateIssued: e.date,
-          dueDate: new Date(new Date(e.date).getTime() + 14 * 86400000).toISOString().slice(0, 10),
-          status: "Unpaid",
-          description: e.vendor,
-        });
+        addInvoice(
+          buildRechargeInvoice({
+            tenantId: realTenantId!,
+            chargeType: chargeTypeForCategory(lineCategory),
+            amount: e.amount,
+            date: e.date,
+            description: e.vendor,
+          }),
+        );
       }
     });
     markProposalApplied(proposal.id, { propertyId });

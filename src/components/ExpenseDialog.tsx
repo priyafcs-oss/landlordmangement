@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
 import { readFileAsDataUrl } from "@/lib/files";
+import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -105,15 +106,15 @@ export function ExpenseDialog({
     if (isEdit && expense) {
       updateExpense(expense.id, payload);
       if (form.rechargeToTenant && form.tenantId && !expense.recharged) {
-        addInvoice({
-          tenantId: form.tenantId,
-          chargeType: "Other",
-          amountDue: cost,
-          dateIssued: form.date,
-          dueDate: new Date(new Date(form.date).getTime() + 14 * 86400000).toISOString().slice(0, 10),
-          status: "Unpaid",
-          description: form.itemName,
-        });
+        addInvoice(
+          buildRechargeInvoice({
+            tenantId: form.tenantId,
+            chargeType: chargeTypeForCategory(form.category),
+            amount: cost,
+            date: form.date,
+            description: form.itemName,
+          }),
+        );
         updateExpense(expense.id, { recharged: true });
       }
       toast.success("Expense updated");
@@ -123,15 +124,15 @@ export function ExpenseDialog({
 
     addExpense({ ...payload, status: "approved", source: "manual" });
     if (form.rechargeToTenant && form.tenantId) {
-      addInvoice({
-        tenantId: form.tenantId,
-        chargeType: "Other",
-        amountDue: cost,
-        dateIssued: form.date,
-        dueDate: new Date(new Date(form.date).getTime() + 14 * 86400000).toISOString().slice(0, 10),
-        status: "Unpaid",
-        description: form.itemName,
-      });
+      addInvoice(
+        buildRechargeInvoice({
+          tenantId: form.tenantId,
+          chargeType: chargeTypeForCategory(form.category),
+          amount: cost,
+          date: form.date,
+          description: form.itemName,
+        }),
+      );
       toast.success("Expense logged and recharged to tenant");
     } else {
       toast.success("Expense logged");

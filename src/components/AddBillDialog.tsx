@@ -36,6 +36,7 @@ import {
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
+import { buildRechargeInvoice } from "@/lib/recharge";
 import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
@@ -435,15 +436,15 @@ export function AddBillDialog({
         const amount = parseFloat(li.amount) || 0;
         const recharge = !!(li.rechargeToTenant && li.tenantId);
         if (recharge) {
-          addInvoice({
-            tenantId: li.tenantId,
-            chargeType: billTypeToChargeType(form.billType),
-            amountDue: amount,
-            dateIssued: todayISO(),
-            dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-            status: "Unpaid",
-            description: li.description || form.billType,
-          });
+          addInvoice(
+            buildRechargeInvoice({
+              tenantId: li.tenantId,
+              chargeType: billTypeToChargeType(form.billType),
+              amount,
+              date: form.issueDate || todayISO(),
+              description: li.description || form.billType,
+            }),
+          );
         }
         return {
           description: li.description || form.billType,
