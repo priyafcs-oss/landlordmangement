@@ -36,6 +36,17 @@ export interface DocumentEntry {
   fileData?: string;
   subject?: string;
   emailBody?: string;
+  /** Warranty expiry date (ISO), when this "Maintenance" document is a warranted item — drives the
+   * expiring/expired badge that used to be specific to the Maintenance tab's own list. Undefined
+   * for every other kind, and for maintenance items with no warranty on file. */
+  warrantyExpiry?: string;
+}
+
+/** Same label/fileName/subject match `DocumentsContent`'s search box uses — shared so the search
+ * inside embedded `DocumentsSection` instances behaves identically instead of drifting. */
+export function matchesDocumentQuery(d: Pick<DocumentEntry, "label" | "fileName" | "subject">, query: string): boolean {
+  if (!query) return true;
+  return `${d.label} ${d.fileName ?? ""} ${d.subject ?? ""}`.toLowerCase().includes(query.toLowerCase());
 }
 
 /** Best-effort period range read off an AI-extracted proposal's payload — the payload union
@@ -201,6 +212,7 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         fileData: e.invoiceFileData,
         subject: e.sourceSubject,
         emailBody: e.sourceEmailBody,
+        warrantyExpiry: e.hasWarranty ? e.warrantyExpiry : undefined,
       })),
     // Inspection reports/condition reports — currently the only place these get attached.
     ...state.inspections

@@ -10,7 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { FileText, FolderOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange } from "@/lib/calculations";
 import { DocumentLink } from "@/components/DocumentLink";
-import { buildDocumentEntries, type DocumentEntry } from "@/lib/documents";
+import { buildDocumentEntries, matchesDocumentQuery, type DocumentEntry } from "@/lib/documents";
 
 export const Route = createFileRoute("/documents")({
   head: () => ({
@@ -120,7 +120,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
     if (fileFormat !== "__all__" && fileFormatOf(d) !== fileFormat) return false;
     if (tenantId !== "__all__" && d.tenantId !== tenantId) return false;
     if (fy !== "all" && !(d.date >= start && d.date <= end)) return false;
-    if (query && !`${d.label} ${d.fileName ?? ""} ${d.subject ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+    if (!matchesDocumentQuery(d, query)) return false;
     return true;
   });
 
