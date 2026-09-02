@@ -1879,6 +1879,15 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
   const { state, findOrCreateProvider, updateProvider, addProviderAgreement, updateProviderAgreement, markProposalApplied } = useStore();
   const payload = proposal.payload as AgencyAgreementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  // Same editable fields (including each fee's own GST-inclusive flag) as the manual "Upload &
+  // extract" flow on the agent's Provider record — this review card used to show a read-only
+  // summary of only 6 fields with no way to see or fix the AI's GST-inclusive/exclusive read, or
+  // to correct a wrong value before it got saved.
+  const [form, setForm] = useState<AgreementFormState>(() =>
+    agreementFormFrom({ ...payload, contractFileName: proposal.sourceFileName, contractFileData: proposal.sourceFileData }),
+  );
+  const [busy, setBusy] = useState(false);
+  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
   const confirm = () => {
     const property = state.properties.find((p) => p.id === propertyId);
@@ -1887,21 +1896,7 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
     const providerId = findOrCreateProvider(payload.agencyName || "Managing agent", propertyId);
     updateProvider(providerId, { role: "Agent" });
     const existingAgreement = latestAgreementFor(state.providerAgreements, providerId, propertyId);
-    const fields = {
-      managementFeePercent: payload.managementFeePercent,
-      lettingFeeAmount: payload.lettingFeeAmount,
-      lettingFeeWeeksRent: payload.lettingFeeWeeksRent,
-      adminFeeAmount: payload.adminFeeAmount,
-      adminFeeFrequency: payload.adminFeeFrequency,
-      leaseRenewalFeeAmount: payload.leaseRenewalFeeAmount,
-      inspectionFeeAmount: payload.inspectionFeeAmount,
-      advertisingFeeAmount: payload.advertisingFeeAmount,
-      noticePeriodDays: payload.noticePeriodDays,
-      contractStartDate: payload.contractStartDate,
-      contractReviewDate: payload.contractReviewDate,
-      contractFileName: proposal.sourceFileName,
-      contractFileData: proposal.sourceFileData,
-    };
+    const fields = agreementPayloadFrom(form);
     if (existingAgreement) {
       // Never overwrites a value already on file — same "fill blanks only" rule the manual
       // extract-and-review form follows.
@@ -1913,7 +1908,7 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
       }
       updateProviderAgreement(existingAgreement.id, patch);
     } else {
-      addProviderAgreement({ providerId, propertyId, gstApplicable: false, ...fields });
+      addProviderAgreement({ providerId, propertyId, ...fields });
     }
     markProposalApplied(proposal.id, { propertyId });
     toast.success(existingAgreement ? "Management agreement applied to existing agent" : "Managing agent added");
@@ -1935,38 +1930,15 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
-          <div>
-            <div className="text-muted-foreground">Management fee</div>
-            <div className="font-medium">{payload.managementFeePercent !== undefined ? `${payload.managementFeePercent}%` : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Letting fee</div>
-            <div className="font-medium">
-              {payload.lettingFeeAmount !== undefined
-                ? fmtCurrency(payload.lettingFeeAmount)
-                : payload.lettingFeeWeeksRent !== undefined
-                  ? `${payload.lettingFeeWeeksRent} wk rent`
-                  : "—"}
-            </div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Admin fee</div>
-            <div className="font-medium">{payload.adminFeeAmount !== undefined ? fmtCurrency(payload.adminFeeAmount) : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Advertising fee</div>
-            <div className="font-medium">{payload.advertisingFeeAmount !== undefined ? fmtCurrency(payload.advertisingFeeAmount) : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Notice period</div>
-            <div className="font-medium">{payload.noticePeriodDays !== undefined ? `${payload.noticePeriodDays} days` : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Start date</div>
-            <div className="font-medium">{payload.contractStartDate || "—"}</div>
-          </div>
-        </div>
+        <AgreementFields
+          form={form}
+          setForm={setForm}
+          busy={busy}
+          extractSummary={extractSummary}
+          onFileSelected={(file) => {
+            void extractAgreementFile(file, setForm, setBusy, setExtractSummary);
+          }}
+        />
 
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
@@ -4283,7 +4255,7 @@ interface AgreementFormState {
   gstApplicable: boolean;
 }
 
-function agreementFormFrom(agreement?: ProviderAgreement): AgreementFormState {
+function agreementFormFrom(agreement?: Partial<ProviderAgreement>): AgreementFormState {
   return {
     contractFileName: agreement?.contractFileName ?? "",
     contractFileData: agreement?.contractFileData ?? "",
