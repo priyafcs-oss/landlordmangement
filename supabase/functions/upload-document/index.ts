@@ -18,10 +18,12 @@ function isSupportedAttachment(contentType: string): boolean {
 /**
  * Lets the landlord upload a bill, rent statement or lease agreement directly from the app,
  * instead of only via the email inbox — same classify → extract → stage pipeline as
- * parse-inbound-bill, just fed from a direct file upload rather than a Resend webhook. Requires
- * a valid Supabase Auth session (default JWT verification — no --no-verify-jwt), since this is
- * called from the logged-in landlord's browser via supabase.functions.invoke, unlike the email
- * webhook which has no user session to authenticate.
+ * parse-inbound-bill, just fed from a direct file upload rather than a Resend webhook.
+ * `verify_jwt = false` in config.toml, same as every other AI-calling function here — this app
+ * has no login (see 20260818100000_drop_auth_requirement.sql) and uses the newer opaque
+ * sb_publishable_/sb_secret_ key format, which isn't a JWT and would fail verification anyway.
+ * Anyone with the project URL and publishable key can call this directly; that's an accepted
+ * tradeoff for a single-landlord app on the free tier, not an oversight.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {

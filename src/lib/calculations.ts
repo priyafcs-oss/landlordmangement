@@ -427,9 +427,12 @@ export function fmtCurrency(n: number): string {
 }
 
 export function ausFinancialYear(dateISO: string): string {
+  // `new Date("YYYY-MM-DD")` always parses as UTC midnight -- read it back with the UTC getters
+  // too, not the local-time ones, or this misclassifies dates near the FY boundary for anyone
+  // whose local timezone sits behind UTC (e.g. the Americas).
   const d = new Date(dateISO);
-  const y = d.getFullYear();
-  const m = d.getMonth();
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
   return m >= 6 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
 }
 
@@ -481,9 +484,27 @@ export function buildDepreciationSchedule(items: DepreciationItem[]): Depreciati
     const startYear = parseInt(startFy.split("-")[0], 10);
 
     if (method === "Prime Cost") {
+      // Pro-rate the first year by days held, same as Diminishing Value below — otherwise a
+      // mid-year purchase claimed a full year's cost/life in its first FY (overstating that year)
+      // and the schedule fell short of `cost` after exactly `life` years instead of finishing with
+      // a matching partial claim in a final part-year.
       const annual = cost / life;
-      for (let i = 0; i < Math.ceil(life); i++) {
-        addToFy(`${startYear + i}-${startYear + i + 1}`, division, annual);
+      let claimed = 0;
+      let i = 0;
+      while (claimed < cost - 0.01 && i < Math.ceil(life) + 1) {
+        const fy = `${startYear + i}-${startYear + i + 1}`;
+        let claim: number;
+        if (i === 0) {
+          const { end } = fyRange(fy);
+          const daysHeld = Math.max(1, Math.min(365, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1));
+          claim = annual * (daysHeld / 365);
+        } else {
+          claim = annual;
+        }
+        claim = Math.min(claim, cost - claimed);
+        addToFy(fy, division, claim);
+        claimed += claim;
+        i++;
       }
     } else {
       let opening = cost;

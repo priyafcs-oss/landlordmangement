@@ -18,6 +18,13 @@ const DUPLICATE_WINDOW_DAYS = 14;
 const PRICE_SPIKE_MULTIPLIER = 1.4;
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 
+/** Escapes ilike's wildcard characters (%, _) so a free-text AI-extracted vendor name can't
+ * accidentally turn into a wildcard pattern (e.g. "Pensioner Rebate 50% Applied" matching every
+ * vendor whose name happens to start the same way as the text before the %). */
+function escapeIlike(s: string): string {
+  return s.replace(/[%_]/g, (c) => `\\${c}`);
+}
+
 /**
  * Looks for an existing Expense that this uploaded bill is actual evidence for, rather than a
  * separate new charge — the common case being a water/agent-fee deduction already posted from a
@@ -43,7 +50,7 @@ async function findAttachableExpense(
     .from("expenses")
     .select("id, cost, invoiceFileData, source")
     .eq("propertyId", matchedPropertyId)
-    .ilike("itemName", parsed.vendor)
+    .ilike("itemName", escapeIlike(parsed.vendor))
     .gte("date", from)
     .lte("date", to);
   if (!data || data.length === 0) return null;
@@ -74,13 +81,12 @@ async function runGuardrails(
   const from = new Date(dueDate.getTime() - DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
   const to = new Date(dueDate.getTime() + DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
 
-  const { data: dupeByVendor } = await supabase
-    .from("expenses")
-    .select("id")
-    .ilike("itemName", parsed.vendor)
-    .gte("date", from)
-    .lte("date", to)
-    .limit(1);
+  // Scoped to the matched property when known — otherwise two properties sharing the same agent
+  // or utility provider (a very common case) can each false-positive off the other's genuine,
+  // unrelated charge just for landing in the same vendor+date window.
+  let dupeQuery = supabase.from("expenses").select("id").ilike("itemName", escapeIlike(parsed.vendor)).gte("date", from).lte("date", to);
+  if (matchedPropertyId) dupeQuery = dupeQuery.eq("propertyId", matchedPropertyId);
+  const { data: dupeByVendor } = await dupeQuery.limit(1);
 
   let isDuplicate = (dupeByVendor?.length ?? 0) > 0;
 
@@ -92,7 +98,9 @@ async function runGuardrails(
   // period's genuine bill from a recurring biller (a water account's quarterly bill, say) got
   // flagged as a duplicate of whichever earlier bill happened to share that same account reference.
   if (!isDuplicate && parsed.bpay_reference) {
-    const { data: dupeByRef } = await supabase.from("expenses").select("id, cost, date").eq("bpayReference", parsed.bpay_reference);
+    let refQuery = supabase.from("expenses").select("id, cost, date").eq("bpayReference", parsed.bpay_reference);
+    if (matchedPropertyId) refQuery = refQuery.eq("propertyId", matchedPropertyId);
+    const { data: dupeByRef } = await refQuery;
     isDuplicate = (dupeByRef ?? []).some(
       (e: { cost: number; date: string }) =>
         Math.abs(Number(e.cost) - parsed.amount) <= amountTolerance ||
@@ -104,23 +112,26 @@ async function runGuardrails(
   // already-scheduled Unpaid bill for the same vendor/window has to be checked here too, or a
   // second forward of the same notice would silently stop being caught as a duplicate.
   if (!isDuplicate) {
-    const { data: dupeByVendorBill } = await supabase
+    let billQuery = supabase
       .from("property_bills")
       .select("id")
       .eq("status", "Unpaid")
-      .ilike("providerName", parsed.vendor)
+      .ilike("providerName", escapeIlike(parsed.vendor))
       .gte("dueDate", from)
-      .lte("dueDate", to)
-      .limit(1);
+      .lte("dueDate", to);
+    if (matchedPropertyId) billQuery = billQuery.eq("propertyId", matchedPropertyId);
+    const { data: dupeByVendorBill } = await billQuery.limit(1);
     isDuplicate = (dupeByVendorBill?.length ?? 0) > 0;
   }
 
   if (!isDuplicate && parsed.bpay_reference) {
-    const { data: dupeByRefBill } = await supabase
+    let refBillQuery = supabase
       .from("property_bills")
       .select("id, amount, dueDate")
       .eq("status", "Unpaid")
       .eq("bpayReference", parsed.bpay_reference);
+    if (matchedPropertyId) refBillQuery = refBillQuery.eq("propertyId", matchedPropertyId);
+    const { data: dupeByRefBill } = await refBillQuery;
     isDuplicate = (dupeByRefBill ?? []).some(
       (b: { amount: number; dueDate: string }) =>
         Math.abs(Number(b.amount) - parsed.amount) <= amountTolerance ||
@@ -130,10 +141,12 @@ async function runGuardrails(
 
   if (isDuplicate) reasons.push("Possible Duplicate");
 
-  const { data: history } = await supabase
-    .from("expenses")
-    .select("cost")
-    .ilike("itemName", parsed.vendor);
+  // Also property-scoped for the same reason as the duplicate checks above — otherwise a bigger
+  // property's larger historical bills from the same vendor dilute/skew the average used here,
+  // hiding a real spike on a smaller property and false-flagging a legitimately larger one.
+  let historyQuery = supabase.from("expenses").select("cost").ilike("itemName", escapeIlike(parsed.vendor));
+  if (matchedPropertyId) historyQuery = historyQuery.eq("propertyId", matchedPropertyId);
+  const { data: history } = await historyQuery;
 
   if (history && history.length > 0) {
     const avg = history.reduce((s: number, r: { cost: number }) => s + Number(r.cost), 0) / history.length;
@@ -229,7 +242,7 @@ async function upsertProviderFromBill(
     .from("providers")
     .select("id, email, phone, website, abn, address")
     .eq("propertyId", propertyId)
-    .ilike("name", parsed.vendor)
+    .ilike("name", escapeIlike(parsed.vendor))
     .maybeSingle();
 
   if (existing) {
