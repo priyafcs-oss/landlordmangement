@@ -3,6 +3,7 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Field } from "@/components/Field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -50,15 +51,6 @@ const LOW_CONFIDENCE_THRESHOLD = 0.85;
 const SHARED_UNIT = "__shared__";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
-}
 
 interface InstalmentRow {
   key: string;

@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Field } from "@/components/Field";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -29,15 +30,6 @@ export const Route = createFileRoute("/buffers")({
   }),
   component: BuffersPage,
 });
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
-}
 
 function monthlyExpenseEstimate(state: ReturnType<typeof useStore>["state"], scopeType: BufferScopeType, scopeId?: string) {
   const cutoff = new Date();

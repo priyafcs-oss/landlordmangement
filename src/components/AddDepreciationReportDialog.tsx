@@ -3,6 +3,7 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Field } from "@/components/Field";
 import {
   Select,
   SelectContent,
@@ -28,15 +29,6 @@ import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { DepreciationItem } from "@/lib/types";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
-}
 
 interface AssetRow {
   key: string;

@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Field, Stat } from "@/components/Field";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1111,10 +1112,11 @@ function EofyReport() {
                 </Button>
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <Stat label="Gross rent collected" value={fmtCurrency(report.gross)} />
-                <Stat label="Total deductible (Running Expenses)" value={fmtCurrency(report.total)} />
-                <Stat label="Loan interest (est.)" value={fmtCurrency(report.interest)} />
+                <Stat className="bg-background" label="Gross rent collected" value={fmtCurrency(report.gross)} />
+                <Stat className="bg-background" label="Total deductible (Running Expenses)" value={fmtCurrency(report.total)} />
+                <Stat className="bg-background" label="Loan interest (est.)" value={fmtCurrency(report.interest)} />
                 <Stat
+                  className="bg-background"
                   label="Net taxable profit / loss"
                   value={fmtCurrency(report.net)}
                   strong
@@ -1175,40 +1177,6 @@ function EofyReport() {
           </CardContent>
         </Card>
       )}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  strong,
-  negative,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-  negative?: boolean;
-}) {
-  return (
-    <div className="rounded bg-background p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div
-        className={
-          "mt-1 font-medium " + (strong ? "text-base " : "") + (negative ? "text-destructive" : "")
-        }
-      >
-        {value}
-      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Field } from "@/components/Field";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,15 +39,6 @@ import type {
 import { COMPLIANCE_CERT_TYPES } from "@/lib/types";
 
 const SHARED_UNIT = "__shared__";
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
-}
 
 /** Premises/dwelling scope select, shared by every dialog in this file — only rendered when the
  * property actually has units on file, same "shared vs a specific dwelling" pattern used across
