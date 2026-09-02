@@ -30,6 +30,7 @@ import {
   todayISO,
   billTypeToChargeType,
   billTypeToDefaultCategory,
+  mapExpenseCategory,
   expenseCategoryToTaxCategory,
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
@@ -86,6 +87,7 @@ interface ExtractResult {
   bpay_biller_code?: string | null;
   bpay_reference?: string | null;
   bill_category?: string;
+  expense_category?: string;
   future_instalments?: { due_date: string; amount: number }[];
   line_items?: { description: string; amount: number }[];
   confidence?: number;
@@ -217,7 +219,17 @@ export function AddBillDialog({
   const applyExtracted = (
     data: Pick<
       ExtractResult,
-      "vendor" | "amount" | "due_date" | "property_address" | "bpay_biller_code" | "bpay_reference" | "bill_category" | "future_instalments" | "line_items" | "confidence"
+      | "vendor"
+      | "amount"
+      | "due_date"
+      | "property_address"
+      | "bpay_biller_code"
+      | "bpay_reference"
+      | "bill_category"
+      | "expense_category"
+      | "future_instalments"
+      | "line_items"
+      | "confidence"
     >,
     sourceFileName?: string,
     sourceFileData?: string,
@@ -236,7 +248,11 @@ export function AddBillDialog({
       sourceFileData: sourceFileData ?? f.sourceFileData,
       propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
       billType: mapBillType(data.bill_category),
-      category: billTypeToDefaultCategory(mapBillType(data.bill_category)),
+      // expense_category is the richer, purpose-built field for this — bill_category only ever
+      // has 7 fixed values (Water/Council/Strata/Insurance/Electricity/Gas/Other), so a repair,
+      // pest control, gardening or other non-utility bill always fell back to the generic default
+      // when this used billTypeToDefaultCategory(mapBillType(...)) instead.
+      category: data.expense_category ? mapExpenseCategory(data.expense_category, data.vendor) : billTypeToDefaultCategory(mapBillType(data.bill_category)),
       providerName: data.vendor ?? f.providerName,
       dueDate: data.due_date ?? f.dueDate,
       bpayBillerCode: data.bpay_biller_code ?? f.bpayBillerCode,
@@ -299,10 +315,11 @@ export function AddBillDialog({
     setForm((f) => ({
       ...f,
       propertyId: initialProposal.propertyId ?? f.propertyId,
-      // atoCategory is only the coarse two-value AI guess — "Capital Works" nudges the default
-      // toward the Cost Base group, otherwise the billType-derived default from applyExtracted
-      // above (already applied to `f`) stands; the landlord still reviews/edits before saving.
-      category: payload.atoCategory === "Capital Works" ? "Capital Improvement" : f.category,
+      // atoCategory is only the coarse two-value AI guess — "Capital Works" nudges toward the
+      // Cost Base group over whatever applyExtracted set; otherwise prefer the proposal's own
+      // already-resolved category (server-side parse-bill.ts, computed from expense_category)
+      // over applyExtracted's weaker billType-derived fallback above.
+      category: payload.atoCategory === "Capital Works" ? "Capital Improvement" : (payload.category ?? f.category),
     }));
     // applyExtracted above already ran its own (weaker, client-side substring) property match
     // against the raw extracted address text and stored that guess in extractSummary.propertyMatched

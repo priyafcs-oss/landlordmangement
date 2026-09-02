@@ -7,6 +7,7 @@ import {
   extractBillFields,
   mapAtoCategory,
   mapBillType,
+  mapExpenseCategory,
   validateParsedBill,
 } from "./core-parser.ts";
 import type { NormalizedBillInput, ParsedBillFields, ParseResult, ProposalParseResult } from "./types.ts";
@@ -328,7 +329,11 @@ async function writeApprovedBill(
     status: "Unpaid",
     providerName: parsed.vendor,
     providerId: matchedProviderId,
-    category: defaultCategory,
+    // The provider's own saved default wins when it has one (a landlord's own categorization
+    // choice for that vendor); otherwise fall back to this bill's own AI-read expense_category
+    // instead of leaving category unset — see mapExpenseCategory's doc comment for why
+    // bill_category alone (7 fixed values) can't do this for most non-utility bills.
+    category: defaultCategory ?? mapExpenseCategory(parsed.expense_category, parsed.vendor),
     bpayBillerCode: parsed.bpay_biller_code ?? undefined,
     bpayReference: parsed.bpay_reference ?? undefined,
     source: "Email",
@@ -422,7 +427,7 @@ async function stageBillProposal(
       vendorAbn: parsed.vendor_abn ?? undefined,
       vendorAddress: parsed.vendor_address ?? undefined,
       providerId: matchedProviderId,
-      category: defaultCategory,
+      category: defaultCategory ?? mapExpenseCategory(parsed.expense_category, parsed.vendor),
       confidence: parsed.confidence,
     },
   };

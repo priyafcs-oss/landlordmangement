@@ -25,8 +25,16 @@ export interface ParsedBillFields {
   bpay_biller_code: string | null;
   bpay_reference: string | null;
   ato_category: string;
-  /** Free-text category Gemini assigns, mapped onto the app's BillType union for scheduling. */
+  /** Free-text category Gemini assigns, mapped onto the app's BillType union for scheduling
+   * (Water/Council Rates/Strata/Insurance/Electricity/Gas/Other) — deliberately narrow, only for
+   * the handful of bill types with their own scheduling/annual-cost/rebill behavior. */
   bill_category: string;
+  /** Free-text category Gemini assigns from the app's full ATO expense-category taxonomy (see
+   * mapExpenseCategory) — the one that actually drives the Category field on Add Bill/Add
+   * Transaction. bill_category alone can't do this: any bill that isn't one of its 7 fixed values
+   * (a repair invoice, pest control, gardening, legal fees, ...) was falling back to the generic
+   * "Sundry Rental Expenses" with no attempt at a real category. */
+  expense_category: string;
   /** Any OTHER instalments/due dates printed on the same notice besides the one currently due — e.g. a
    * council rates notice listing all 4 quarters. Empty array if the notice only shows one payment. */
   future_instalments: ParsedFutureInstalment[];

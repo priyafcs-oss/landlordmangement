@@ -25,7 +25,7 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType } from "@/lib/calculations";
+import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, billTypeToChargeType, mapExpenseCategory } from "@/lib/calculations";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -110,6 +110,7 @@ interface ExtractResult {
   amount?: number;
   due_date?: string;
   property_address?: string;
+  expense_category?: string;
   confidence?: number;
 }
 
@@ -207,7 +208,7 @@ export function AddTransactionDialog({
   /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
   const applyExtracted = (
-    data: Pick<ExtractResult, "vendor" | "amount" | "due_date" | "property_address" | "confidence">,
+    data: Pick<ExtractResult, "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence">,
     sourceFileName?: string,
     sourceFileData?: string,
   ) => {
@@ -227,7 +228,17 @@ export function AddTransactionDialog({
       payee: data.vendor ?? f.payee,
       date: data.due_date ?? f.date,
     }));
-    setLineItems([{ ...blankLineItem(), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }]);
+    setLineItems([
+      {
+        ...blankLineItem(),
+        description: data.vendor ?? "",
+        amount: data.amount ? String(data.amount) : "",
+        // Previously always left at blankLineItem's hardcoded "Sundry Rental Expenses" default —
+        // extract-bill's expense_category field exists specifically so a general receipt/invoice
+        // (not just a utility bill) gets a real category guess instead of the generic fallback.
+        category: data.expense_category ? mapExpenseCategory(data.expense_category, data.vendor) : blankLineItem().category,
+      },
+    ]);
     setConfidence(data.confidence ?? null);
 
     if (!data.vendor && !data.amount) {

@@ -6,6 +6,15 @@ Extract the fields defined in the response schema as strict JSON.
 - due_date must be formatted YYYY-MM-DD, and is the instalment that is CURRENTLY due / due soonest.
 - bpay_biller_code and bpay_reference must be null if the bill has no BPAY details.
 - bill_category must be one of: Water, Council Rates, Strata, Insurance, Electricity, Gas, Other.
+- expense_category is a SEPARATE, more specific field — pick the single best match to what this
+  bill/receipt is actually FOR, from: Advertising for Tenants, Body Corporate Fees, Cleaning,
+  Council Rates, Gardening / Lawn Mowing, Insurance, Legal Fees, Pest Control, Repairs &
+  Maintenance, Strata Levies, Water Charges, Electricity, Gas, Telephone / Internet, Tax Agent /
+  Accounting Fees, Sundry Rental Expenses. Use the vendor name and line items to judge this, not
+  just bill_category — e.g. a plumber's invoice is "Repairs & Maintenance", a pest inspection is
+  "Pest Control", a lawn/garden service is "Gardening / Lawn Mowing", an accountant's tax return
+  fee is "Tax Agent / Accounting Fees". Only use "Sundry Rental Expenses" when nothing else on this
+  list genuinely fits — it is a last resort, not a default.
 - future_instalments is REQUIRED — you must always include this field, even as an empty array [] when
   there is no schedule to extract. Do not omit it under any circumstances.
 - Many Australian council and water rate notices print the FULL year's payment schedule on one notice,
@@ -72,6 +81,7 @@ const BILL_SCHEMA = {
     bpay_reference: { type: "STRING", nullable: true },
     ato_category: { type: "STRING" },
     bill_category: { type: "STRING" },
+    expense_category: { type: "STRING" },
     future_instalments: {
       type: "ARRAY",
       items: {
@@ -109,6 +119,7 @@ const BILL_SCHEMA = {
     "property_address",
     "ato_category",
     "bill_category",
+    "expense_category",
     "future_instalments",
     "line_items",
     "confidence",
@@ -161,4 +172,66 @@ export function mapBillType(billCategory: string, vendor: string): BillType {
   if (haystack.includes("electric") || haystack.includes("power")) return "Electricity";
   if (haystack.includes("gas")) return "Gas";
   return "Other";
+}
+
+/** The app's own "Running Expenses" ATO category taxonomy (src/lib/types.ts CATEGORY_GROUPS) —
+ * duplicated here since an edge function can't import from src/. Kept in sync by hand; a category
+ * added there for a genuinely bill-shaped expense should be added here too. */
+const EXPENSE_CATEGORIES = [
+  "Advertising for Tenants",
+  "Body Corporate Fees",
+  "Cleaning",
+  "Council Rates",
+  "Gardening / Lawn Mowing",
+  "Insurance",
+  "Legal Fees",
+  "Pest Control",
+  "Repairs & Maintenance",
+  "Strata Levies",
+  "Water Charges",
+  "Electricity",
+  "Gas",
+  "Telephone / Internet",
+  "Tax Agent / Accounting Fees",
+  "Sundry Rental Expenses",
+] as const;
+export type BillExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/** Maps Gemini's free-text expense_category (or a vendor/description fallback) onto the app's
+ * ExpenseCategory taxonomy — this is what actually drives the Category field on Add Bill/Add
+ * Transaction, since bill_category's 7 fixed values can't represent most non-utility bills (a
+ * repair invoice, pest control, gardening, ...). Falls back to keyword matching against the
+ * vendor name (same idea as mapBillType) so a badly-extracted expense_category still lands
+ * somewhere better than the generic default when the vendor name itself is a strong signal. */
+export function mapExpenseCategory(expenseCategory: string, vendor: string): BillExpenseCategory {
+  const exact = EXPENSE_CATEGORIES.find((c) => c.toLowerCase() === (expenseCategory ?? "").trim().toLowerCase());
+  if (exact) return exact;
+  const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
+  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
+  if (haystack.includes("water")) return "Water Charges";
+  if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata Levies";
+  if (haystack.includes("body corp")) return "Body Corporate Fees";
+  if (haystack.includes("insur")) return "Insurance";
+  if (haystack.includes("electric") || haystack.includes("power")) return "Electricity";
+  if (haystack.includes("gas")) return "Gas";
+  if (haystack.includes("pest")) return "Pest Control";
+  if (haystack.includes("garden") || haystack.includes("lawn")) return "Gardening / Lawn Mowing";
+  if (haystack.includes("clean")) return "Cleaning";
+  if (haystack.includes("legal") || haystack.includes("lawyer") || haystack.includes("solicitor")) return "Legal Fees";
+  if (haystack.includes("account") || haystack.includes("tax agent") || haystack.includes("bookkeep")) return "Tax Agent / Accounting Fees";
+  if (haystack.includes("telco") || haystack.includes("internet") || haystack.includes("phone") || haystack.includes("telstra") || haystack.includes("optus"))
+    return "Telephone / Internet";
+  if (haystack.includes("advertis") || haystack.includes("marketing") || haystack.includes("listing"))
+    return "Advertising for Tenants";
+  if (
+    haystack.includes("plumb") ||
+    haystack.includes("electrician") ||
+    haystack.includes("repair") ||
+    haystack.includes("maintenance") ||
+    haystack.includes("handyman") ||
+    haystack.includes("aircon") ||
+    haystack.includes("locksmith")
+  )
+    return "Repairs & Maintenance";
+  return "Sundry Rental Expenses";
 }
