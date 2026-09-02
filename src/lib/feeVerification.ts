@@ -19,11 +19,7 @@ export type AgreementFeeTerms = Pick<
   | "leaseRenewalFeeGstInclusive"
   | "inspectionFeeGstInclusive"
   | "advertisingFeeGstInclusive"
-> & {
-  /** Optional here (unlike the DB row, where it's required) so an ad hoc terms object built from
-   * an AI-extracted proposal not yet saved — which has no GST flag yet — can still be passed in. */
-  gstApplicable?: boolean;
-};
+>;
 
 export type FeeCheckType = "Management Fee" | "Letting Fee" | "Admin Fee" | "Lease Renewal Fee" | "Inspection Fee" | "Other Fee";
 export type FeeCheckStatus = "match" | "overcharge" | "undercharge" | "not_charged" | "unspecified";
@@ -186,14 +182,13 @@ function actualTotalsByType(lines: FeeLine[], agentName: string): Map<FeeCheckTy
   return totals;
 }
 
-/** Applies GST to a single fee's stated rate, if it needs it — the master gstApplicable switch
- * has to be on AND this specific fee's own rate has to be GST-exclusive ("plus GST") for the 1.1
- * multiplier to apply. A rate already marked GST-inclusive is used as-is even when the agency is
- * GST-registered, since GST is already folded into that number — applying the multiplier there
- * too is exactly the double-count this per-fee flag exists to prevent (see ProviderAgreement's
- * gstApplicable/`*GstInclusive` doc comments). */
-function effectiveRate(rate: number, gstInclusive: boolean | undefined, gstApplicable: boolean | undefined): number {
-  return gstApplicable && !gstInclusive ? rate * 1.1 : rate;
+/** Applies GST to a single fee's stated rate, if it needs it — a rate marked "plus GST"
+ * (gstInclusive false/unset) gets the 10% added; a rate already marked GST-inclusive is used
+ * as-is, since GST is already folded into that number and adding it again would double-count
+ * (see ProviderAgreement's `*GstInclusive` doc comment). No separate "is the agency GST
+ * registered" switch — each fee's own flag fully determines its own math. */
+function effectiveRate(rate: number, gstInclusive: boolean | undefined): number {
+  return gstInclusive ? rate : rate * 1.1;
 }
 
 /**
@@ -239,7 +234,7 @@ export function verifyAgentFees(params: {
       // in a different month than the rent it was deducted from) still surfaces the actual charge
       // rather than silently dropping it — there's just nothing to compute an expected amount
       // against, so it reads as "unspecified" instead of a computed variance.
-      const rate = effectiveRate(agreement.managementFeePercent, agreement.managementFeeGstInclusive, agreement.gstApplicable);
+      const rate = effectiveRate(agreement.managementFeePercent, agreement.managementFeeGstInclusive);
       const expected = rentCollected > 0 ? rentCollected * (rate / 100) : undefined;
       results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0));
     }
@@ -252,7 +247,7 @@ export function verifyAgentFees(params: {
       const rawExpected =
         agreement.lettingFeeAmount ?? (agreement.lettingFeeWeeksRent && weeklyRent ? agreement.lettingFeeWeeksRent * weeklyRent : undefined);
       const expected =
-        rawExpected !== undefined ? effectiveRate(rawExpected, agreement.lettingFeeGstInclusive, agreement.gstApplicable) : undefined;
+        rawExpected !== undefined ? effectiveRate(rawExpected, agreement.lettingFeeGstInclusive) : undefined;
       results.push(buildResult("Letting Fee", expected, lettingActual, false));
     }
   }
@@ -262,7 +257,7 @@ export function verifyAgentFees(params: {
     if (adminActual > 0) {
       const expected =
         agreement.adminFeeAmount !== undefined
-          ? effectiveRate(agreement.adminFeeAmount, agreement.adminFeeGstInclusive, agreement.gstApplicable)
+          ? effectiveRate(agreement.adminFeeAmount, agreement.adminFeeGstInclusive)
           : undefined;
       results.push(buildResult("Admin Fee", expected, adminActual, false));
     }
@@ -273,7 +268,7 @@ export function verifyAgentFees(params: {
     if (renewalActual > 0) {
       const expected =
         agreement.leaseRenewalFeeAmount !== undefined
-          ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive, agreement.gstApplicable)
+          ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive)
           : undefined;
       results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
     }
@@ -284,7 +279,7 @@ export function verifyAgentFees(params: {
     if (inspectionActual > 0) {
       const expected =
         agreement.inspectionFeeAmount !== undefined
-          ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive, agreement.gstApplicable)
+          ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive)
           : undefined;
       results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
     }
@@ -356,7 +351,6 @@ export function reconcileFlatFees(params: {
         ? effectiveRate(
             annualizeFlatFee(agreement.adminFeeAmount, agreement.adminFeeFrequency, statementCount),
             agreement.adminFeeGstInclusive,
-            agreement.gstApplicable,
           )
         : undefined;
     results.push(buildResult("Admin Fee", expected, adminActual, false));
@@ -366,7 +360,7 @@ export function reconcileFlatFees(params: {
   if (renewalActual > 0) {
     const expected =
       agreement.leaseRenewalFeeAmount !== undefined
-        ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive, agreement.gstApplicable)
+        ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive)
         : undefined;
     results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
   }
@@ -375,7 +369,7 @@ export function reconcileFlatFees(params: {
   if (inspectionActual > 0) {
     const expected =
       agreement.inspectionFeeAmount !== undefined
-        ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive, agreement.gstApplicable)
+        ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive)
         : undefined;
     results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
   }

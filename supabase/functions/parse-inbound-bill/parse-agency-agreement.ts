@@ -6,14 +6,26 @@ import type { NormalizedBillInput, ProposalParseResult } from "./types.ts";
 const AGREEMENT_PROMPT = `You are extracting fee terms from an Australian Property Management Agreement (PMA) / agency agreement between a landlord and a real estate agency.
 Extract the fields defined in the response schema as strict JSON.
 - property_address: the address of the property this agreement covers, as printed on the agreement. Null if not stated.
-For every fee amount/percent below, extract the rate EXACTLY as stated in the contract — do not
-combine a base rate and a GST-inclusive rate into one "effective" number. Instead, also set that
-fee's matching "..._gst_inclusive" boolean from the contract's own wording: wording like "inclusive
-of GST", "GST inclusive", or "incl. GST" -> true; wording like "plus GST", "+ GST", "excluding GST",
-or GST not mentioned at all -> false. Getting this flag right matters more than the number itself —
-downstream fee-verification math applies GST on top of an exclusive rate but NOT on top of an
-inclusive one, so a wrong flag silently double-counts or drops GST.
-- management_fee_percent / management_fee_gst_inclusive: the ongoing management fee as a percentage of rent collected (e.g. "6.6% of rent collected, inclusive of GST" -> 6.6 / true; "5% plus GST" -> 5 / false). Null if not stated.
+For every fee amount/percent below, extract the number EXACTLY as printed in the contract,
+character-for-character — NEVER calculate, combine, or output an "effective"/GST-adjusted number.
+If the contract says "4% plus GST", the answer is 4, never 4.4 — the separate
+"..._gst_inclusive" boolean (not the number) is where the GST wording goes. Getting this flag
+right matters more than the number itself — downstream fee-verification math ADDS 10% to a fee
+whose flag is false, and uses the number AS-IS when the flag is true, so a wrong flag silently
+double-counts or drops GST.
+Set each fee's own "..._gst_inclusive" boolean using this exact rule, applied to the wording next
+to THAT SPECIFIC fee only (a document can state different fees differently):
+  - The wording right next to this fee explicitly says "plus GST", "+ GST", "excl. GST", or
+    "excluding GST" -> false.
+  - Anything else — a plain number/percentage with NO GST wording at all next to it, or wording
+    like "inclusive of GST" / "GST inclusive" / "incl. GST" -> true. Most Australian agency
+    agreements quote fees GST-inclusive by default, so treat "no GST wording mentioned" as
+    inclusive (true), not exclusive — only ever answer false when this fee's own text explicitly
+    says "plus"/"+"/"excl" GST.
+Worked examples: "Management fee: 4% plus GST" -> percent 4, gst_inclusive false. "Admin fee: $66"
+(no GST wording at all) -> amount 66, gst_inclusive true. "Letting fee: one week's rent inclusive
+of GST" -> weeks_rent 1, gst_inclusive true.
+- management_fee_percent / management_fee_gst_inclusive: the ongoing management fee as a percentage of rent collected (e.g. "6.6% of rent collected, inclusive of GST" -> 6.6 / true; "4% plus GST" -> 4 / false). Null if not stated.
 - letting_fee_amount is a flat dollar letting/leasing fee charged when a new tenant is placed. Null if the agreement instead expresses this as a number of weeks' rent, or doesn't state one.
 - letting_fee_weeks_rent is the letting fee expressed as a number of weeks' rent (e.g. "one week's rent plus GST" -> 1, "2 weeks rent" -> 2). Null if a flat dollar amount is used instead, or not stated.
 - letting_fee_gst_inclusive: the GST wording for whichever of letting_fee_amount/letting_fee_weeks_rent is set.
@@ -23,7 +35,7 @@ inclusive one, so a wrong flag silently double-counts or drops GST.
 - inspection_fee_amount / inspection_fee_gst_inclusive is a flat fee charged per routine/entry/exit inspection, if billed separately from the management fee. Null if not stated.
 - inspections_per_year is how many routine inspections per year the agreement commits the agent to (e.g. "quarterly inspections" -> 4, "twice yearly" -> 2). Null if not stated.
 - advertising_fee_amount / advertising_fee_gst_inclusive is a flat marketing/advertising fee charged when the property is listed for a new tenant, separate from the letting fee itself (sometimes called a "marketing fee" or "sign board fee"). Null if not stated.
-- lease_preparation_fee_amount / lease_preparation_fee_gst_inclusive is a flat fee for preparing a new lease document, separate from the letting fee. Null if not stated.
+- lease_preparation_fee_amount / lease_preparation_fee_gst_inclusive is a flat fee for preparing/drawing up the tenancy agreement document itself — may be called "lease preparation fee", "tenancy agreement fee", "lease document fee", "new lease fee", or "agreement preparation fee" — separate from the letting/leasing fee itself (the fee for FINDING a tenant). Null if not stated as its own line item.
 - ncat_fee_amount / ncat_fee_gst_inclusive is a flat fee (or hourly rate) for the agent attending/lodging an NCAT (or other state tribunal) matter on the owner's behalf. Null if not stated.
 - agent_pays_water_usage: true if the agreement says the agent pays/manages water usage charges on the owner's behalf from rental proceeds, false if the agreement says the owner/landlord handles this directly, null if not stated either way.
 - agent_pays_land_tax: same as above, for land tax. Null if not stated either way.

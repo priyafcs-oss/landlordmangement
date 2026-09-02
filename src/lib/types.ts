@@ -587,13 +587,11 @@ export interface ProviderAgreement {
   /** When the agreement is next up for renewal/review, if stated. */
   contractReviewDate?: string;
   contractNotes?: string;
-  /** Master "is this agency GST-registered" switch — when false, no fee has GST added regardless
-   * of the per-fee flags below. When true, each fee's effective/expected amount in
-   * feeVerification.ts is `rate * 1.1`, UNLESS that fee's own `*GstInclusive` flag is set, in which
-   * case the stated rate already has GST folded in and is used as-is. Per-fee rather than one
-   * global multiplier because a single agreement can state some fees as "X% plus GST" and others
-   * as "$Y inclusive of GST" — a single flag can't represent both without double- or under-counting. */
-  gstApplicable: boolean;
+  /** Whether this fee's own stated rate already has GST folded in — when true, the rate is used
+   * as-is; when false/unset ("plus GST"), feeVerification.ts's effectiveRate() adds 10%. Per-fee
+   * rather than one agreement-wide switch because a single agreement can state some fees as "X%
+   * plus GST" and others as "$Y inclusive of GST" — one flag can't represent both without double-
+   * or under-counting. */
   managementFeeGstInclusive?: boolean;
   lettingFeeGstInclusive?: boolean;
   adminFeeGstInclusive?: boolean;

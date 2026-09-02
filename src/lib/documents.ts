@@ -230,8 +230,10 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         fileName: i.fileFileName,
         fileData: i.fileData,
       })),
+    // A dismissed proposal was explicitly rejected as not worth keeping (the wrong property, a
+    // duplicate, junk) — it shouldn't linger in every document list as if it were a filed record.
     ...state.aiProposals
-      .filter((p) => p.kind !== "bill" && p.kind !== "expense")
+      .filter((p) => p.kind !== "bill" && p.kind !== "expense" && p.status !== "dismissed")
       .map((p) => {
         const kind = proposalDocumentKind(p.kind);
         const label = proposalDocumentLabel(p);

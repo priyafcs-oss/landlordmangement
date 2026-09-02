@@ -196,7 +196,6 @@ function AgreementRow({ agreement }: { agreement: ProviderAgreement }) {
             {agreement.leaseRenewalFeeAmount !== undefined && <span>Renewal {fmtCurrency(agreement.leaseRenewalFeeAmount)}</span>}
             {agreement.inspectionFeeAmount !== undefined && <span>Inspection {fmtCurrency(agreement.inspectionFeeAmount)}</span>}
             {agreement.advertisingFeeAmount !== undefined && <span>Advertising {fmtCurrency(agreement.advertisingFeeAmount)}</span>}
-            {agreement.gstApplicable && <span>+GST</span>}
           </div>
         )}
         {agreement.contractFileData && (

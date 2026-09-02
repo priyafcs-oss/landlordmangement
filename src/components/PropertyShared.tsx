@@ -4252,7 +4252,6 @@ interface AgreementFormState {
   contractStartDate: string;
   contractReviewDate: string;
   contractNotes: string;
-  gstApplicable: boolean;
 }
 
 function agreementFormFrom(agreement?: Partial<ProviderAgreement>): AgreementFormState {
@@ -4285,7 +4284,6 @@ function agreementFormFrom(agreement?: Partial<ProviderAgreement>): AgreementFor
     contractStartDate: agreement?.contractStartDate ?? "",
     contractReviewDate: agreement?.contractReviewDate ?? "",
     contractNotes: agreement?.contractNotes ?? "",
-    gstApplicable: agreement?.gstApplicable ?? false,
   };
 }
 
@@ -4320,7 +4318,6 @@ function agreementPayloadFrom(form: AgreementFormState) {
     contractStartDate: form.contractStartDate || undefined,
     contractReviewDate: form.contractReviewDate || undefined,
     contractNotes: form.contractNotes.trim() || undefined,
-    gstApplicable: form.gstApplicable,
   };
 }
 
@@ -4658,16 +4655,6 @@ function AgreementFields({
             onChange={(e) => setForm((f) => ({ ...f, contractReviewDate: e.target.value }))}
           />
         </Field>
-        <div className="col-span-2 flex items-center gap-2 rounded border p-2">
-          <Checkbox
-            id="agreement-gst"
-            checked={form.gstApplicable}
-            onCheckedChange={(v) => setForm((f) => ({ ...f, gstApplicable: v === true }))}
-          />
-          <Label htmlFor="agreement-gst" className="text-xs font-normal">
-            Agency is GST-registered — add 10% GST to every fee above whose "includes GST" box isn't ticked
-          </Label>
-        </div>
         <div className="col-span-2 space-y-1.5 rounded border p-2">
           <div className="text-xs font-medium">Outgoings — does the agent pay these on the owner's behalf?</div>
           <label className="flex items-center gap-2 text-xs font-normal">
@@ -4675,7 +4662,7 @@ function AgreementFields({
               checked={form.agentPaysWaterUsage}
               onCheckedChange={(v) => setForm((f) => ({ ...f, agentPaysWaterUsage: v === true }))}
             />
-            Water usage
+            Water Bill
           </label>
           <label className="flex items-center gap-2 text-xs font-normal">
             <Checkbox
@@ -5048,7 +5035,6 @@ export function ProviderRow({
             {agreement.adminFeeAmount !== undefined && <span>Admin {fmtCurrency(agreement.adminFeeAmount)}</span>}
             {agreement.advertisingFeeAmount !== undefined && <span>Advertising {fmtCurrency(agreement.advertisingFeeAmount)}</span>}
             {agreement.noticePeriodDays !== undefined && <span>Notice {agreement.noticePeriodDays} days</span>}
-            {agreement.gstApplicable && <span>+GST</span>}
             {agreement.contractFileData && (
               <button
                 type="button"
