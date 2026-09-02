@@ -1131,7 +1131,7 @@ interface BankStatementTransaction {
   date: string;
   description: string;
   amount: number;
-  direction: "credit" | "debit";
+  direction: "in" | "out";
 }
 
 function BankFeedDialog() {
@@ -1189,7 +1189,7 @@ function BankFeedDialog() {
         toast.error(data?.error || "Couldn't read this statement");
         return;
       }
-      const credits = (data.transactions ?? []).filter((t) => t.direction === "credit");
+      const credits = (data.transactions ?? []).filter((t) => t.direction === "in");
       const found: { tenant: Tenant; amount: number; line: string }[] = [];
       for (const t of credits) {
         const line = `${t.date} ${t.description}`;

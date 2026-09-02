@@ -39,7 +39,9 @@ const SCHEMA = {
   required: ["transactions", "confidence"],
 };
 
-async function callGemini(input: NormalizedBillInput): Promise<ParsedBankStatementFields> {
+/** Pure Gemini extraction, no database access — shared by the classify→stage pipeline below and
+ * the stateless extract-bank-statement endpoint used by Rental Hub's Bank Feed Import. */
+export async function extractBankStatementFields(input: NormalizedBillInput): Promise<ParsedBankStatementFields> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
   const parts = buildDocumentParts(PROMPT, input);
@@ -64,7 +66,7 @@ export async function parseBankStatement(
 
   let parsed: ParsedBankStatementFields;
   try {
-    parsed = await callGemini(input);
+    parsed = await extractBankStatementFields(input);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Gemini extraction failed" };
   }
