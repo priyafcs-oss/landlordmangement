@@ -1,20 +1,17 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ausFinancialYear, fyRange, buildFyOptions } from "@/lib/calculations";
-import { bucketBy } from "@/lib/group";
 import {
   DocTable,
   DocGroupSection,
-  fileFormatOf,
   formatDocMonthLabel,
   FILE_FORMATS,
-  type FileFormat,
+  useDocumentFilters,
 } from "@/components/DocumentEntryRow";
-import { buildDocumentEntries, matchesDocumentQuery, type DocumentEntry } from "@/lib/documents";
+import { buildDocumentEntries, type DocumentEntry } from "@/lib/documents";
 
 export const Route = createFileRoute("/documents")({
   head: () => ({
@@ -54,16 +51,8 @@ function DocumentsPage() {
 export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
   const { state } = useStore();
   const [propertyFilter, setPropertyFilter] = useState("__all__");
-  const [tenantId, setTenantId] = useState("__all__");
-  const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
-  const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
   const [tab, setTab] = useState<"all" | "needsHome">("all");
-  const [fy, setFy] = useState("all");
-  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
-  const [query, setQuery] = useState("");
   const propertyId = lockedPropertyId ?? propertyFilter;
-
-  const fys = useMemo(() => buildFyOptions(), []);
 
   const entries = buildDocumentEntries(state);
 
@@ -78,22 +67,8 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
   );
   const tabbed = tab === "needsHome" ? scoped.filter(needsHome) : scoped;
 
-  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
-
-  const filtered = tabbed.filter((d) => {
-    if (kind !== "__all__" && d.kind !== kind) return false;
-    if (fileFormat !== "__all__" && fileFormatOf(d) !== fileFormat) return false;
-    if (tenantId !== "__all__" && d.tenantId !== tenantId) return false;
-    if (fy !== "all" && !(d.date >= start && d.date <= end)) return false;
-    if (!matchesDocumentQuery(d, query)) return false;
-    return true;
-  });
-
-  const groups = useMemo(() => {
-    if (groupBy === "none") return null;
-    const map = bucketBy(filtered, (d) => (!d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date)));
-    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [filtered, groupBy]);
+  const { query, setQuery, kind, setKind, fileFormat, setFileFormat, fy, setFy, fys, groupBy, setGroupBy, tenantId, setTenantId, filtered, groups } =
+    useDocumentFilters(tabbed);
 
   const lastAdded = scoped.reduce<string>((latest, d) => (d.date > latest ? d.date : latest), "");
   const byType = Object.entries(

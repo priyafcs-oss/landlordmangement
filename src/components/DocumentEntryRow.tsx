@@ -274,6 +274,54 @@ export function DocumentNameCell({
 }
 
 /**
+ * Search/type/file-format/FY/group-by/tenant filter state + the resulting filtered & grouped
+ * list — the logic shared by DocumentsPanel below and the standalone "Other documents" page
+ * (routes/documents.tsx), which wraps this same filtering in its own richer page shell (tabs, an
+ * Insights sidebar, a property picker) that doesn't belong on every embedded per-tab list.
+ */
+export function useDocumentFilters(entries: DocumentEntry[]) {
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
+  const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
+  const [fy, setFy] = useState("all");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+  const [tenantId, setTenantId] = useState("__all__");
+  const [sortDir, setSortDir] = useState<"newest" | "oldest">("newest");
+
+  const fys = useMemo(() => buildFyOptions(), []);
+  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
+
+  const filtered = useMemo(
+    () =>
+      entries
+        .filter((d) => matchesDocumentQuery(d, query))
+        .filter((d) => kind === "__all__" || d.kind === kind)
+        .filter((d) => fileFormat === "__all__" || fileFormatOf(d) === fileFormat)
+        .filter((d) => tenantId === "__all__" || d.tenantId === tenantId)
+        .filter((d) => fy === "all" || (d.date >= start && d.date <= end))
+        .sort((a, b) => (sortDir === "newest" ? (a.date < b.date ? 1 : -1) : a.date < b.date ? -1 : 1)),
+    [entries, query, kind, fileFormat, tenantId, fy, start, end, sortDir],
+  );
+
+  const groups = useMemo(() => {
+    if (groupBy === "none") return null;
+    const map = bucketBy(filtered, (d) => (!d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date)));
+    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [filtered, groupBy]);
+
+  return {
+    query, setQuery,
+    kind, setKind,
+    fileFormat, setFileFormat,
+    fy, setFy, fys,
+    groupBy, setGroupBy,
+    tenantId, setTenantId,
+    sortDir, setSortDir,
+    filtered, groups,
+  };
+}
+
+/**
  * The full filter bar (search, type, file format, financial year, group-by, tenant) plus the
  * table/grouped view — same filtering power the standalone "Other documents" page has, packaged
  * so it can be dropped into any property tab (Purchase, Tenancy, Maintenance, Insurance,
@@ -294,37 +342,18 @@ export function DocumentsPanel({
   searchPlaceholder?: string;
   emptyMessage?: string;
 }) {
-  const [query, setQuery] = useState("");
-  const [kind, setKind] = useState<"__all__" | DocumentEntry["kind"]>("__all__");
-  const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
-  const [fy, setFy] = useState("all");
-  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
-  const [tenantId, setTenantId] = useState("__all__");
-  const [sortDir, setSortDir] = useState<"newest" | "oldest">("newest");
+  const {
+    query, setQuery,
+    kind, setKind,
+    fileFormat, setFileFormat,
+    fy, setFy, fys,
+    groupBy, setGroupBy,
+    tenantId, setTenantId,
+    sortDir, setSortDir,
+    filtered, groups,
+  } = useDocumentFilters(entries);
 
   const kindOptions = useMemo(() => [...new Set(entries.map((e) => e.kind))], [entries]);
-
-  const fys = useMemo(() => buildFyOptions(), []);
-
-  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
-
-  const filtered = useMemo(
-    () =>
-      entries
-        .filter((d) => matchesDocumentQuery(d, query))
-        .filter((d) => kind === "__all__" || d.kind === kind)
-        .filter((d) => fileFormat === "__all__" || fileFormatOf(d) === fileFormat)
-        .filter((d) => tenantId === "__all__" || d.tenantId === tenantId)
-        .filter((d) => fy === "all" || (d.date >= start && d.date <= end))
-        .sort((a, b) => (sortDir === "newest" ? (a.date < b.date ? 1 : -1) : a.date < b.date ? -1 : 1)),
-    [entries, query, kind, fileFormat, tenantId, fy, start, end, sortDir],
-  );
-
-  const groups = useMemo(() => {
-    if (groupBy === "none") return null;
-    const map = bucketBy(filtered, (d) => (!d.date ? "unknown" : groupBy === "month" ? d.date.slice(0, 7) : ausFinancialYear(d.date)));
-    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [filtered, groupBy]);
 
   return (
     <div>
