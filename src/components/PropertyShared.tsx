@@ -5210,21 +5210,33 @@ export function PropertyFeeVerificationTab({
   const monthKeys = [...new Set([...rentInRange.map((e) => e.date.slice(0, 7)), ...expensesInRange.map((e) => e.date.slice(0, 7))])].sort();
 
   const monthRows = monthKeys.map((key) => {
-    const rentCollected = rentInRange.filter((e) => e.date.slice(0, 7) === key).reduce((s, e) => s + e.credit, 0);
+    const monthRent = rentInRange.filter((e) => e.date.slice(0, 7) === key);
+    const rentCollected = monthRent.reduce((s, e) => s + e.credit, 0);
+    // A letting fee contracted as "N weeks' rent" needs the actual tenant's weekly rent to convert
+    // to a dollar figure — resolved from whichever tenant's rent payment(s) make up this month's
+    // total, the same "unambiguous single tenant" resolution RentLedgerProposalCard's feeChecks
+    // uses (singleAssignedTenant) rather than guessing when more than one tenant paid in the month.
+    const monthTenantIds = [...new Set(monthRent.map((e) => e.tenantId))];
+    const monthTenant = monthTenantIds.length === 1 ? state.tenants.find((t) => t.id === monthTenantIds[0]) : undefined;
     const lines = collectAgentFeeLines(expensesInRange.filter((e) => e.date.slice(0, 7) === key));
     const results = verifyAgentFees({
       agentName: provider.name,
       agreement: agreementTerms,
       rentCollected,
       lines,
+      tenantRent: monthTenant ? { amount: monthTenant.rentAmount, frequency: monthTenant.rentFrequency } : undefined,
       feeTypes: ["Management Fee", "Letting Fee"],
     });
+    // Management-Fee-only, matching the headline tiles above — Letting Fee still has its own
+    // sub-row in the expanded-month breakdown (results includes both types), this just keeps the
+    // column-header total from silently combining the two into one number.
+    const mgmtResults = results.filter((r) => r.type === "Management Fee");
     return {
       key,
       rentCollected,
       results,
-      totalActual: results.reduce((s, r) => s + r.actual, 0),
-      totalExpected: results.reduce((s, r) => s + (r.expected ?? 0), 0),
+      totalActual: mgmtResults.reduce((s, r) => s + r.actual, 0),
+      totalExpected: mgmtResults.reduce((s, r) => s + (r.expected ?? 0), 0),
     };
   });
   // Admin/Lease Renewal/Inspection Fee — flat contracted amounts reconciled once for the whole
@@ -5244,8 +5256,9 @@ export function PropertyFeeVerificationTab({
   const mgmtRowsOnly = monthRows.map((m) => m.results.filter((r) => r.type === "Management Fee"));
   const totalActual = mgmtRowsOnly.reduce((s, rs) => s + rs.reduce((s2, r) => s2 + r.actual, 0), 0);
   const totalExpected = mgmtRowsOnly.reduce((s, rs) => s + rs.reduce((s2, r) => s2 + (r.expected ?? 0), 0), 0);
-  // Combined Management + Letting Fee total across every period — the monthly table's own column
-  // totals, distinct from the Management-Fee-only headline tiles above.
+  // Management-Fee-only total across every period — the monthly table's own column footer, kept
+  // consistent with the Management-Fee-only headline tiles above (Letting Fee is broken out in each
+  // month's own expanded row instead, see monthRows above).
   const monthlyTotalActual = monthRows.reduce((s, m) => s + m.totalActual, 0);
   const monthlyTotalExpected = monthRows.reduce((s, m) => s + m.totalExpected, 0);
   const flaggedMonths = monthRows.filter((m) =>

@@ -848,8 +848,20 @@ function EofyReport() {
         // one call (mathematically identical to summing per-period); Admin/Lease Renewal/
         // Inspection Fee are flat contracted amounts reconciled once for the FY instead — see
         // feeVerification.ts's doc comments for why mixing the two overstated the flat fees.
+        // A letting fee contracted as "N weeks' rent" needs the actual tenant's weekly rent to
+        // convert to a dollar figure — only resolvable when the property had exactly one tenant
+        // over the FY, the same "unambiguous single tenant" resolution used elsewhere for this
+        // (see singleAssignedTenant in PropertyShared.tsx's feeChecks, and PropertyFeeVerificationTab).
+        const soleTenant = tenantIds.length === 1 ? state.tenants.find((t) => t.id === tenantIds[0]) : undefined;
         const results = [
-          ...verifyAgentFees({ agentName: agent.name, agreement, rentCollected, lines, feeTypes: ["Management Fee", "Letting Fee"] }),
+          ...verifyAgentFees({
+            agentName: agent.name,
+            agreement,
+            rentCollected,
+            lines,
+            tenantRent: soleTenant ? { amount: soleTenant.rentAmount, frequency: soleTenant.rentFrequency } : undefined,
+            feeTypes: ["Management Fee", "Letting Fee"],
+          }),
           ...reconcileFlatFees({ agentName: agent.name, agreement, lines, statementCount }),
         ];
         if (results.length > 0) {

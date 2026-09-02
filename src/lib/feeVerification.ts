@@ -19,7 +19,7 @@ export type AgreementFeeTerms = Pick<
   gstApplicable?: boolean;
 };
 
-export type FeeCheckType = "Management Fee" | "Letting Fee" | "Admin Fee" | "Lease Renewal Fee" | "Inspection Fee";
+export type FeeCheckType = "Management Fee" | "Letting Fee" | "Admin Fee" | "Lease Renewal Fee" | "Inspection Fee" | "Other Fee";
 export type FeeCheckStatus = "match" | "overcharge" | "undercharge" | "not_charged" | "unspecified";
 
 export interface FeeCheckResult {
@@ -129,23 +129,51 @@ export function buildResult(type: FeeCheckType, expected: number | undefined, ac
   return { type, expected, actual, variance, status };
 }
 
+/** Words generic enough that a line built ONLY from them (plus the agent's own name, and the
+ * "Property Agent Fees"/"Letting Fees" category boilerplate collectAgentFeeLines adds) still means
+ * the recurring management fee — see actualTotalsByType below. Anything else left over after
+ * stripping these and the agent's name means the line carries a real, if unrecognised, descriptor
+ * (e.g. "tenancy_preparation_fee") and shouldn't be assumed to be the management fee. */
+const GENERIC_FEE_FILLER = /\b(the|a|an|agency|agent|property|management|fee|fees|commission|charge|charges)\b/gi;
+
+function isGenericFeeText(text: string, agentName: string): boolean {
+  // Raw AI-extracted category tags are snake_case (e.g. "agency_fee", "tenancy_preparation_fee") —
+  // normalize underscores to spaces first so GENERIC_FEE_FILLER's \b word boundaries see each part
+  // as its own word, rather than the whole tag failing to match anything.
+  const normalized = text.replace(/_/g, " ");
+  const agentPattern = new RegExp(agentName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  const withoutAgentName = agentName ? normalized.replace(agentPattern, " ") : normalized;
+  const remainder = withoutAgentName.replace(GENERIC_FEE_FILLER, " ").replace(/[^a-z0-9]+/gi, " ").trim();
+  return remainder.length === 0;
+}
+
 /** Classifies each fee line to a FeeCheckType and sums amounts by type — the shared core of both
  * verifyAgentFees (one statement/period) and reconcileFlatFees (a whole FY at once). A line with
- * no recognisable fee keyword (a bare "Agency Fee"/"Commission" with no further detail) still
- * overwhelmingly means the recurring management fee — the only fee type charged on virtually every
- * statement — rather than something to silently drop from the total, PROVIDED the line was
- * actually paid to the agent itself (its vendor/payee name matches), or is explicitly tagged with
- * the dedicated fee category. Without that guard, a bill the agent merely paid on the owner's
+ * no recognisable fee keyword, that was either paid to the agent itself (its vendor/payee name
+ * matches) or is explicitly tagged with the dedicated fee category, is either:
+ *  - genuinely generic ("Agency Fee", "Commission", bare "Property Agent Fee(s)") — this
+ *    overwhelmingly means the recurring management fee, the only fee type charged on virtually
+ *    every statement, so it's counted as one rather than silently dropped from the total; or
+ *  - carrying a MORE specific descriptor the keyword list just doesn't recognise (e.g. a raw AI tag
+ *    like "tenancy_preparation_fee") — counting that as Management Fee would misattribute a charge
+ *    that might be something else entirely, so it's bucketed as "Other Fee" instead, kept visible
+ *    to the landlord rather than silently inflating (or vanishing from) a total it doesn't belong
+ *    in.
+ * Without the agent/category guard in the first place, a bill the agent merely paid on the owner's
  * behalf (a tradesperson invoice deducted from the same statement, or a Repairs & Maintenance
  * expense routed through the agent's trust account) would fall into this same catch-all and
- * inflate the management fee total with costs that have nothing to do with it. */
+ * inflate totals with costs that have nothing to do with the agent's own fees. */
 function actualTotalsByType(lines: FeeLine[], agentName: string): Map<FeeCheckType, number> {
   const normalizedAgentName = agentName.trim().toLowerCase();
   const totals = new Map<FeeCheckType, number>();
   for (const line of lines) {
+    const blob = `${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`;
     const isFeeCategory = /property agent fees|letting fees/i.test(line.category ?? "");
     const payeeIsAgent = [line.vendor, line.providerName].some((v) => !!v && v.trim().toLowerCase() === normalizedAgentName);
-    const type = classifyFeeLine(`${line.vendor ?? ""} ${line.category ?? ""} ${line.description ?? ""}`) ?? (isFeeCategory || payeeIsAgent ? "Management Fee" : null);
+    let type = classifyFeeLine(blob);
+    if (!type && (isFeeCategory || payeeIsAgent)) {
+      type = isGenericFeeText(blob, agentName) ? "Management Fee" : "Other Fee";
+    }
     if (!type) continue;
     totals.set(type, (totals.get(type) ?? 0) + line.amount);
   }
@@ -186,7 +214,7 @@ export function verifyAgentFees(params: {
   /** Matched tenant's rent, for a letting fee contracted as "N weeks' rent" rather than a flat $. */
   tenantRent?: { amount: number; frequency: RentFrequency };
   /** Restricts which fee types are computed/returned — see the doc comment above. Defaults to all
-   * five types. */
+   * six types. */
   feeTypes?: FeeCheckType[];
 }): FeeCheckResult[] {
   const { agentName, agreement, rentCollected, lines, tenantRent, feeTypes } = params;
@@ -241,6 +269,15 @@ export function verifyAgentFees(params: {
     }
   }
 
+  // No agreement field could ever supply an expected amount for an unrecognised charge — always
+  // reported as "unspecified" so it stays visible rather than silently vanishing from every total.
+  if (wants("Other Fee")) {
+    const otherActual = actualByType.get("Other Fee") ?? 0;
+    if (otherActual > 0) {
+      results.push(buildResult("Other Fee", undefined, otherActual, false));
+    }
+  }
+
   return results;
 }
 
@@ -264,17 +301,19 @@ function annualizeFlatFee(amount: number, frequency: FeeFrequency | undefined, s
 }
 
 /**
- * Reconciles the three flat/infrequent agreement fees — Admin Fee, Lease Renewal Fee, Inspection
- * Fee — once for a whole FY (or other span), rather than once per calling period. This is the
- * counterpart to verifyAgentFees's per-period Management/Letting Fee handling: those two scale
- * naturally with how often they're charged (a % of rent, a fee per new tenancy), but a flat
- * contracted admin fee doesn't — comparing the same raw contracted amount against every period it
- * recurs in and then summing those "expected" values overstates the true annual figure by however
- * many periods it appeared in. Pass every agent-fee line across the WHOLE span being reconciled in
- * one call (not per month) so `actual` is summed exactly once; `expected` is the frequency-
- * annualized contracted amount. Only emits a result for a fee type that was actually charged
- * somewhere in the span — a renewal/inspection fee never occurring is normal, not a discrepancy,
- * the same asymmetry verifyAgentFees applies to those types.
+ * Reconciles the flat/infrequent agreement fees — Admin Fee, Lease Renewal Fee, Inspection Fee —
+ * plus unrecognised "Other Fee" charges, once for a whole FY (or other span), rather than once per
+ * calling period. This is the counterpart to verifyAgentFees's per-period Management/Letting Fee
+ * handling: those two scale naturally with how often they're charged (a % of rent, a fee per new
+ * tenancy), but a flat contracted admin fee doesn't — comparing the same raw contracted amount
+ * against every period it recurs in and then summing those "expected" values overstates the true
+ * annual figure by however many periods it appeared in ("Other Fee" has no contracted amount at
+ * all, so it's reconciled here purely to avoid it being excluded by callers that restrict
+ * verifyAgentFees to Management/Letting Fee only). Pass every agent-fee line across the WHOLE span
+ * being reconciled in one call (not per month) so `actual` is summed exactly once; `expected` is
+ * the frequency-annualized contracted amount. Only emits a result for a fee type that was actually
+ * charged somewhere in the span — a renewal/inspection fee never occurring is normal, not a
+ * discrepancy, the same asymmetry verifyAgentFees applies to those types.
  */
 export function reconcileFlatFees(params: {
   agentName: string;
@@ -309,6 +348,14 @@ export function reconcileFlatFees(params: {
   if (inspectionActual > 0) {
     const expected = agreement.inspectionFeeAmount !== undefined ? agreement.inspectionFeeAmount * gstMultiplier : undefined;
     results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
+  }
+
+  // Reconciled here rather than in verifyAgentFees's per-period call (callers that sum across
+  // periods restrict it to Management/Letting Fee only) so an unrecognised charge is still surfaced
+  // exactly once for the span, not silently dropped — see actualTotalsByType's doc comment.
+  const otherActual = actualByType.get("Other Fee") ?? 0;
+  if (otherActual > 0) {
+    results.push(buildResult("Other Fee", undefined, otherActual, false));
   }
 
   return results;
