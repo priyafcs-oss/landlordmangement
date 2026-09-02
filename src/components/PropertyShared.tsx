@@ -5511,7 +5511,7 @@ export function DeletePropertyDialog({ property, trigger, onDeleted }: { propert
   const [mode, setMode] = useState<"all" | "keepRentalHub">("all");
   const [confirmText, setConfirmText] = useState("");
 
-  const label = property.alias || property.address;
+  const label = (property.alias || property.address).trim();
   const tenantIds = state.tenants.filter((t) => t.propertyId === property.id).map((t) => t.id);
   const tenantCount = tenantIds.length;
   const ledgerCount = state.ledger.filter((e) => tenantIds.includes(e.tenantId)).length;
