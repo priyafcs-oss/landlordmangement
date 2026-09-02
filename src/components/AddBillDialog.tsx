@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -172,8 +172,13 @@ export function AddBillDialog({
   const [form, setForm] = useState(blankForm());
   const [instalments, setInstalments] = useState<InstalmentRow[]>([]);
   const [lineItems, setLineItems] = useState<LineItemRow[]>([blankLineItem()]);
+  // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset can
+  // tell its own result is stale and skip applying it, instead of repopulating a "blank" form
+  // with a previous, unrelated upload's data once the Gemini call finally resolves.
+  const generationRef = useRef(0);
 
   const reset = () => {
+    generationRef.current++;
     setForm(blankForm());
     setInstalments([]);
     setLineItems([blankLineItem(form.billType)]);
@@ -312,17 +317,20 @@ export function AddBillDialog({
         `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
       );
     }
+    const generation = generationRef.current;
     setBusy(true);
     setExtractSummary(null);
     setExtractEmpty(false);
     try {
       const base64 = await readFileAsBase64(file);
+      if (generationRef.current !== generation) return;
       // Attach immediately so the document pane shows the file even if extraction fails below.
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
       const { data, error } = await supabase.functions.invoke<ExtractBillResult>("extract-bill", {
         body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
       });
+      if (generationRef.current !== generation) return;
       if (error) throw error;
       if (!data?.ok) {
         toast.error(data?.error || "Couldn't read this bill");
@@ -337,9 +345,9 @@ export function AddBillDialog({
         toast.success("Extracted — review the fields before saving");
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Extraction failed");
+      if (generationRef.current === generation) toast.error(e instanceof Error ? e.message : "Extraction failed");
     } finally {
-      setBusy(false);
+      if (generationRef.current === generation) setBusy(false);
     }
   };
 

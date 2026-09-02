@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,8 +84,13 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
 
   const [form, setForm] = useState(blankForm());
   const [items, setItems] = useState<AssetRow[]>([blankAsset()]);
+  // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset
+  // can tell its own result is stale and skip applying it, instead of repopulating a "blank"
+  // form with a previous, unrelated upload's data once the Gemini call finally resolves.
+  const generationRef = useRef(0);
 
   const reset = () => {
+    generationRef.current++;
     setForm(blankForm());
     setItems([blankAsset()]);
     setExtractOk(false);
@@ -98,16 +103,19 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
       );
     }
+    const generation = generationRef.current;
     setBusy(true);
     setExtractOk(false);
     setExtractEmpty(false);
     try {
       const base64 = await readFileAsBase64(file);
+      if (generationRef.current !== generation) return;
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
       const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-depreciation-report", {
         body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
       });
+      if (generationRef.current !== generation) return;
       if (error) throw error;
       if (!data?.ok) {
         toast.error(data?.error || "Couldn't read this report");
@@ -139,9 +147,9 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         toast.warning("Couldn't find asset line items in this file — add them manually below");
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Extraction failed");
+      if (generationRef.current === generation) toast.error(e instanceof Error ? e.message : "Extraction failed");
     } finally {
-      setBusy(false);
+      if (generationRef.current === generation) setBusy(false);
     }
   };
 
