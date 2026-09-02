@@ -1350,17 +1350,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             date: paidDate,
             propertyId: bill.propertyId,
             assetId: bill.assetId,
+            unitId: bill.unitId,
             // Falls back for bills saved before taxCategory existed on property_bills.
             taxCategory: bill.taxCategory ?? "Immediate Deduction",
+            category: bill.category,
             hasWarranty: false,
             rechargeToTenant: false,
             status: "approved",
             source: "manual",
             bpayBillerCode: bill.bpayBillerCode,
             bpayReference: bill.bpayReference,
+            // Previously dropped on conversion, which silently un-linked the provider directory
+            // entry and the actual bill PDF the moment a bill was marked paid — the Transactions
+            // row then showed neither a provider nor a working invoice link even though both were
+            // right there on the Bill.
+            providerName: bill.providerName,
+            providerId: bill.providerId,
+            invoiceFileName: bill.sourceFileName,
+            invoiceFileData: bill.sourceFileData,
           };
           linkedExpenseId = newExpense.id;
           void upsertRow(TABLES.expenses, newExpense as unknown as Record<string, unknown>);
+          if (bill.providerName && !bill.providerId) {
+            value.findOrCreateProvider(bill.providerName, bill.propertyId);
+          }
         }
 
         void updateRow(TABLES.bills, id, { status: "Paid", paidDate, linkedExpenseId });
