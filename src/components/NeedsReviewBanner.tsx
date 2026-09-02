@@ -85,7 +85,7 @@ export function NeedsReviewBanner() {
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{e.itemName}</span>
-                    {e.source === "email_auto" && <Badge variant="secondary">Auto</Badge>}
+                    {(e.source === "email_auto" || e.source === "agent_statement") && <Badge variant="secondary">Auto</Badge>}
                     {(e.reviewReason ?? "")
                       .split("; ")
                       .filter(Boolean)

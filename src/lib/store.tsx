@@ -334,6 +334,14 @@ const Ctx = createContext<StoreCtx | null>(null);
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
+/** Maps a Bill's own origin onto the Expense it becomes at payment time (markBillPaid), so a
+ * bill that came in by email still shows as email-sourced in Transactions instead of "Manual". */
+function billSourceToExpenseSource(billSource: PropertyBill["source"]): Expense["source"] {
+  if (billSource === "Email") return "email_auto";
+  if (billSource === "Upload") return "upload";
+  return "manual";
+}
+
 function addMonthsISO(iso: string, months: number): string {
   const d = new Date(iso);
   d.setMonth(d.getMonth() + months);
@@ -1373,7 +1381,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             hasWarranty: false,
             rechargeToTenant: false,
             status: "approved",
-            source: "manual",
+            source: billSourceToExpenseSource(bill.source),
             bpayBillerCode: bill.bpayBillerCode,
             bpayReference: bill.bpayReference,
             // Previously dropped on conversion, which silently un-linked the provider directory

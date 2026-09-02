@@ -312,9 +312,9 @@ export interface LedgerEntry {
   /** Days that this adjustment/payment shifts the paid-up-to date. Used to reverse cleanly on undo. */
   daysShift?: number;
   /** How this entry was posted — unset for historical rows predating this field. */
-  source?: "manual" | "bank_feed" | "rent_statement";
+  source?: "manual" | "bank_feed" | "agent_statement";
   /** The statement/document this payment was read off, when there is one (set for
-   * source: "rent_statement" rows) — lets Transactions link straight back to it. */
+   * source: "agent_statement" rows) — lets Transactions link straight back to it. */
   sourceFileName?: string;
   sourceFileData?: string;
 }
@@ -402,7 +402,10 @@ export interface Expense {
   /** Set once a TenantInvoice has actually been created for the recharge, so re-saving never double-charges. */
   recharged?: boolean;
   status: "needs_review" | "approved" | "paid";
-  source: "manual" | "email_auto" | "upload";
+  /** How this expense entered the system — "agent_statement" is a fee/deduction line read off a
+   * rent statement, distinct from "email_auto" (a bill forwarded by email) so Transactions can
+   * show a landlord exactly where a figure came from. */
+  source: "manual" | "email_auto" | "upload" | "agent_statement";
   bpayBillerCode?: string;
   bpayReference?: string;
   referenceNumber?: string;

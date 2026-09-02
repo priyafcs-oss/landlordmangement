@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -34,6 +35,15 @@ import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, Expense, ExpenseProposalPayload } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
+/** How this transaction was recorded — shown read-only next to the title, separate from the
+ * invoice/file section below, so "where did this come from" and "what document backs it" are
+ * never conflated into one field. */
+const EXPENSE_SOURCE_LABELS: Record<Expense["source"], string> = {
+  manual: "Manual entry",
+  upload: "Uploaded document",
+  email_auto: "Email",
+  agent_statement: "Agent statement",
+};
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 /** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
  * an empty string, and shared/whole-property genuinely needs its own selectable option. */
@@ -555,7 +565,10 @@ export function AddTransactionDialog({
       )}
       <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{expense ? "Edit transaction" : initialProposal ? "Review transaction" : "New transaction"}</DialogTitle>
+          <div className="flex items-center gap-2">
+            <DialogTitle>{expense ? "Edit transaction" : initialProposal ? "Review transaction" : "New transaction"}</DialogTitle>
+            {expense && <Badge variant="secondary">Source: {EXPENSE_SOURCE_LABELS[expense.source]}</Badge>}
+          </div>
           <div className="text-xs text-muted-foreground">
             {expense
               ? "Update the details, or attach/replace the invoice files below."

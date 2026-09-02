@@ -487,7 +487,7 @@ The Landlord`;
 const SOURCE_LABELS: Record<string, string> = {
   manual: "Manual entry",
   bank_feed: "Bank feed",
-  rent_statement: "Rent statement",
+  agent_statement: "Agent statement",
 };
 
 function formatMonthLabel(key: string): string {

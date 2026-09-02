@@ -813,7 +813,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         description: tx.description,
         debit: 0,
         credit: tx.amount,
-        source: "rent_statement",
+        source: "agent_statement",
         sourceFileName: proposal.sourceFileName,
         sourceFileData: proposal.sourceFileData,
       });
@@ -850,7 +850,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         rechargeToTenant: recharge,
         tenantId: realTenantId,
         status: "approved",
-        source: "email_auto",
+        source: "agent_statement",
         rawPropertyAddress: proposal.rawPropertyAddress,
         sourceSubject: proposal.sourceSubject,
         sourceEmailBody: proposal.sourceEmailBody,

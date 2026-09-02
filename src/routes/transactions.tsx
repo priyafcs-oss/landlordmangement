@@ -80,7 +80,7 @@ interface TxRow {
   amount: number; // positive = income, negative = outgoing
   /** GST component of `amount`, when known — expense rows only (rent has no GST). */
   gst?: number;
-  source?: "Manual" | "Email" | "Upload";
+  source?: "Manual" | "Email" | "Upload" | "Agent Statement";
   needsAttention?: boolean;
   /** Who this transaction was paid to (expenses, always populated) or received from (rent —
    * the collecting agent when paid via a rent statement, otherwise the tenant paying directly;
@@ -109,9 +109,10 @@ interface TxRow {
    * total; falls back to the legacy coarse taxCategory for expenses saved before the grouped
    * taxonomy existed and never got a specific category. */
   taxGroup?: CategoryGroup;
-  /** The source document this row was read off, when there is one — ledger rows from a rent
-   * statement (LedgerEntry.sourceFileName/Data) and expense rows with an attached invoice/receipt
-   * (Expense.invoiceFileName/Data). Lets the Source column link straight back to it. */
+  /** The invoice/statement document this row was read off, when there is one — ledger rows from
+   * an agent statement (LedgerEntry.sourceFileName/Data) and expense rows with an attached
+   * invoice/receipt (Expense.invoiceFileName/Data). Shown in its own Invoice column, independent
+   * of the Source column above — a row can have a source label with no file, or vice versa. */
   sourceFileName?: string;
   sourceFileData?: string;
 }
@@ -158,7 +159,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [query, setQuery] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
-  const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false });
+  const [sourceFilter, setSourceFilter] = useState({ manual: false, email: false, upload: false, agentStatement: false });
   const [sort, setSort] = useState<SortState<TxSortField> | null>(null);
   // Hidden by default so the table gets the full width — a landlord scanning transactions cares
   // about the rows, not the summary cards; the toggle remembers whoever last showed/hid it.
@@ -234,8 +235,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           category: e.type,
           propertyId: tenant?.propertyId,
           amount: e.credit,
-          source: e.source === "rent_statement" ? ("Upload" as const) : ("Manual" as const),
-          providerName: e.source === "rent_statement" ? agentNameFor(tenant?.propertyId) : tenant?.name,
+          source: e.source === "agent_statement" ? ("Agent Statement" as const) : ("Manual" as const),
+          providerName: e.source === "agent_statement" ? agentNameFor(tenant?.propertyId) : tenant?.name,
           tenantId: e.tenantId,
           tenantName: tenant?.name,
           unitId: tenant?.unitId,
@@ -254,7 +255,14 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         assetId: e.assetId,
         amount: e.direction === "Income" ? e.cost : -e.cost,
         gst: e.gst,
-        source: e.source === "email_auto" ? ("Email" as const) : e.source === "upload" ? ("Upload" as const) : ("Manual" as const),
+        source:
+          e.source === "agent_statement"
+            ? ("Agent Statement" as const)
+            : e.source === "email_auto"
+              ? ("Email" as const)
+              : e.source === "upload"
+                ? ("Upload" as const)
+                : ("Manual" as const),
         providerName: e.providerName,
         needsAttention: e.status === "needs_review",
         expenseId: e.id,
@@ -274,7 +282,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     return prop?.alias || prop?.address || state.assets.find((a) => a.id === r.assetId)?.name || "";
   };
   const anyTypeFilter = typeFilter.income || typeFilter.expense;
-  const anySourceFilter = sourceFilter.manual || sourceFilter.email || sourceFilter.upload;
+  const anySourceFilter = sourceFilter.manual || sourceFilter.email || sourceFilter.upload || sourceFilter.agentStatement;
   // Fuzzy word-boundary match against the selected provider's own name (same logic
   // findOrCreateProvider uses) rather than an exact string/FK match — most rows only ever carry
   // free-text providerName, not the provider's own id, and a legal-suffix/trading-name variant
@@ -300,7 +308,8 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         !anySourceFilter ||
         (sourceFilter.manual && r.source === "Manual") ||
         (sourceFilter.email && r.source === "Email") ||
-        (sourceFilter.upload && r.source === "Upload"),
+        (sourceFilter.upload && r.source === "Upload") ||
+        (sourceFilter.agentStatement && r.source === "Agent Statement"),
     )
     .sort((a, b) => {
       if (!sort) return a.date < b.date ? 1 : -1;
@@ -349,7 +358,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   }, [filtered, groupBy]);
 
   const exportCsv = () => {
-    const header = ["Date", "Description", "Provider", "Property", "Tenant", "Category", "Tax Treatment", "Source", "Amount", "GST"];
+    const header = ["Date", "Description", "Provider", "Property", "Tenant", "Category", "Tax Treatment", "Source", "Invoice", "Amount", "GST"];
     const rows = filtered.map((r) => {
       const prop = state.properties.find((p) => p.id === r.propertyId);
       const asset = state.assets.find((a) => a.id === r.assetId);
@@ -362,6 +371,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         r.category,
         taxTreatmentLabel(r.category),
         r.source ?? "",
+        r.sourceFileName ?? "",
         r.amount,
         r.gst ?? "",
       ];
@@ -504,6 +514,12 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               </DropdownMenuCheckboxItem>
               <DropdownMenuCheckboxItem checked={sourceFilter.upload} onCheckedChange={(v) => setSourceFilter((f) => ({ ...f, upload: v === true }))}>
                 Upload
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem
+                checked={sourceFilter.agentStatement}
+                onCheckedChange={(v) => setSourceFilter((f) => ({ ...f, agentStatement: v === true }))}
+              >
+                Agent Statement
               </DropdownMenuCheckboxItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -739,6 +755,7 @@ function TxTable({
             <SortableTh field="category" label="Category" sort={sort ?? null} onSort={onSort ?? noSort} />
             <SortableTh field="taxTreatment" label="Tax Treatment" sort={sort ?? null} onSort={onSort ?? noSort} />
             <SortableTh field="source" label="Source" sort={sort ?? null} onSort={onSort ?? noSort} />
+            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice</th>
             <SortableTh field="amount" label="Amount" align="right" sort={sort ?? null} onSort={onSort ?? noSort} />
             <th className="w-16 px-2 py-2" />
           </tr>
@@ -763,6 +780,7 @@ function TxTable({
                 <td className="px-3 py-2 text-xs text-muted-foreground">{r.tenantName ?? "—"}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{taxTreatmentLabel(r.category)}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{r.source ?? "—"}</td>
                 <td className="px-3 py-2 text-xs">
                   {r.sourceFileData ? (
                     <DocumentLink fileName={r.sourceFileName} fileData={r.sourceFileData} className="inline-flex items-center gap-1 text-primary underline">
@@ -770,7 +788,7 @@ function TxTable({
                       <span className="max-w-[140px] truncate">{r.sourceFileName || "Document"}</span>
                     </DocumentLink>
                   ) : (
-                    <span className="text-muted-foreground">{r.source ?? "—"}</span>
+                    <span className="text-muted-foreground">—</span>
                   )}
                 </td>
                 <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>

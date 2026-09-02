@@ -536,7 +536,7 @@ export function buildActivityFeed(state: {
   const items: ActivityItem[] = [];
 
   for (const e of state.expenses) {
-    if (e.source !== "email_auto") continue;
+    if (e.source !== "email_auto" && e.source !== "agent_statement") continue;
     const prop = state.properties.find((p) => p.id === e.propertyId);
     items.push({
       id: `exp_${e.id}`,
@@ -547,15 +547,15 @@ export function buildActivityFeed(state: {
   }
 
   for (const entry of state.ledger) {
-    if (entry.source !== "bank_feed" && entry.source !== "rent_statement") continue;
+    if (entry.source !== "bank_feed" && entry.source !== "agent_statement") continue;
     const tenant = state.tenants.find((t) => t.id === entry.tenantId);
     const prop = tenant ? state.properties.find((p) => p.id === tenant.propertyId) : undefined;
     items.push({
       id: `ledg_${entry.id}`,
       date: entry.date,
       label:
-        entry.source === "rent_statement"
-          ? `Processed a rent statement${prop ? ` · ${prop.alias || prop.address}` : ""}`
+        entry.source === "agent_statement"
+          ? `Processed an agent statement${prop ? ` · ${prop.alias || prop.address}` : ""}`
           : `Recorded rent received${tenant ? ` · ${tenant.name}` : ""}`,
       amount: entry.credit || undefined,
     });
