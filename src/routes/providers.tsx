@@ -34,10 +34,16 @@ export const Route = createFileRoute("/providers")({
   component: ProvidersPage,
 });
 
-/** Every property this provider has ever been paid on, derived from expenses/bills carrying its
- * providerId — deliberately not a stored join table (see the migration's own note). */
+/** Every property this provider is associated with — tagged via provider_properties (the join
+ * table findOrCreateProvider/ensureProviderProperty populate whenever a provider is linked from
+ * anywhere: a Tenancy tab agent, a statement/bill vendor, a manually entered expense), UNIONED
+ * with properties it's actually been paid on according to expenses/bills carrying its providerId
+ * FK. The FK alone used to be the only source here, but that field is rarely populated — most
+ * paths only ever set the plain-text providerName on an Expense/Bill, matching by name, not the
+ * FK — so a provider linked everywhere else in the app still showed "No linked properties yet". */
 export function linkedPropertyIds(state: AppState, providerId: string): string[] {
   const ids = new Set<string>();
+  for (const pp of state.providerProperties) if (pp.providerId === providerId) ids.add(pp.propertyId);
   for (const e of state.expenses) if (e.providerId === providerId && e.propertyId) ids.add(e.propertyId);
   for (const b of state.bills) if (b.providerId === providerId && b.propertyId) ids.add(b.propertyId);
   return Array.from(ids);
