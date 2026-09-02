@@ -34,7 +34,7 @@ import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
-import type { AiIntakeProposal, Expense, ExpenseProposalPayload } from "@/lib/types";
+import type { AiIntakeProposal, Expense, ExpenseProposalPayload, ExtractBillResult } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 /** How this transaction was recorded — shown read-only next to the title, separate from the
@@ -105,17 +105,6 @@ const blankLineItem = (): LineItemRow => ({
  * expense-only category value that makes no sense for the new direction. */
 const defaultCategoryFor = (direction: LineItemRow["direction"]): LineItemRow["category"] =>
   direction === "Income" ? "Other Rental Income" : "Sundry Rental Expenses";
-
-interface ExtractResult {
-  ok?: boolean;
-  error?: string;
-  vendor?: string;
-  amount?: number;
-  due_date?: string;
-  property_address?: string;
-  expense_category?: string;
-  confidence?: number;
-}
 
 /**
  * Add Transaction — the one-off counterpart to AddBillDialog, same document pane + line-item
@@ -206,7 +195,7 @@ export function AddTransactionDialog({
   /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
   const applyExtracted = (
-    data: Pick<ExtractResult, "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence">,
+    data: Pick<ExtractBillResult, "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence">,
     sourceFileName?: string,
     sourceFileData?: string,
   ) => {
@@ -328,7 +317,7 @@ export function AddTransactionDialog({
       const base64 = await readFileAsBase64(file);
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
-      const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-bill", {
+      const { data, error } = await supabase.functions.invoke<ExtractBillResult>("extract-bill", {
         body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
       });
       if (error) throw error;

@@ -761,6 +761,24 @@ export type BillType =
   | "Gas"
   | "Other";
 
+/** Shape of the extract-bill edge function's response — shared by AddBillDialog and
+ * AddTransactionDialog, both of which call this same endpoint for "Upload & extract". */
+export interface ExtractBillResult {
+  ok?: boolean;
+  error?: string;
+  vendor?: string;
+  amount?: number;
+  due_date?: string;
+  property_address?: string;
+  bpay_biller_code?: string | null;
+  bpay_reference?: string | null;
+  bill_category?: string;
+  expense_category?: string;
+  future_instalments?: { due_date: string; amount: number }[];
+  line_items?: { description: string; amount: number }[];
+  confidence?: number;
+}
+
 /** One cost line on a bill — e.g. a council notice broken into rates/waste/environment charges. */
 export interface BillLineItem {
   description: string;

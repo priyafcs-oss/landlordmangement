@@ -43,7 +43,7 @@ import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
-import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory } from "@/lib/types";
+import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
@@ -68,22 +68,6 @@ interface LineItemRow {
   gst: string;
   rechargeToTenant: boolean;
   tenantId: string;
-}
-
-interface ExtractResult {
-  ok?: boolean;
-  error?: string;
-  vendor?: string;
-  amount?: number;
-  due_date?: string;
-  property_address?: string;
-  bpay_biller_code?: string | null;
-  bpay_reference?: string | null;
-  bill_category?: string;
-  expense_category?: string;
-  future_instalments?: { due_date: string; amount: number }[];
-  line_items?: { description: string; amount: number }[];
-  confidence?: number;
 }
 
 function mapBillType(category?: string): BillType {
@@ -211,7 +195,7 @@ export function AddBillDialog({
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
   const applyExtracted = (
     data: Pick<
-      ExtractResult,
+      ExtractBillResult,
       | "vendor"
       | "amount"
       | "due_date"
@@ -341,7 +325,7 @@ export function AddBillDialog({
       // Attach immediately so the document pane shows the file even if extraction fails below.
       setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
 
-      const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-bill", {
+      const { data, error } = await supabase.functions.invoke<ExtractBillResult>("extract-bill", {
         body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
       });
       if (error) throw error;
