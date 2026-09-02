@@ -37,6 +37,7 @@ import {
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
+import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
@@ -211,13 +212,7 @@ export function AddBillDialog({
     sourceFileName?: string,
     sourceFileData?: string,
   ) => {
-    const matchedProperty = data.property_address
-      ? state.properties.find(
-          (p) =>
-            p.address.toLowerCase().includes(data.property_address!.toLowerCase()) ||
-            data.property_address!.toLowerCase().includes(p.address.toLowerCase()),
-        )
-      : undefined;
+    const matchedProperty = data.property_address ? matchPropertyByAddress(state.properties, data.property_address) : undefined;
 
     setForm((f) => ({
       ...f,

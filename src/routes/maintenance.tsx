@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { selectPublicProperties, type PublicProperty } from "@/lib/db";
 import { readFileAsDataUrl } from "@/lib/files";
+import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,16 +44,7 @@ function MaintenancePage() {
   const [submitted, setSubmitted] = useState(false);
 
   const resolvePropertyId = useMemo(() => {
-    return (input: string) => {
-      const q = input.trim().toLowerCase();
-      if (!q) return undefined;
-      // Exact tenant code first
-      const byCode = properties.find((p) => p.tenantCode?.toLowerCase() === q);
-      if (byCode) return byCode.id;
-      // Substring match on address
-      const byAddr = properties.find((p) => p.address.toLowerCase().includes(q));
-      return byAddr?.id;
-    };
+    return (input: string) => matchPropertyByAddress(properties, input)?.id;
   }, [properties]);
 
   const onPhoto = (files: FileList | null) => {

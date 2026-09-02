@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory } from "@/lib/calculations";
 import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
+import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -199,13 +200,7 @@ export function AddTransactionDialog({
     sourceFileName?: string,
     sourceFileData?: string,
   ) => {
-    const matchedProperty = data.property_address
-      ? state.properties.find(
-          (p) =>
-            p.address.toLowerCase().includes(data.property_address!.toLowerCase()) ||
-            data.property_address!.toLowerCase().includes(p.address.toLowerCase()),
-        )
-      : undefined;
+    const matchedProperty = data.property_address ? matchPropertyByAddress(state.properties, data.property_address) : undefined;
 
     setForm((f) => ({
       ...f,
