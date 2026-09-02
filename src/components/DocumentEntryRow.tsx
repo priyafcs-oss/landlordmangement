@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, FileText, FolderOpen, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, FileText, FolderOpen, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { DocumentLink } from "@/components/DocumentLink";
 import { useStore } from "@/lib/store";
 import { daysUntil, fmtCurrency, ausFinancialYear, fyRange, buildFyOptions } from "@/lib/calculations";
@@ -191,24 +191,17 @@ export function DocTable({ rows, showProperty = true }: { rows: DocumentEntry[];
 }
 
 export function DocGroupSection({ label, rows, showProperty }: { label: string; rows: DocumentEntry[]; showProperty?: boolean }) {
-  const [open, setOpen] = useState(false);
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
-      <CollapsibleTrigger asChild>
-        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
-          <span className="flex items-center gap-2 font-medium">
-            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {label}
-          </span>
-          <Badge variant="outline" className="font-normal">
-            {rows.length} document{rows.length === 1 ? "" : "s"}
-          </Badge>
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">
-        <DocTable rows={rows} showProperty={showProperty} />
-      </CollapsibleContent>
-    </Collapsible>
+    <CollapsibleGroupSection
+      label={label}
+      summary={
+        <Badge variant="outline" className="font-normal">
+          {rows.length} document{rows.length === 1 ? "" : "s"}
+        </Badge>
+      }
+    >
+      <DocTable rows={rows} showProperty={showProperty} />
+    </CollapsibleGroupSection>
   );
 }
 

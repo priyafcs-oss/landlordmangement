@@ -3,7 +3,6 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -14,11 +13,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
-import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search } from "lucide-react";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { bucketBy } from "@/lib/group";
+import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { usePersistedToggle } from "@/lib/hooks";
 import { toast } from "sonner";
 
@@ -403,28 +403,21 @@ function BillGroupSection({
   expanded: Set<string>;
   toggleExpanded: (key: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const total = rows.reduce((s, b) => s + b.amount, 0);
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
-      <CollapsibleTrigger asChild>
-        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
-          <span className="flex items-center gap-2 font-medium">
-            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {label}
-          </span>
-          <span className="flex items-center gap-3 text-xs text-muted-foreground">
-            <Badge variant="outline" className="font-normal">
-              {rows.length} bill{rows.length === 1 ? "" : "s"}
-            </Badge>
-            <span className="font-medium text-foreground">{fmtCurrency(total)}</span>
-          </span>
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">
-        <BillsTableBody rows={rows} sort={sort} onSort={onSort} expanded={expanded} toggleExpanded={toggleExpanded} {...helpers} />
-      </CollapsibleContent>
-    </Collapsible>
+    <CollapsibleGroupSection
+      label={label}
+      summary={
+        <>
+          <Badge variant="outline" className="font-normal">
+            {rows.length} bill{rows.length === 1 ? "" : "s"}
+          </Badge>
+          <span className="font-medium text-foreground">{fmtCurrency(total)}</span>
+        </>
+      }
+    >
+      <BillsTableBody rows={rows} sort={sort} onSort={onSort} expanded={expanded} toggleExpanded={toggleExpanded} {...helpers} />
+    </CollapsibleGroupSection>
   );
 }
 

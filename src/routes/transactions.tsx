@@ -9,7 +9,7 @@ import { Field, Stat } from "@/components/Field";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -18,7 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { bucketBy } from "@/lib/group";
@@ -846,27 +846,20 @@ function TxGroupSection({
   sort?: SortState<TxSortField> | null;
   onSort?: (field: TxSortField) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const income = rows.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
   const expenses = rows.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0);
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded border">
-      <CollapsibleTrigger asChild>
-        <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm">
-          <span className="flex items-center gap-2 font-medium">
-            {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            {label}
-          </span>
-          <span className="flex gap-3 text-xs text-muted-foreground">
-            <span className="text-emerald-600">Income {fmtCurrency(income)}</span>
-            <span className="text-destructive">Expenses {fmtCurrency(Math.abs(expenses))}</span>
-          </span>
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">
-        <TxTable rows={rows} lockedPropertyId={lockedPropertyId} sort={sort} onSort={onSort} />
-      </CollapsibleContent>
-    </Collapsible>
+    <CollapsibleGroupSection
+      label={label}
+      summary={
+        <>
+          <span className="text-emerald-600">Income {fmtCurrency(income)}</span>
+          <span className="text-destructive">Expenses {fmtCurrency(Math.abs(expenses))}</span>
+        </>
+      }
+    >
+      <TxTable rows={rows} lockedPropertyId={lockedPropertyId} sort={sort} onSort={onSort} />
+    </CollapsibleGroupSection>
   );
 }
 
