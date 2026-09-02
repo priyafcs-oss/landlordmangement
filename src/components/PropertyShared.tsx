@@ -2031,7 +2031,7 @@ export function PropertyDialog({
   const [newEntityName, setNewEntityName] = useState("");
   const [newEntityType, setNewEntityType] = useState<Entity["type"]>("Individual");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
+  const buildForm = () => ({
     address: property?.address ?? initialAddress ?? "",
     alias: property?.alias ?? "",
     entityId: property?.entityId ?? "",
@@ -2043,6 +2043,7 @@ export function PropertyDialog({
     domainPropertyType: property?.domainPropertyType ?? "",
     dwellingConfiguration: (property?.dwellingConfiguration ?? "House") as Property["dwellingConfiguration"],
   });
+  const [form, setForm] = useState(buildForm);
   const [units, setUnits] = useState<PropertyUnit[]>(property?.units ?? []);
   const [addressSuggestions, setAddressSuggestions] = useState<{ id: string; address: string }[]>([]);
   const [addressLookupBusy, setAddressLookupBusy] = useState(false);
@@ -2109,7 +2110,15 @@ export function PropertyDialog({
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (!o) onDone();
+        if (o) {
+          setForm(buildForm());
+          setUnits(property?.units ?? []);
+          setAddressSuggestions([]);
+          setCreatingEntity(false);
+          setNewEntityName("");
+        } else {
+          onDone();
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -2460,10 +2469,8 @@ export function PropertySummaryTab({
   );
 }
 
-function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?: React.ReactNode }) {
-  const { updateProperty } = useStore();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
+function purchaseAcquisitionFormOf(prop: Property) {
+  return {
     purchasePrice: prop.purchasePrice?.toString() ?? "",
     currentValue: prop.currentValue?.toString() ?? "",
     purchaseDate: prop.purchaseDate ?? "",
@@ -2476,7 +2483,13 @@ function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?
     loanBalance: prop.loanBalance?.toString() ?? "",
     interestRate: prop.interestRate?.toString() ?? "",
     repaymentFrequency: (prop.repaymentFrequency ?? "Monthly") as RepaymentFrequency,
-  });
+  };
+}
+
+function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?: React.ReactNode }) {
+  const { updateProperty } = useStore();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(() => purchaseAcquisitionFormOf(prop));
 
   const save = () => {
     updateProperty(prop.id, {
@@ -2498,7 +2511,13 @@ function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setForm(purchaseAcquisitionFormOf(prop));
+      }}
+    >
       <DialogTrigger asChild>
         {trigger ?? (
           <Button size="icon" variant="ghost" className="h-6 w-6">
@@ -2809,13 +2828,23 @@ function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
     });
     toast.success("Depreciation item added");
     setOpen(false);
-    setDescription("");
-    setPurchaseCost("");
-    setEffectiveLifeYears("");
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setDescription("");
+          setPurchaseCost("");
+          setEffectiveLifeYears("");
+          setPurchaseDate(todayISO());
+          setMethod("Diminishing Value");
+          setDivision("Div 40");
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="gap-1">
           <Plus className="h-3 w-3" /> Add one-off item
@@ -3003,10 +3032,8 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   );
 }
 
-function PropertyDetailsDialog({ prop, trigger }: { prop: Property; trigger?: React.ReactNode }) {
-  const { updateProperty } = useStore();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
+function propertyDetailsFormOf(prop: Property) {
+  return {
     tenantCode: prop.tenantCode ?? "",
     councilRateRef: prop.councilRateRef ?? "",
     waterAccountRef: prop.waterAccountRef ?? "",
@@ -3022,7 +3049,13 @@ function PropertyDetailsDialog({ prop, trigger }: { prop: Property; trigger?: Re
     pmFeePercent: prop.pmFeePercent?.toString() ?? "",
     inspectionFrequencyMonths: prop.inspectionFrequencyMonths?.toString() ?? "",
     notes: prop.notes ?? "",
-  });
+  };
+}
+
+function PropertyDetailsDialog({ prop, trigger }: { prop: Property; trigger?: React.ReactNode }) {
+  const { updateProperty } = useStore();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(() => propertyDetailsFormOf(prop));
 
   const save = () => {
     updateProperty(prop.id, {
@@ -3047,7 +3080,13 @@ function PropertyDetailsDialog({ prop, trigger }: { prop: Property; trigger?: Re
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setForm(propertyDetailsFormOf(prop));
+      }}
+    >
       <DialogTrigger asChild>
         {trigger ?? (
           <Button size="icon" variant="ghost" className="h-6 w-6">
@@ -4772,7 +4811,7 @@ export function ProviderDialog({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
-  const [form, setForm] = useState({
+  const buildForm = () => ({
     name: provider?.name ?? "",
     role: provider?.role ?? defaultRole ?? ("Other" as ProviderRole),
     unitId: provider?.unitId ?? SHARED_UNIT,
@@ -4787,6 +4826,7 @@ export function ProviderDialog({
     passwordNote: provider?.passwordNote ?? "",
     defaultCategory: provider?.defaultCategory ?? "",
   });
+  const [form, setForm] = useState(buildForm);
   const [agreementForm, setAgreementForm] = useState<AgreementFormState>(() => agreementFormFrom(agreement));
   const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
@@ -4846,7 +4886,17 @@ export function ProviderDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setForm(buildForm());
+          setAgreementForm(agreementFormFrom(agreement));
+          setExtractSummary(null);
+        }
+      }}
+    >
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -4999,7 +5049,17 @@ export function ProviderAgreementDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setPropertyId(agreement?.propertyId ?? "");
+          setForm(agreementFormFrom(agreement));
+          setExtractSummary(null);
+        }
+      }}
+    >
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -6102,7 +6162,7 @@ export function TenantDialog({
   const { addTenant, updateTenant, state } = useStore();
   const [open, setOpen] = useState(false);
   const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
-  const [form, setForm] = useState({
+  const buildForm = () => ({
     name: tenant?.name ?? initialValues?.name ?? "",
     email: tenant?.email ?? initialValues?.email ?? "",
     phone: tenant?.phone ?? initialValues?.phone ?? "",
@@ -6131,6 +6191,7 @@ export function TenantDialog({
     bondTransferFileName: tenant?.bondTransferFileName ?? "",
     bondTransferFileData: tenant?.bondTransferFileData ?? "",
   });
+  const [form, setForm] = useState(buildForm);
   const [additionalTenants, setAdditionalTenants] = useState<ContactPerson[]>(tenant?.additionalTenants ?? []);
   const updateAdditionalTenant = (idx: number, patch: Partial<ContactPerson>) =>
     setAdditionalTenants((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -6166,7 +6227,16 @@ export function TenantDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) {
+          setForm(buildForm());
+          setAdditionalTenants(tenant?.additionalTenants ?? []);
+        }
+      }}
+    >
       <DialogTrigger asChild>{children ?? <Button size="sm">Add Tenant</Button>}</DialogTrigger>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
