@@ -826,7 +826,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         markBillPaid(match.id, { paidDate: e.date });
         return;
       }
-      if (e.vendor.trim()) findOrCreateProvider(e.vendor.trim(), propertyId || undefined);
+      const lineProviderId = e.vendor.trim() ? findOrCreateProvider(e.vendor.trim(), propertyId || undefined) : undefined;
       const lineTenantId = expTenantIds[i];
       const realTenantId = lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined;
       const recharge = rechargeIncluded[i] && !!realTenantId;
@@ -841,6 +841,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         // the agent merely paid on the owner's behalf gets its own real category instead.
         category: categorizeAgentStatementLine(e, agent?.name),
         providerName: e.vendor,
+        providerId: lineProviderId,
         // The AI's raw free-text classification (e.g. "management_fees") — itemName alone is
         // usually just the agency's name, so this is the only signal fee verification has to work
         // with once this line becomes a plain Expense row (see classifyFeeLine in feeVerification.ts).

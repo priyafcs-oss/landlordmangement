@@ -388,7 +388,7 @@ export function AddTransactionDialog({
     if (!expense) return;
     const li = lineItems[0];
     const amount = parseFloat(li.amount) || 0;
-    if (form.payee.trim()) findOrCreateProvider(form.payee.trim(), form.propertyId);
+    const providerId = form.payee.trim() ? findOrCreateProvider(form.payee.trim(), form.propertyId) : undefined;
     if (li.rechargeToTenant && li.tenantId && !expense.recharged) {
       addInvoice({
         tenantId: li.tenantId,
@@ -409,6 +409,7 @@ export function AddTransactionDialog({
       taxCategory: li.direction === "Income" ? "Immediate Deduction" : expenseCategoryToTaxCategory(li.category),
       category: li.category,
       providerName: form.payee.trim() || undefined,
+      providerId,
       gst: li.gst ? parseFloat(li.gst) || 0 : undefined,
       direction: li.direction === "Income" ? "Income" : undefined,
       hasWarranty: li.hasWarranty,
@@ -438,7 +439,7 @@ export function AddTransactionDialog({
     let flaggedCount = 0;
 
     for (const propertyId of properties) {
-      if (form.payee.trim()) findOrCreateProvider(form.payee.trim(), propertyId);
+      const providerId = form.payee.trim() ? findOrCreateProvider(form.payee.trim(), propertyId) : undefined;
       for (const li of validItems) {
         const fullAmount = parseFloat(li.amount) || 0;
         const amount = fullAmount / perPropertyDivisor;
@@ -492,6 +493,7 @@ export function AddTransactionDialog({
           taxCategory: li.direction === "Income" ? "Immediate Deduction" : expenseCategoryToTaxCategory(li.category),
           category: li.category,
           providerName: form.payee.trim() || undefined,
+          providerId,
           gst: li.gst ? (parseFloat(li.gst) || 0) / perPropertyDivisor : undefined,
           direction: li.direction === "Income" ? "Income" : undefined,
           hasWarranty: li.hasWarranty,

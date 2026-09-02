@@ -23,6 +23,7 @@ import { downloadCsv } from "@/lib/csv";
 import { toast } from "sonner";
 import type { AssetType, CategoryGroup, RentLedgerProposalPayload } from "@/lib/types";
 import { latestAgreementFor } from "@/lib/providerAgreements";
+import { matchProviderByName } from "@/lib/providerMatch";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { DocumentLink } from "@/components/DocumentLink";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
@@ -153,6 +154,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
   const [unitId, setUnitId] = useState("__all__");
+  const [providerFilterId, setProviderFilterId] = useState("__all__");
   const [query, setQuery] = useState("");
   const [needsAttentionOnly, setNeedsAttentionOnly] = useState(false);
   const [typeFilter, setTypeFilter] = useState({ income: false, expense: false });
@@ -273,6 +275,11 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   };
   const anyTypeFilter = typeFilter.income || typeFilter.expense;
   const anySourceFilter = sourceFilter.manual || sourceFilter.email || sourceFilter.upload;
+  // Fuzzy word-boundary match against the selected provider's own name (same logic
+  // findOrCreateProvider uses) rather than an exact string/FK match — most rows only ever carry
+  // free-text providerName, not the provider's own id, and a legal-suffix/trading-name variant
+  // (e.g. "Sydney Water" vs "Sydney Water Corporation") shouldn't make a row invisible here.
+  const selectedProviderForFilter = providerFilterId !== "__all__" ? state.providers.find((p) => p.id === providerFilterId) : undefined;
 
   const filtered = allRows
     .filter((r) => fy === "all" || (r.date >= start && r.date <= end))
@@ -280,6 +287,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
     .filter((r) => tenantId === "__all__" || r.tenantId === tenantId)
     .filter((r) => unitId === "__all__" || r.unitId === unitId)
+    .filter((r) => !selectedProviderForFilter || (!!r.providerName && !!matchProviderByName([selectedProviderForFilter], r.providerName)))
     .filter(
       (r) =>
         !query ||
@@ -453,6 +461,21 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               </SelectContent>
             </Select>
           )}
+          <Select value={providerFilterId} onValueChange={setProviderFilterId}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All providers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All providers</SelectItem>
+              {[...state.providers]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1">

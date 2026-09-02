@@ -92,6 +92,8 @@ export function ExpenseDialog({
   const submit = () => {
     if (!form.itemName || !form.propertyId) return toast.error("Item and property required");
     const cost = parseFloat(form.cost) || 0;
+    const providerName = form.providerName.trim() || undefined;
+    const providerId = providerName ? findOrCreateProvider(providerName, form.propertyId) : undefined;
     const payload = {
       itemName: form.itemName,
       cost,
@@ -99,7 +101,8 @@ export function ExpenseDialog({
       propertyId: form.propertyId,
       unitId: form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       category: form.category,
-      providerName: form.providerName.trim() || undefined,
+      providerName,
+      providerId,
       gst: form.gst ? parseFloat(form.gst) || 0 : undefined,
       taxCategory: expenseCategoryToTaxCategory(form.category),
       hasWarranty: form.hasWarranty,
@@ -109,8 +112,6 @@ export function ExpenseDialog({
       invoiceFileName: form.invoiceFileName || undefined,
       invoiceFileData: form.invoiceFileData || undefined,
     };
-
-    if (payload.providerName) findOrCreateProvider(payload.providerName, form.propertyId);
 
     if (isEdit && expense) {
       updateExpense(expense.id, payload);

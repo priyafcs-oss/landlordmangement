@@ -17,6 +17,7 @@ import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh"
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search } from "lucide-react";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
+import { matchProviderByName } from "@/lib/providerMatch";
 import { toast } from "sonner";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
@@ -54,6 +55,7 @@ export function BillsBoard({
   const [status, setStatus] = useState<(typeof STATUS_OPTIONS)[number]>("__all__");
   const [billType, setBillType] = useState<"__all__" | BillType>("__all__");
   const [category, setCategory] = useState<"__all__" | ExpenseCategory>("__all__");
+  const [providerFilterId, setProviderFilterId] = useState("__all__");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState<SortField> | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -118,11 +120,17 @@ export function BillsBoard({
     }
   };
 
+  // Fuzzy word-boundary match against the selected provider's own name (same logic
+  // findOrCreateProvider uses), not an exact string/FK match — most bills only ever carry
+  // free-text providerName, and a legal-suffix/trading-name variant shouldn't hide a row here.
+  const selectedProviderForFilter = providerFilterId !== "__all__" ? state.providers.find((p) => p.id === providerFilterId) : undefined;
+
   const filtered = bills
     .filter((b) => !showPropertyFilter || propertyId === "__all__" || b.propertyId === propertyId)
     .filter((b) => !showPropertyFilter || assetType === "__all__" || assetTypeOf(b) === assetType)
     .filter((b) => billType === "__all__" || b.billType === billType)
     .filter((b) => category === "__all__" || b.category === category)
+    .filter((b) => !selectedProviderForFilter || (!!b.providerName && !!matchProviderByName([selectedProviderForFilter], b.providerName)))
     .filter((b) => {
       if (status === "__all__") return true;
       if (status === "Overdue") return isOverdue(b);
@@ -255,6 +263,21 @@ export function BillsBoard({
                   ))}
                 </SelectGroup>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={providerFilterId} onValueChange={setProviderFilterId}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All providers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All providers</SelectItem>
+              {[...state.providers]
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
           <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>

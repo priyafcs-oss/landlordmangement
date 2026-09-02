@@ -459,6 +459,47 @@ export function AddBillDialog({
     // proposal or was typed in by hand.
     const payload = initialProposal?.payload as BillProposalPayload | undefined;
 
+    // Resolved BEFORE the bill(s) below so the created bill(s) can carry providerId themselves —
+    // matched portfolio-wide (not just providersForProperty) so a vendor already on file at
+    // another property gets tagged onto this one instead of creating a duplicate identity row —
+    // same fuzzy word-boundary matching findOrCreateProvider uses, so "Sydney Water" vs "Sydney
+    // Water Corporation" across two different bills lands on one directory entry either way.
+    const existingProvider = matchProviderByName(state.providers, form.providerName);
+    let resolvedProviderId: string | undefined;
+    if (existingProvider) {
+      resolvedProviderId = existingProvider.id;
+      ensureProviderProperty(existingProvider.id, propertyId);
+      const patch: Partial<Provider> = {};
+      if (form.portalUrl) patch.portalUrl = form.portalUrl;
+      if (form.portalUsername) patch.portalUsername = form.portalUsername;
+      if (form.passwordNote) patch.passwordNote = form.passwordNote;
+      // An AI-confirmed bill often carries the vendor's contact details straight off the
+      // notice -- fill in whatever the Provider directory doesn't already have, same as the
+      // pre-consolidation review card did. Never overwrites a value already on file.
+      if (payload) {
+        if (!existingProvider.email && payload.vendorEmail) patch.email = payload.vendorEmail;
+        if (!existingProvider.phone && payload.vendorPhone) patch.phone = payload.vendorPhone;
+        if (!existingProvider.website && payload.vendorWebsite) patch.website = payload.vendorWebsite;
+        if (!existingProvider.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
+        if (!existingProvider.address && payload.vendorAddress) patch.address = payload.vendorAddress;
+      }
+      if (Object.keys(patch).length > 0) updateProvider(existingProvider.id, patch);
+    } else {
+      resolvedProviderId = addProvider({
+        name: form.providerName.trim(),
+        role: payload && form.billType === "Council Rates" ? "Council" : "Other",
+        portalUrl: form.portalUrl || undefined,
+        portalUsername: form.portalUsername || undefined,
+        passwordNote: form.passwordNote || undefined,
+        email: payload?.vendorEmail,
+        phone: payload?.vendorPhone,
+        website: payload?.vendorWebsite,
+        abn: payload?.vendorAbn,
+        address: payload?.vendorAddress,
+      });
+      ensureProviderProperty(resolvedProviderId, propertyId);
+    }
+
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;
     const shared = {
       propertyId,
@@ -468,6 +509,7 @@ export function AddBillDialog({
       taxCategory: expenseCategoryToTaxCategory(form.category),
       status: "Unpaid" as const,
       providerName: form.providerName.trim(),
+      providerId: resolvedProviderId,
       referenceNumber: form.referenceNumber || undefined,
       bpayBillerCode: form.bpayBillerCode || undefined,
       bpayReference: form.bpayReference || undefined,
@@ -497,44 +539,6 @@ export function AddBillDialog({
           label: inst.label,
         });
       }
-    }
-
-    // Matched portfolio-wide (not just providersForProperty) so a vendor already on file at
-    // another property gets tagged onto this one instead of creating a duplicate identity row —
-    // same fuzzy word-boundary matching findOrCreateProvider uses, so "Sydney Water" vs "Sydney
-    // Water Corporation" across two different bills lands on one directory entry either way.
-    const existingProvider = matchProviderByName(state.providers, form.providerName);
-    if (existingProvider) {
-      ensureProviderProperty(existingProvider.id, propertyId);
-      const patch: Partial<Provider> = {};
-      if (form.portalUrl) patch.portalUrl = form.portalUrl;
-      if (form.portalUsername) patch.portalUsername = form.portalUsername;
-      if (form.passwordNote) patch.passwordNote = form.passwordNote;
-      // An AI-confirmed bill often carries the vendor's contact details straight off the
-      // notice -- fill in whatever the Provider directory doesn't already have, same as the
-      // pre-consolidation review card did. Never overwrites a value already on file.
-      if (payload) {
-        if (!existingProvider.email && payload.vendorEmail) patch.email = payload.vendorEmail;
-        if (!existingProvider.phone && payload.vendorPhone) patch.phone = payload.vendorPhone;
-        if (!existingProvider.website && payload.vendorWebsite) patch.website = payload.vendorWebsite;
-        if (!existingProvider.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
-        if (!existingProvider.address && payload.vendorAddress) patch.address = payload.vendorAddress;
-      }
-      if (Object.keys(patch).length > 0) updateProvider(existingProvider.id, patch);
-    } else {
-      const newProviderId = addProvider({
-        name: form.providerName.trim(),
-        role: payload && form.billType === "Council Rates" ? "Council" : "Other",
-        portalUrl: form.portalUrl || undefined,
-        portalUsername: form.portalUsername || undefined,
-        passwordNote: form.passwordNote || undefined,
-        email: payload?.vendorEmail,
-        phone: payload?.vendorPhone,
-        website: payload?.vendorWebsite,
-        abn: payload?.vendorAbn,
-        address: payload?.vendorAddress,
-      });
-      ensureProviderProperty(newProviderId, propertyId);
     }
 
     if (initialProposal && payload) {

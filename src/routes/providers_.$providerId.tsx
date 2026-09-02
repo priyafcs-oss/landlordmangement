@@ -20,6 +20,7 @@ import { openBillDocument } from "@/lib/files";
 import { ProviderDialog, ProviderRow, ProviderAgreementDialog } from "@/components/PropertyShared";
 import { agreementsForProvider } from "@/lib/providerAgreements";
 import { hasFeeTerms } from "@/lib/feeVerification";
+import { matchProviderByName } from "@/lib/providerMatch";
 import { toast } from "sonner";
 import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
 
@@ -259,12 +260,19 @@ function ProviderProfilePage() {
     );
   }
 
+  // Matches on the providerId FK when it's set, OR a fuzzy name match against this provider's own
+  // name (same word-boundary logic findOrCreateProvider itself uses) when it isn't — most
+  // Expense/Bill creation paths only ever wrote the plain-text providerName, never the FK, so a
+  // provider's whole payment history went missing here despite being right there in Transactions.
+  const belongsToProvider = (row: { providerId?: string; providerName?: string }): boolean =>
+    row.providerId === provider.id || (!!row.providerName && !!matchProviderByName([provider], row.providerName));
+
   const payments: PaymentRow[] = [
     ...state.expenses
-      .filter((e) => e.providerId === provider.id)
+      .filter(belongsToProvider)
       .map((e) => ({ id: e.id, date: e.date, description: e.itemName, amount: e.cost, propertyId: e.propertyId, kind: "Expense" as const })),
     ...state.bills
-      .filter((b) => b.providerId === provider.id)
+      .filter(belongsToProvider)
       .map((b) => ({
         id: b.id,
         date: b.paidDate || b.dueDate,
@@ -276,7 +284,7 @@ function ProviderProfilePage() {
       })),
   ].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-  const outstanding = state.bills.filter((b) => b.providerId === provider.id && b.status !== "Paid");
+  const outstanding = state.bills.filter((b) => belongsToProvider(b) && b.status !== "Paid");
 
   const paymentsByProperty = new Map<string, PaymentRow[]>();
   for (const row of payments) {
