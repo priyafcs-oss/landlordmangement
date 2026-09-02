@@ -1,5 +1,5 @@
 import type { Expense, ExpenseCategory, FeeFrequency, ProviderAgreement, RentFrequency } from "./types";
-import { fmtCurrency } from "./calculations";
+import { fmtCurrency, mapExpenseCategory } from "./calculations";
 
 /** The subset of a ProviderAgreement's fields verification actually needs — lets a caller pass
  * either a real ProviderAgreement row or a plain object built ad hoc (e.g. from an AI-extracted
@@ -72,24 +72,6 @@ export function classifyFeeLine(text: string): FeeCheckType | null {
   return null;
 }
 
-/** Non-fee deduction lines checked after classifyFeeLine finds no fee keyword and the line isn't
- * paid to the agent itself — a rent statement routinely deducts real bills (water usage, a
- * tradesperson's invoice) the agent paid on the owner's behalf, and those need their own ATO
- * category, not the agent's. Order matters for the same reason as CLASSIFY_PATTERNS — "water" is
- * checked before the Repairs & Maintenance catch-all so a water bill doesn't fall through to it. */
-const NON_FEE_CATEGORY_PATTERNS: [ExpenseCategory, RegExp][] = [
-  ["Water Charges", /\bwater\b/i],
-  ["Gas", /\bgas\b/i],
-  ["Electricity", /\belectricity\b/i],
-  ["Council Rates", /council/i],
-  ["Strata Levies", /\bstrata\b/i],
-  ["Body Corporate Fees", /body\s*corp/i],
-  ["Insurance", /insur/i],
-  ["Pest Control", /\bpest\b/i],
-  ["Gardening / Lawn Mowing", /garden|lawn/i],
-  ["Cleaning", /\bclean/i],
-];
-
 /**
  * Maps one statement deduction line to the ATO expense category it actually belongs under, for
  * posting as an Expense — distinct from classifyFeeLine, which only asks "which fee type is
@@ -109,10 +91,11 @@ export function categorizeAgentStatementLine(
   const payeeIsAgent = !!agentName && !!line.vendor && line.vendor.trim().toLowerCase() === agentName.trim().toLowerCase();
   if (feeType === "Letting Fee") return "Letting Fees";
   if (feeType || payeeIsAgent) return "Property Agent Fees";
-  for (const [category, pattern] of NON_FEE_CATEGORY_PATTERNS) {
-    if (pattern.test(blob)) return category;
-  }
-  return "Repairs & Maintenance";
+  // mapExpenseCategory's own keyword coverage is a superset of what this needs; only its final
+  // fallback differs — a bill-like deduction on a statement is far more often a real Repairs &
+  // Maintenance cost than the generic Sundry catch-all mapExpenseCategory defaults to elsewhere.
+  const mapped = mapExpenseCategory(line.category, `${line.vendor ?? ""} ${line.description ?? ""}`);
+  return mapped === "Sundry Rental Expenses" ? "Repairs & Maintenance" : mapped;
 }
 
 function weeklyRentOf(rentAmount: number, frequency: RentFrequency): number {
