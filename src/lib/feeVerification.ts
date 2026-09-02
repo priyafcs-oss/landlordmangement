@@ -1,4 +1,5 @@
 import type { Expense, ExpenseCategory, FeeFrequency, ProviderAgreement, RentFrequency } from "./types";
+import { fmtCurrency } from "./calculations";
 
 /** The subset of a ProviderAgreement's fields verification actually needs — lets a caller pass
  * either a real ProviderAgreement row or a plain object built ad hoc (e.g. from an AI-extracted
@@ -32,6 +33,11 @@ export interface FeeCheckResult {
   actual: number;
   variance: number | null;
   status: FeeCheckStatus;
+  /** Plain-language "how the expected amount was worked out" (e.g. "$2,739.50 rent collected ×
+   * 6.6% (4% + 10% GST) = $180.80") so a landlord can check the AI's own arithmetic instead of
+   * just trusting the flagged variance. Undefined when expected is null (nothing was computed),
+   * or when a result is a rolled-up multi-period summary with no single calculation to show. */
+  calculation?: string;
 }
 
 /** One agent-charged line from a statement (or a posted Expense standing in for one) — vendor,
@@ -118,17 +124,36 @@ function weeklyRentOf(rentAmount: number, frequency: RentFrequency): number {
 const TOLERANCE_RATE = 0.02;
 const MIN_TOLERANCE = 2;
 
-export function buildResult(type: FeeCheckType, expected: number | undefined, actual: number, treatZeroAsMissing: boolean): FeeCheckResult {
+export function buildResult(
+  type: FeeCheckType,
+  expected: number | undefined,
+  actual: number,
+  treatZeroAsMissing: boolean,
+  calculation?: string,
+): FeeCheckResult {
   if (expected === undefined) {
     return { type, expected: null, actual, variance: null, status: "unspecified" };
   }
   if (treatZeroAsMissing && actual === 0 && expected > 0) {
-    return { type, expected, actual, variance: -expected, status: "not_charged" };
+    return { type, expected, actual, variance: -expected, status: "not_charged", calculation };
   }
   const tolerance = Math.max(MIN_TOLERANCE, expected * TOLERANCE_RATE);
   const variance = actual - expected;
   const status: FeeCheckStatus = Math.abs(variance) <= tolerance ? "match" : variance > 0 ? "overcharge" : "undercharge";
-  return { type, expected, actual, variance, status };
+  return { type, expected, actual, variance, status, calculation };
+}
+
+/** Plain-language note on how a single rate became the number multiplied into `expected` — shown
+ * alongside every fee-check result so the landlord can verify the AI's own arithmetic rather than
+ * just trusting the flagged variance (see FeeCheckResult.calculation). */
+function gstNote(rate: number, gstInclusive: boolean | undefined): string {
+  return gstInclusive ? `${rate}% (GST-inclusive rate)` : `${rate}% + 10% GST = ${(rate * 1.1).toFixed(2)}%`;
+}
+
+/** Short suffix for a flat-dollar fee's calculation string — same GST-inclusive/plus-GST framing
+ * as gstNote, just for an amount rather than a percentage. */
+function gstSuffix(gstInclusive: boolean | undefined): string {
+  return gstInclusive ? " (GST-inclusive)" : " + 10% GST";
 }
 
 /** Words generic enough that a line built ONLY from them (plus the agent's own name, and the
@@ -236,7 +261,11 @@ export function verifyAgentFees(params: {
       // against, so it reads as "unspecified" instead of a computed variance.
       const rate = effectiveRate(agreement.managementFeePercent, agreement.managementFeeGstInclusive);
       const expected = rentCollected > 0 ? rentCollected * (rate / 100) : undefined;
-      results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0));
+      const calculation =
+        expected !== undefined
+          ? `${fmtCurrency(rentCollected)} rent collected × ${gstNote(agreement.managementFeePercent, agreement.managementFeeGstInclusive)} = ${fmtCurrency(expected)}`
+          : undefined;
+      results.push(buildResult("Management Fee", expected, mgmtActual, rentCollected > 0, calculation));
     }
   }
 
@@ -248,7 +277,13 @@ export function verifyAgentFees(params: {
         agreement.lettingFeeAmount ?? (agreement.lettingFeeWeeksRent && weeklyRent ? agreement.lettingFeeWeeksRent * weeklyRent : undefined);
       const expected =
         rawExpected !== undefined ? effectiveRate(rawExpected, agreement.lettingFeeGstInclusive) : undefined;
-      results.push(buildResult("Letting Fee", expected, lettingActual, false));
+      const calculation =
+        rawExpected === undefined
+          ? undefined
+          : agreement.lettingFeeAmount !== undefined
+            ? `Flat letting fee ${fmtCurrency(agreement.lettingFeeAmount)}${gstSuffix(agreement.lettingFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+            : `${agreement.lettingFeeWeeksRent} week${agreement.lettingFeeWeeksRent === 1 ? "" : "s"} × ${fmtCurrency(weeklyRent!)} weekly rent = ${fmtCurrency(rawExpected)}${gstSuffix(agreement.lettingFeeGstInclusive)} = ${fmtCurrency(expected!)}`;
+      results.push(buildResult("Letting Fee", expected, lettingActual, false, calculation));
     }
   }
 
@@ -259,7 +294,11 @@ export function verifyAgentFees(params: {
         agreement.adminFeeAmount !== undefined
           ? effectiveRate(agreement.adminFeeAmount, agreement.adminFeeGstInclusive)
           : undefined;
-      results.push(buildResult("Admin Fee", expected, adminActual, false));
+      const calculation =
+        agreement.adminFeeAmount !== undefined
+          ? `Flat admin fee ${fmtCurrency(agreement.adminFeeAmount)}${gstSuffix(agreement.adminFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+          : undefined;
+      results.push(buildResult("Admin Fee", expected, adminActual, false, calculation));
     }
   }
 
@@ -270,7 +309,11 @@ export function verifyAgentFees(params: {
         agreement.leaseRenewalFeeAmount !== undefined
           ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive)
           : undefined;
-      results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
+      const calculation =
+        agreement.leaseRenewalFeeAmount !== undefined
+          ? `Flat lease renewal fee ${fmtCurrency(agreement.leaseRenewalFeeAmount)}${gstSuffix(agreement.leaseRenewalFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+          : undefined;
+      results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false, calculation));
     }
   }
 
@@ -281,7 +324,11 @@ export function verifyAgentFees(params: {
         agreement.inspectionFeeAmount !== undefined
           ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive)
           : undefined;
-      results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
+      const calculation =
+        agreement.inspectionFeeAmount !== undefined
+          ? `Flat inspection fee ${fmtCurrency(agreement.inspectionFeeAmount)}${gstSuffix(agreement.inspectionFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+          : undefined;
+      results.push(buildResult("Inspection Fee", expected, inspectionActual, false, calculation));
     }
   }
 
@@ -346,14 +393,13 @@ export function reconcileFlatFees(params: {
 
   const adminActual = actualByType.get("Admin Fee") ?? 0;
   if (adminActual > 0) {
-    const expected =
+    const annualized = agreement.adminFeeAmount !== undefined ? annualizeFlatFee(agreement.adminFeeAmount, agreement.adminFeeFrequency, statementCount) : undefined;
+    const expected = annualized !== undefined ? effectiveRate(annualized, agreement.adminFeeGstInclusive) : undefined;
+    const calculation =
       agreement.adminFeeAmount !== undefined
-        ? effectiveRate(
-            annualizeFlatFee(agreement.adminFeeAmount, agreement.adminFeeFrequency, statementCount),
-            agreement.adminFeeGstInclusive,
-          )
+        ? `${fmtCurrency(agreement.adminFeeAmount)} (${agreement.adminFeeFrequency ?? "Annually"}) annualized to ${fmtCurrency(annualized!)}${gstSuffix(agreement.adminFeeGstInclusive)} = ${fmtCurrency(expected!)}`
         : undefined;
-    results.push(buildResult("Admin Fee", expected, adminActual, false));
+    results.push(buildResult("Admin Fee", expected, adminActual, false, calculation));
   }
 
   const renewalActual = actualByType.get("Lease Renewal Fee") ?? 0;
@@ -362,7 +408,11 @@ export function reconcileFlatFees(params: {
       agreement.leaseRenewalFeeAmount !== undefined
         ? effectiveRate(agreement.leaseRenewalFeeAmount, agreement.leaseRenewalFeeGstInclusive)
         : undefined;
-    results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false));
+    const calculation =
+      agreement.leaseRenewalFeeAmount !== undefined
+        ? `Flat lease renewal fee ${fmtCurrency(agreement.leaseRenewalFeeAmount)}${gstSuffix(agreement.leaseRenewalFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+        : undefined;
+    results.push(buildResult("Lease Renewal Fee", expected, renewalActual, false, calculation));
   }
 
   const inspectionActual = actualByType.get("Inspection Fee") ?? 0;
@@ -371,7 +421,11 @@ export function reconcileFlatFees(params: {
       agreement.inspectionFeeAmount !== undefined
         ? effectiveRate(agreement.inspectionFeeAmount, agreement.inspectionFeeGstInclusive)
         : undefined;
-    results.push(buildResult("Inspection Fee", expected, inspectionActual, false));
+    const calculation =
+      agreement.inspectionFeeAmount !== undefined
+        ? `Flat inspection fee ${fmtCurrency(agreement.inspectionFeeAmount)}${gstSuffix(agreement.inspectionFeeGstInclusive)} = ${fmtCurrency(expected!)}`
+        : undefined;
+    results.push(buildResult("Inspection Fee", expected, inspectionActual, false, calculation));
   }
 
   // Reconciled here rather than in verifyAgentFees's per-period call (callers that sum across

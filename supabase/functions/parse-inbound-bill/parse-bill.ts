@@ -83,13 +83,20 @@ async function runGuardrails(
 
   let isDuplicate = (dupeByVendor?.length ?? 0) > 0;
 
+  const amountTolerance = Math.max(2, parsed.amount * 0.02);
+
+  // A bpayReference/CRN match alone is NOT sufficient on its own — most Australian utility
+  // "reference numbers" are the ACCOUNT number, identical on every bill a provider ever sends, not
+  // an invoice number. Without also requiring the amount or date to roughly agree, every new
+  // period's genuine bill from a recurring biller (a water account's quarterly bill, say) got
+  // flagged as a duplicate of whichever earlier bill happened to share that same account reference.
   if (!isDuplicate && parsed.bpay_reference) {
-    const { data: dupeByRef } = await supabase
-      .from("expenses")
-      .select("id")
-      .eq("bpayReference", parsed.bpay_reference)
-      .limit(1);
-    isDuplicate = (dupeByRef?.length ?? 0) > 0;
+    const { data: dupeByRef } = await supabase.from("expenses").select("id, cost, date").eq("bpayReference", parsed.bpay_reference);
+    isDuplicate = (dupeByRef ?? []).some(
+      (e: { cost: number; date: string }) =>
+        Math.abs(Number(e.cost) - parsed.amount) <= amountTolerance ||
+        Math.abs(new Date(e.date).getTime() - dueDate.getTime()) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
+    );
   }
 
   // Bills no longer get a paired Expense at intake, only at payment — so an already-staged or
@@ -110,11 +117,14 @@ async function runGuardrails(
   if (!isDuplicate && parsed.bpay_reference) {
     const { data: dupeByRefBill } = await supabase
       .from("property_bills")
-      .select("id")
+      .select("id, amount, dueDate")
       .eq("status", "Unpaid")
-      .eq("bpayReference", parsed.bpay_reference)
-      .limit(1);
-    isDuplicate = (dupeByRefBill?.length ?? 0) > 0;
+      .eq("bpayReference", parsed.bpay_reference);
+    isDuplicate = (dupeByRefBill ?? []).some(
+      (b: { amount: number; dueDate: string }) =>
+        Math.abs(Number(b.amount) - parsed.amount) <= amountTolerance ||
+        Math.abs(new Date(b.dueDate).getTime() - dueDate.getTime()) <= DUPLICATE_WINDOW_DAYS * DAY_MS,
+    );
   }
 
   if (isDuplicate) reasons.push("Possible Duplicate");

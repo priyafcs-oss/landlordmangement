@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -85,10 +86,13 @@ interface TxRow {
    * the collecting agent when paid via a rent statement, otherwise the tenant paying directly;
    * left blank if neither is known). */
   providerName?: string;
-  /** Set only for expense-backed rows — the only ones editable/deletable from this table.
-   * Rent-payment ledger rows have their own edit/delete flow on the tenant's own ledger, which
-   * also reverses the paid-up-to-date shift correctly; this table doesn't duplicate that. */
+  /** Set only for expense-backed rows — used to open the edit dialog / delete this row when it's
+   * an expense. */
   expenseId?: string;
+  /** Set only for ledger-backed (rent payment) rows — same idea as expenseId, for the other row
+   * type this table shows. Editing recomputes the tenant's paid-up-to date the same way deleting
+   * already did. */
+  ledgerEntryId?: string;
   /** The tenant this row is tied to — direct on ledger rows (whose payer is always a tenant) and
    * on expenses explicitly recharged to one; otherwise inferred as the sole current tenant at the
    * row's property (left unset if the property has none or more than one, rather than guessing). */
@@ -223,6 +227,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         const tenant = state.tenants.find((t) => t.id === e.tenantId);
         return {
           id: `ledg_${e.id}`,
+          ledgerEntryId: e.id,
           date: e.date,
           description: e.description || e.type,
           category: e.type,
@@ -618,6 +623,66 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
   );
 }
 
+/** Edits a rent-payment ledger row's date/amount/description straight from the Transactions
+ * table — previously only deletable there, or from the tenant's own Ledger tab, with no edit at
+ * all in either place. Updating recomputes the tenant's paid-up-to date the same way a delete
+ * already did (see updateLedger in store.tsx). */
+function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string; trigger: React.ReactNode }) {
+  const { state, updateLedger } = useStore();
+  const entry = state.ledger.find((e) => e.id === ledgerEntryId);
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(entry?.date ?? "");
+  const [amount, setAmount] = useState(entry ? String(entry.credit) : "");
+  const [description, setDescription] = useState(entry?.description ?? "");
+
+  const onOpenChange = (o: boolean) => {
+    setOpen(o);
+    if (o && entry) {
+      setDate(entry.date);
+      setAmount(String(entry.credit));
+      setDescription(entry.description);
+    }
+  };
+
+  const save = () => {
+    const val = parseFloat(amount);
+    if (!val || val <= 0) return toast.error("Enter a valid amount");
+    if (!date) return toast.error("Date is required");
+    updateLedger(ledgerEntryId, { date, credit: val, description });
+    toast.success("Rent payment updated");
+    setOpen(false);
+  };
+
+  if (!entry) return null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit rent payment</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="space-y-1">
+            <Label className="text-xs">Date</Label>
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Amount</Label>
+            <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Description</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={save}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function TxTable({
   rows,
   lockedPropertyId,
@@ -629,7 +694,7 @@ function TxTable({
   sort?: SortState<TxSortField> | null;
   onSort?: (field: TxSortField) => void;
 }) {
-  const { state, deleteExpense } = useStore();
+  const { state, deleteExpense, deleteLedger } = useStore();
   if (rows.length === 0) {
     return (
       <div className="p-6 text-center text-sm text-muted-foreground">
@@ -709,6 +774,31 @@ function TxTable({
                           if (confirm(`Delete "${expense.itemName}"?`)) {
                             deleteExpense(expense.id);
                             toast.success("Transaction removed");
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                  {r.ledgerEntryId && (
+                    <div className="flex items-center justify-end gap-0.5">
+                      <EditLedgerRowDialog
+                        ledgerEntryId={r.ledgerEntryId}
+                        trigger={
+                          <Button size="icon" variant="ghost" className="h-6 w-6">
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        }
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={() => {
+                          if (confirm(`Delete "${r.description}"?`)) {
+                            deleteLedger(r.ledgerEntryId!);
+                            toast.success("Rent payment removed");
                           }
                         }}
                       >

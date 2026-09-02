@@ -99,22 +99,54 @@ function referenceMatches(a?: string, b?: string): boolean {
  * the two paths with no server-side guardrail of any kind) already exists as a Bill or an
  * Expense — same idea as the email/upload pipeline's runGuardrails duplicate check, just running
  * client-side at the point of saving instead of server-side at intake. A match is either a close
- * vendor+amount+date fit, or an exact reference/BPAY match regardless of date. Always a
- * confirmable warning, never a hard block — "Save Anyway" is always available.
+ * vendor+amount+date fit, or a reference/BPAY match that ALSO has either the amount or the date
+ * roughly agreeing. Reference/BPAY alone isn't enough — most Australian utility "reference
+ * numbers" are the ACCOUNT number, not an invoice number, so it's identical on every quarterly (or
+ * monthly) bill from the same provider; treating a bare reference match as a duplicate regardless
+ * of date or amount flagged every new period's genuine bill against the previous one. Requiring
+ * amount-or-date proximity too still catches the real case this was for (the same invoice
+ * forwarded/uploaded twice, where amount and date are unchanged) without misfiring on a new bill
+ * that just happens to share the account's unchanging reference number. Always a confirmable
+ * warning, never a hard block — "Save Anyway" is always available.
  */
 export function findDuplicateRecord(
   bills: PropertyBill[],
   expenses: Expense[],
   candidate: DuplicateCandidate,
 ): DuplicateMatch | null {
+  const referenceAndProximityMatch = (
+    refA?: string,
+    refB?: string,
+    bpayA?: string,
+    bpayB?: string,
+    amountA?: number,
+    amountB?: number,
+    dateA?: string,
+    dateB?: string,
+  ): boolean =>
+    (referenceMatches(refA, refB) || referenceMatches(bpayA, bpayB)) &&
+    !!amountA &&
+    !!amountB &&
+    !!dateA &&
+    !!dateB &&
+    (amountMatches(amountA, amountB) || symmetricDateWithinWindow(dateA, dateB, DUPLICATE_WINDOW_DAYS));
+
   const billMatch = bills.find(
     (b) =>
       (!candidate.propertyId || b.propertyId === candidate.propertyId) &&
       ((vendorMatches(b.providerName, candidate.vendorOrDescription) &&
         amountMatches(b.amount, candidate.amount) &&
         symmetricDateWithinWindow(b.dueDate, candidate.date, DUPLICATE_WINDOW_DAYS)) ||
-        referenceMatches(candidate.referenceNumber, b.referenceNumber) ||
-        referenceMatches(candidate.bpayReference, b.bpayReference)),
+        referenceAndProximityMatch(
+          candidate.referenceNumber,
+          b.referenceNumber,
+          candidate.bpayReference,
+          b.bpayReference,
+          candidate.amount,
+          b.amount,
+          candidate.date,
+          b.dueDate,
+        )),
   );
   if (billMatch) {
     return {
@@ -135,8 +167,16 @@ export function findDuplicateRecord(
       ((vendorMatches(e.itemName, candidate.vendorOrDescription) &&
         amountMatches(e.cost, candidate.amount) &&
         symmetricDateWithinWindow(e.date, candidate.date, DUPLICATE_WINDOW_DAYS)) ||
-        referenceMatches(candidate.referenceNumber, e.referenceNumber) ||
-        referenceMatches(candidate.bpayReference, e.bpayReference)),
+        referenceAndProximityMatch(
+          candidate.referenceNumber,
+          e.referenceNumber,
+          candidate.bpayReference,
+          e.bpayReference,
+          candidate.amount,
+          e.cost,
+          candidate.date,
+          e.date,
+        )),
   );
   if (expenseMatch) {
     return {

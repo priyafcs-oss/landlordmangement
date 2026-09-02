@@ -14,10 +14,18 @@ export function DuplicateWarningDialog({
   match,
   onCancel,
   onSaveAnyway,
+  onAttachInstead,
 }: {
   match: DuplicateMatch | null;
   onCancel: () => void;
   onSaveAnyway: () => void;
+  /** Offered instead of a hard "Cancel vs Save Anyway" choice when the file being saved might just
+   * be the actual invoice/document EVIDENCE for the match already on file (e.g. a rent-statement
+   * deduction with no PDF yet) rather than a genuinely separate second charge — attaches the
+   * current file onto the existing record instead of creating a duplicate. Omit when there's no
+   * file to attach, or the match is a Bill rather than an Expense (a Bill's own file is handled
+   * differently, via the bill itself). */
+  onAttachInstead?: () => void;
 }) {
   return (
     <Dialog open={!!match} onOpenChange={(o) => !o && onCancel()}>
@@ -54,6 +62,11 @@ export function DuplicateWarningDialog({
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
+          {onAttachInstead && (
+            <Button variant="secondary" onClick={onAttachInstead}>
+              Attach to this transaction instead
+            </Button>
+          )}
           <Button variant="destructive" onClick={onSaveAnyway}>
             Save duplicate anyway
           </Button>

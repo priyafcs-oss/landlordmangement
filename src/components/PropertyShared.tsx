@@ -701,13 +701,12 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     return ids.size === 1 ? [...ids][0] : SHARED_EXPENSE_TENANT;
   })();
   const [expTenantIds, setExpTenantIds] = useState<string[]>(() => expenseLines.map(() => soleTxTenant));
-  // Water usage paid by the agent on the owner's behalf is the standard case for recharging a
-  // deduction straight back to the tenant — defaults on for a line that reads as a water charge
-  // AND already has a specific (non-shared) tenant assigned; every other deduction (agent fees,
-  // repairs, etc.) defaults off since those are the owner's own cost, not the tenant's.
-  const [rechargeIncluded, setRechargeIncluded] = useState<boolean[]>(() =>
-    expenseLines.map((e) => categorizeAgentStatementLine(e) === "Water Charges" && soleTxTenant !== SHARED_EXPENSE_TENANT),
-  );
+  // Always defaults off, even for a water charge with a specific tenant assigned — a statement's
+  // "Water Charges" deduction line is usually the FULL bill (fixed service/access charges plus
+  // usage), and only the usage portion is the tenant's to pay; ticking this recharges the whole
+  // line amount, so the landlord has to deliberately opt in (and, ideally, edit the amount down
+  // to just the usage component first) rather than have it silently pre-checked.
+  const [rechargeIncluded, setRechargeIncluded] = useState<boolean[]>(() => expenseLines.map(() => false));
   // An agent statement's deduction is often just reporting that a bill already sitting in
   // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
   // creating a second, disconnected Expense for the same real-world payment.
@@ -1168,18 +1167,28 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               {(() => {
                 const realTenantId = expTenantIds[i] && expTenantIds[i] !== SHARED_EXPENSE_TENANT ? expTenantIds[i] : undefined;
                 const rechargeTenant = realTenantId ? tenantsAtProperty.find((t) => t.id === realTenantId) : undefined;
+                const isWaterCharge = categorizeAgentStatementLine(e, agent?.name) === "Water Charges";
                 return (
-                  <label className="ml-6 flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      disabled={!realTenantId}
-                      checked={rechargeIncluded[i] && !!realTenantId}
-                      onChange={(ev) => setRechargeIncluded((v) => v.map((val, j) => (j === i ? ev.target.checked : val)))}
-                    />
-                    {realTenantId
-                      ? `Recharge ${fmtCurrency(e.amount)} to ${rechargeTenant?.name ?? "tenant"} (adds an invoice they'll owe)`
-                      : "Recharge to tenant — assign a specific tenant above first"}
-                  </label>
+                  <div className="ml-6 space-y-0.5">
+                    <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        disabled={!realTenantId}
+                        checked={rechargeIncluded[i] && !!realTenantId}
+                        onChange={(ev) => setRechargeIncluded((v) => v.map((val, j) => (j === i ? ev.target.checked : val)))}
+                      />
+                      {realTenantId
+                        ? `Recharge ${fmtCurrency(e.amount)} to ${rechargeTenant?.name ?? "tenant"} (adds an invoice they'll owe)`
+                        : "Recharge to tenant — assign a specific tenant above first"}
+                    </label>
+                    {isWaterCharge && (
+                      <div className="text-[10px] text-amber-700">
+                        This line is usually the FULL water bill (fixed service charges + usage) — only the usage
+                        portion is the tenant's to pay. Edit the amount above down to just the usage component before
+                        recharging, or leave unticked and recharge manually from the actual bill.
+                      </div>
+                    )}
+                  </div>
                 );
               })()}
               {billMatches[i] && (
@@ -1275,7 +1284,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
 /** Shared row renderer for one FeeCheckResult — used both inline during rent-statement review
  * and in the standalone verification report/EOFY summary, so the colour/wording never drifts. */
 export function FeeCheckRow({ result }: { result: FeeCheckResult }) {
-  const { type, expected, actual, variance, status } = result;
+  const { type, expected, actual, variance, status, calculation } = result;
   const style =
     status === "overcharge"
       ? "border-destructive/40 bg-destructive/5 text-destructive"
@@ -1297,9 +1306,14 @@ export function FeeCheckRow({ result }: { result: FeeCheckResult }) {
             ? `Not itemised this time — expected around ${fmtCurrency(expected ?? 0)}`
             : `${fmtCurrency(actual)} charged — no agreed rate on file for this fee`;
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-2 rounded border px-2 py-1 text-xs ${style}`}>
-      <span className="font-medium">{type}</span>
-      <span>{message}</span>
+    <div className={`rounded border px-2 py-1 text-xs ${style}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">{type}</span>
+        <span>{message}</span>
+      </div>
+      {/* Lets the landlord check the AI's own arithmetic against the agreement terms directly,
+       * rather than just trusting the flagged variance — see FeeCheckResult.calculation. */}
+      {calculation && <div className="mt-0.5 text-[10px] italic opacity-80">{calculation}</div>}
     </div>
   );
 }

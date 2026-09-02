@@ -39,6 +39,7 @@ import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
+import { matchProviderByName } from "@/lib/providerMatch";
 import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory } from "@/lib/types";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
@@ -126,8 +127,18 @@ export function AddBillDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const { state, addBill, addProvider, updateProvider, ensureProviderProperty, updateProperty, addInvoice, markProposalApplied, dismissProposal } =
-    useStore();
+  const {
+    state,
+    addBill,
+    addProvider,
+    updateProvider,
+    ensureProviderProperty,
+    updateProperty,
+    addInvoice,
+    updateExpense,
+    markProposalApplied,
+    dismissProposal,
+  } = useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
   const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
@@ -293,6 +304,16 @@ export function AddBillDialog({
       // above (already applied to `f`) stands; the landlord still reviews/edits before saving.
       category: payload.atoCategory === "Capital Works" ? "Capital Improvement" : f.category,
     }));
+    // applyExtracted above already ran its own (weaker, client-side substring) property match
+    // against the raw extracted address text and stored that guess in extractSummary.propertyMatched
+    // — but initialProposal.propertyId is the server's already-resolved match (matchProperty in the
+    // edge function, with fuzzier address normalization than the client-side check here), and just
+    // overwrote form.propertyId above. Without this, a proposal the server matched correctly but
+    // this dialog's own weaker guess couldn't could show "Couldn't match a property" on the left
+    // while the correct property sits selected on the right — actively misleading, not just stale.
+    if (initialProposal.propertyId) {
+      setExtractSummary((s) => (s ? { ...s, propertyMatched: true } : s));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProposal?.id]);
 
@@ -480,10 +501,9 @@ export function AddBillDialog({
 
     // Matched portfolio-wide (not just providersForProperty) so a vendor already on file at
     // another property gets tagged onto this one instead of creating a duplicate identity row —
-    // the same portfolio-wide dedup findOrCreateProvider applies elsewhere.
-    const existingProvider = state.providers.find(
-      (p) => p.name.trim().toLowerCase() === form.providerName.trim().toLowerCase(),
-    );
+    // same fuzzy word-boundary matching findOrCreateProvider uses, so "Sydney Water" vs "Sydney
+    // Water Corporation" across two different bills lands on one directory entry either way.
+    const existingProvider = matchProviderByName(state.providers, form.providerName);
     if (existingProvider) {
       ensureProviderProperty(existingProvider.id, propertyId);
       const patch: Partial<Provider> = {};
@@ -530,7 +550,7 @@ export function AddBillDialog({
           updateProperty(propertyId, { [annualField]: Math.round(annual * 100) / 100 } as Partial<Property>);
         }
       }
-      markProposalApplied(initialProposal.id);
+      markProposalApplied(initialProposal.id, { propertyId });
     }
 
     // Notify happens after saving and after the dedup check, using the still-live form state —
@@ -545,6 +565,24 @@ export function AddBillDialog({
     setOpen(false);
     reset();
     toast.success(billGroupId ? "Bill added with scheduled instalments" : "Bill added");
+  };
+
+  /** Offered on the duplicate-warning dialog when the match is an Expense — the file being saved
+   * is very plausibly the actual invoice for a charge already posted from a rent statement (no PDF
+   * attached yet), not a genuinely separate second bill. Attaches it there instead of creating a
+   * duplicate; if this proposal came from Universal Upload, still marks it applied so it doesn't
+   * linger in the review queue. */
+  const attachToExisting = () => {
+    if (!duplicateMatch || duplicateMatch.kind !== "expense") return;
+    updateExpense(duplicateMatch.id, {
+      invoiceFileName: form.sourceFileName || undefined,
+      invoiceFileData: form.sourceFileData || undefined,
+    });
+    if (initialProposal) markProposalApplied(initialProposal.id, { propertyId });
+    setDuplicateMatch(null);
+    setOpen(false);
+    reset();
+    toast.success("Invoice attached to the existing transaction");
   };
 
   const hasRecharge = lineItems.some((li) => li.rechargeToTenant && li.tenantId);
@@ -984,6 +1022,7 @@ export function AddBillDialog({
       match={duplicateMatch}
       onCancel={() => setDuplicateMatch(null)}
       onSaveAnyway={() => commitSave(pendingNotify)}
+      onAttachInstead={duplicateMatch?.kind === "expense" && form.sourceFileData ? attachToExisting : undefined}
     />
     </>
   );

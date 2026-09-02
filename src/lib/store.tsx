@@ -48,6 +48,7 @@ import {
   saveSettings,
 } from "./db";
 import { paidUpToDateFromPayments, todayISO } from "./calculations";
+import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
 
 const defaultAi: AiConfig = {
@@ -184,6 +185,7 @@ interface StoreCtx {
 
   addLedger: (e: Omit<LedgerEntry, "id">) => void;
   deleteLedger: (id: string) => void;
+  updateLedger: (id: string, patch: Partial<LedgerEntry>) => void;
 
   addInvoice: (i: Omit<TenantInvoice, "id">) => void;
   updateInvoice: (id: string, i: Partial<TenantInvoice>) => void;
@@ -831,6 +833,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tenants: entry ? recomputePaidUp(entry.tenantId, s.tenants, ledger, s.rentChanges) : s.tenants,
         };
       }),
+    updateLedger: (id, patch) =>
+      set((s) => {
+        const existing = s.ledger.find((e) => e.id === id);
+        if (!existing) return s;
+        void updateRow(TABLES.ledger, id, patch as Record<string, unknown>);
+        const ledger = s.ledger.map((e) => (e.id === id ? { ...e, ...patch } : e));
+        return {
+          ...s,
+          ledger,
+          // A date/amount edit shifts this tenant's paid-up-to date the same way adding/deleting
+          // a payment does, so it has to be recomputed here too, not just on add/delete.
+          tenants: recomputePaidUp(patch.tenantId ?? existing.tenantId, s.tenants, ledger, s.rentChanges),
+        };
+      }),
 
     addInvoice: (i) => {
       const row: TenantInvoice = { ...i, id: uid("inv") };
@@ -1097,7 +1113,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
      * provider shows up on that property's Providers tab. */
     findOrCreateProvider: (name, propertyId) => {
       const trimmed = name.trim();
-      const existing = state.providers.find((p) => p.name.trim().toLowerCase() === trimmed.toLowerCase());
+      const existing = matchProviderByName(state.providers, trimmed);
       const id = existing ? existing.id : uid("prov");
       if (!existing) {
         const row: Provider = { id, name: trimmed, role: "Other" };
