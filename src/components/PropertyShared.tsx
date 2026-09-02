@@ -617,7 +617,7 @@ function isRentTransaction(description: string): boolean {
 }
 
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addLedger, addExpense, markBillPaid, markProposalApplied, refresh } = useStore();
+  const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied, refresh } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const expenseLines = payload.expenseLines ?? [];
@@ -701,6 +701,13 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     return ids.size === 1 ? [...ids][0] : SHARED_EXPENSE_TENANT;
   })();
   const [expTenantIds, setExpTenantIds] = useState<string[]>(() => expenseLines.map(() => soleTxTenant));
+  // Water usage paid by the agent on the owner's behalf is the standard case for recharging a
+  // deduction straight back to the tenant — defaults on for a line that reads as a water charge
+  // AND already has a specific (non-shared) tenant assigned; every other deduction (agent fees,
+  // repairs, etc.) defaults off since those are the owner's own cost, not the tenant's.
+  const [rechargeIncluded, setRechargeIncluded] = useState<boolean[]>(() =>
+    expenseLines.map((e) => categorizeAgentStatementLine(e) === "Water Charges" && soleTxTenant !== SHARED_EXPENSE_TENANT),
+  );
   // An agent statement's deduction is often just reporting that a bill already sitting in
   // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
   // creating a second, disconnected Expense for the same real-world payment.
@@ -728,12 +735,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     setExpensesIncluded((v) => [...v, true]);
     setExpTenantIds((v) => [...v, soleTxTenant]);
     setMatchAsBill((v) => [...v, false]);
+    setRechargeIncluded((v) => [...v, false]);
   };
   const removeExpRow = (i: number) => {
     setExpRows((rows) => rows.filter((_, j) => j !== i));
     setExpensesIncluded((v) => v.filter((_, j) => j !== i));
     setExpTenantIds((v) => v.filter((_, j) => j !== i));
     setMatchAsBill((v) => v.filter((_, j) => j !== i));
+    setRechargeIncluded((v) => v.filter((_, j) => j !== i));
   };
   /** The AI sometimes puts a line in the wrong section entirely — a tenant-paid recharge parsed
    * as a deduction, or (more rarely) an agent charge parsed as income. Moving converts between
@@ -753,6 +762,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     setExpensesIncluded((v) => [...v, true]);
     setExpTenantIds((v) => [...v, soleTxTenant]);
     setMatchAsBill((v) => [...v, false]);
+    setRechargeIncluded((v) => [...v, false]);
   };
 
   const includedIncome = txRows.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
@@ -809,6 +819,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         sourceFileData: proposal.sourceFileData,
       });
     });
+    let rechargedCount = 0;
     expRows.forEach((e, i) => {
       if (!expensesIncluded[i]) return;
       const match = billMatches[i];
@@ -816,7 +827,10 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         markBillPaid(match.id, { paidDate: e.date });
         return;
       }
+      if (e.vendor.trim()) findOrCreateProvider(e.vendor.trim(), propertyId || undefined);
       const lineTenantId = expTenantIds[i];
+      const realTenantId = lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined;
+      const recharge = rechargeIncluded[i] && !!realTenantId;
       addExpense({
         itemName: e.vendor,
         cost: e.amount,
@@ -833,8 +847,8 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         // with once this line becomes a plain Expense row (see classifyFeeLine in feeVerification.ts).
         notes: e.category || undefined,
         hasWarranty: false,
-        rechargeToTenant: false,
-        tenantId: lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined,
+        rechargeToTenant: recharge,
+        tenantId: realTenantId,
         status: "approved",
         source: "email_auto",
         rawPropertyAddress: proposal.rawPropertyAddress,
@@ -843,10 +857,26 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         invoiceFileName: proposal.sourceFileName,
         invoiceFileData: proposal.sourceFileData,
       });
+      if (recharge) {
+        rechargedCount++;
+        addInvoice({
+          tenantId: realTenantId!,
+          chargeType: "Other",
+          amountDue: e.amount,
+          dateIssued: e.date,
+          dueDate: new Date(new Date(e.date).getTime() + 14 * 86400000).toISOString().slice(0, 10),
+          status: "Unpaid",
+          description: e.vendor,
+        });
+      }
     });
     markProposalApplied(proposal.id, { propertyId });
     toast.success(
-      expRows.some((_, i) => expensesIncluded[i]) ? "Rent payments and expenses added" : "Rent payments added",
+      rechargedCount > 0
+        ? `Rent payments and expenses added — ${rechargedCount} recharged to tenant`
+        : expRows.some((_, i) => expensesIncluded[i])
+          ? "Rent payments and expenses added"
+          : "Rent payments added",
     );
   };
 
@@ -1135,6 +1165,23 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               <div className="ml-6 text-[10px] text-muted-foreground">
                 Will post under: {categorizeAgentStatementLine(e, agent?.name)}
               </div>
+              {(() => {
+                const realTenantId = expTenantIds[i] && expTenantIds[i] !== SHARED_EXPENSE_TENANT ? expTenantIds[i] : undefined;
+                const rechargeTenant = realTenantId ? tenantsAtProperty.find((t) => t.id === realTenantId) : undefined;
+                return (
+                  <label className="ml-6 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      disabled={!realTenantId}
+                      checked={rechargeIncluded[i] && !!realTenantId}
+                      onChange={(ev) => setRechargeIncluded((v) => v.map((val, j) => (j === i ? ev.target.checked : val)))}
+                    />
+                    {realTenantId
+                      ? `Recharge ${fmtCurrency(e.amount)} to ${rechargeTenant?.name ?? "tenant"} (adds an invoice they'll owe)`
+                      : "Recharge to tenant — assign a specific tenant above first"}
+                  </label>
+                );
+              })()}
               {billMatches[i] && (
                 <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
                   <input

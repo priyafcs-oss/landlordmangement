@@ -18,6 +18,44 @@ const PRICE_SPIKE_MULTIPLIER = 1.4;
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 
 /**
+ * Looks for an existing Expense that this uploaded bill is actual evidence for, rather than a
+ * separate new charge — the common case being a water/agent-fee deduction already posted from a
+ * rent statement (vendor + amount + date) with the real bill PDF only forwarded or uploaded
+ * afterwards. Same vendor + amount tolerance + date window as the client-side findDuplicateRecord
+ * check (src/lib/billMatch.ts). Only attaches over a row that either has no invoice file yet, or
+ * whose file is the whole rent statement it was posted from (source "email_auto") rather than a
+ * dedicated per-vendor invoice — the real bill just uploaded is strictly more specific evidence
+ * for that one charge, so it's worth attaching on top. A row that already carries its own
+ * dedicated invoice is a genuine potential duplicate instead, left to runGuardrails below.
+ */
+async function findAttachableExpense(
+  supabase: SupabaseClient,
+  parsed: ParsedBillFields,
+  matchedPropertyId: string | null,
+): Promise<{ id: string } | null> {
+  if (!matchedPropertyId) return null;
+  const dueDate = new Date(parsed.due_date);
+  const from = new Date(dueDate.getTime() - DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
+  const to = new Date(dueDate.getTime() + DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
+
+  const { data } = await supabase
+    .from("expenses")
+    .select("id, cost, invoiceFileData, source")
+    .eq("propertyId", matchedPropertyId)
+    .ilike("itemName", parsed.vendor)
+    .gte("date", from)
+    .lte("date", to);
+  if (!data || data.length === 0) return null;
+
+  const tolerance = Math.max(2, parsed.amount * 0.02);
+  const match = data.find(
+    (e: { cost: number; invoiceFileData: string | null; source: string | null }) =>
+      Math.abs(Number(e.cost) - parsed.amount) <= tolerance && (!e.invoiceFileData || e.source === "email_auto"),
+  );
+  return match ? { id: match.id } : null;
+}
+
+/**
  * Decides whether this bill can post straight to expenses (clean, confident, matched, no
  * duplicate/price-spike) or needs a human decision first. Water bills always need review
  * regardless of how clean everything else looks, since they almost always carry a
@@ -426,6 +464,21 @@ export async function parseInboundBill(
 
   const matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "", parsed.bpay_reference);
   const matchedProviderId = await matchProvider(supabase, parsed.vendor, parsed.vendor_abn);
+
+  const attachable = await findAttachableExpense(supabase, parsed, matchedPropertyId);
+  if (attachable) {
+    const { error } = await supabase
+      .from("expenses")
+      .update({
+        invoiceFileName: input.pdfFileName,
+        invoiceFileData: input.pdfBase64,
+        sourceSubject: input.subject,
+        sourceEmailBody: input.textBody,
+      })
+      .eq("id", attachable.id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, linkedExpenseId: attachable.id, status: "approved", reviewReason: null, matchedPropertyId };
+  }
 
   // Matching to an EXISTING provider is safe on both the approved and staged paths — only
   // CREATING a brand-new provider row (upsertProviderFromBill, below) stays gated to the

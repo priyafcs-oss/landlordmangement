@@ -50,6 +50,12 @@ export interface ParseResult {
   /** The created property_bills row's id — bills no longer get a paired Expense at intake, only
    * once actually marked Paid, so this never points at an expenses row. */
   billId?: string;
+  /** Set instead of billId when this upload was matched to an existing Expense (same vendor,
+   * amount and roughly the same date) that had no invoice file yet — e.g. a water bill line
+   * posted from an agent statement, with the actual bill PDF forwarded/uploaded afterwards. The
+   * file is attached directly to that Expense rather than creating a second, disconnected Bill
+   * record for the same real-world charge. */
+  linkedExpenseId?: string;
   status?: "approved" | "needs_review";
   reviewReason?: string | null;
   matchedPropertyId?: string | null;

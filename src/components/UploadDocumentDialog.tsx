@@ -20,6 +20,10 @@ interface UploadResult {
   ok: boolean;
   skipped?: boolean;
   billId?: string;
+  /** Set instead of billId when this file matched an existing Expense (e.g. a water bill line
+   * already posted from an agent statement, with no invoice on file yet) — the file was attached
+   * to that Expense instead of creating a second, disconnected Bill for the same charge. */
+  linkedExpenseId?: string;
   proposalId?: string;
   status?: string;
   error?: string;
@@ -77,6 +81,7 @@ export function UploadDocumentDialog() {
       const failed = results.filter((r) => !r.data.ok);
       const skipped = results.filter((r) => r.data.ok && "skipped" in r.data && r.data.skipped);
       const billed = results.filter((r) => r.data.ok && "billId" in r.data && r.data.billId);
+      const linked = results.filter((r) => r.data.ok && "linkedExpenseId" in r.data && r.data.linkedExpenseId);
       const proposals = results.filter((r) => r.data.ok && "proposalId" in r.data && r.data.proposalId);
 
       failed.forEach((r) => toast.error(`${r.file.name}: ${"error" in r.data ? r.data.error : "Couldn't process this document"}`));
@@ -89,6 +94,13 @@ export function UploadDocumentDialog() {
       }
       if (billed.length > 0) {
         toast.success(billed.length === 1 ? "Bill uploaded — it'll post to P&L once marked paid" : `${billed.length} bills uploaded — they'll post to P&L once marked paid`);
+      }
+      if (linked.length > 0) {
+        toast.success(
+          linked.length === 1
+            ? "Matched an existing expense for this charge — invoice attached to it instead of creating a duplicate"
+            : `${linked.length} files matched existing expenses — invoices attached instead of creating duplicates`,
+        );
       }
       if (proposals.length === 1) {
         toast.success("Uploaded — review it now, or leave it for later on the Dashboard / Assets → All Assets");
