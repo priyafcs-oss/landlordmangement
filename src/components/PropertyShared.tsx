@@ -911,36 +911,37 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           </span>
         </div>
 
-        {!propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {!propertyId && (
             <span className="text-xs text-destructive">
               No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
             </span>
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger className="h-7 w-[220px] text-xs">
-                <SelectValue placeholder="Assign property" />
-              </SelectTrigger>
-              <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <PropertyDialog
-              property={null}
-              onDone={() => {}}
-              initialAddress={proposal.rawPropertyAddress}
-              onCreated={(id) => setPropertyId(id)}
-              trigger={
-                <Button size="sm" variant="outline">
-                  Add new property
-                </Button>
-              }
-            />
-          </div>
-        )}
+          )}
+          {propertyId && <span className="text-xs text-muted-foreground">Property:</span>}
+          <Select value={propertyId} onValueChange={setPropertyId}>
+            <SelectTrigger className="h-7 w-[220px] text-xs">
+              <SelectValue placeholder="Assign property" />
+            </SelectTrigger>
+            <SelectContent>
+              {state.properties.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.alias || p.address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <PropertyDialog
+            property={null}
+            onDone={() => {}}
+            initialAddress={proposal.rawPropertyAddress}
+            onCreated={(id) => setPropertyId(id)}
+            trigger={
+              <Button size="sm" variant="outline">
+                Add new property
+              </Button>
+            }
+          />
+        </div>
 
         {!multiTenant && (
           <div className="flex flex-wrap items-center gap-2">
@@ -963,12 +964,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                 ))}
               </SelectContent>
             </Select>
-            {!txTenantIds[0] && payload.tenantName && !tenantNameMatched && (
+            {!txTenantIds[0] && (
               <>
-                <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
+                {payload.tenantName && !tenantNameMatched && (
+                  <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
+                )}
                 <TenantDialog
                   propertyId={propertyId}
-                  initialValues={{ name: payload.tenantName }}
+                  initialValues={payload.tenantName ? { name: payload.tenantName } : undefined}
                   onSaved={(id) => {
                     setTxTenantIds((ids) => ids.map(() => id));
                     setExpTenantIds((ids) => ids.map(() => id));
