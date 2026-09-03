@@ -845,8 +845,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => {
         const existing = s.ledger.find((e) => e.id === id);
         if (!existing) return s;
-        void updateRow(TABLES.ledger, id, patch as Record<string, unknown>);
-        const ledger = s.ledger.map((e) => (e.id === id ? { ...e, ...patch } : e));
+        const stamped = { ...patch, updatedAt: new Date().toISOString() };
+        void updateRow(TABLES.ledger, id, stamped as Record<string, unknown>);
+        const ledger = s.ledger.map((e) => (e.id === id ? { ...e, ...stamped } : e));
         return {
           ...s,
           ledger,
@@ -877,9 +878,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({ ...s, loans: [...s.loans, row], loanBalanceSnapshots: [...s.loanBalanceSnapshots, snap] }));
     },
     updateLoan: (id, l) => {
-      void updateRow(TABLES.loans, id, l as Record<string, unknown>);
+      const stamped = { ...l, updatedAt: new Date().toISOString() };
+      void updateRow(TABLES.loans, id, stamped as Record<string, unknown>);
       set((s) => {
-        const loans = s.loans.map((x) => (x.id === id ? { ...x, ...l } : x));
+        const loans = s.loans.map((x) => (x.id === id ? { ...x, ...stamped } : x));
         let loanBalanceSnapshots = s.loanBalanceSnapshots;
         if (l.totalBalance !== undefined) {
           loanBalanceSnapshots = [...loanBalanceSnapshots, snapshotLoanBalance(id, l.totalBalance)];
@@ -899,8 +901,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return row.id;
     },
     updateExpense: (id, e) => {
-      void updateRow(TABLES.expenses, id, e as Record<string, unknown>);
-      set((s) => ({ ...s, expenses: s.expenses.map((x) => (x.id === id ? { ...x, ...e } : x)) }));
+      const stamped = { ...e, updatedAt: new Date().toISOString() };
+      void updateRow(TABLES.expenses, id, stamped as Record<string, unknown>);
+      set((s) => ({ ...s, expenses: s.expenses.map((x) => (x.id === id ? { ...x, ...stamped } : x)) }));
     },
     deleteExpense: (id) => {
       void deleteRow(TABLES.expenses, id);
@@ -1348,8 +1351,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({ ...s, bills: [...s.bills, row] }));
     },
     updateBill: (id, b) => {
-      void updateRow(TABLES.bills, id, b as Record<string, unknown>);
-      set((s) => ({ ...s, bills: s.bills.map((x) => (x.id === id ? { ...x, ...b } : x)) }));
+      const stamped = { ...b, updatedAt: new Date().toISOString() };
+      void updateRow(TABLES.bills, id, stamped as Record<string, unknown>);
+      set((s) => ({ ...s, bills: s.bills.map((x) => (x.id === id ? { ...x, ...stamped } : x)) }));
     },
     deleteBill: (id) => {
       void deleteRow(TABLES.bills, id);

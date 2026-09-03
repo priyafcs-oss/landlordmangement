@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, ExternalLink, Paperclip, Receipt, Trash2 } from "lucide-react";
-import { fmtCurrency, todayISO } from "@/lib/calculations";
+import { fmtCurrency, todayISO, fmtModified } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { openBillDocument } from "@/lib/files";
@@ -43,6 +43,13 @@ export function BillRow({
                 {bill.source && <> • {bill.source}</>}
               </div>
               {bill.notes && <div className="mt-1 text-xs">{bill.notes}</div>}
+              {(bill.updatedAt || bill.created_at) && (
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  {bill.updatedAt
+                    ? `Edited ${fmtModified(bill.updatedAt)}`
+                    : `Added ${fmtModified(bill.created_at)}`}
+                </div>
+              )}
             </div>
           }
         />

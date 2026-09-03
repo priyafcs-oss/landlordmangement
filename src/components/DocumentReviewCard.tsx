@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { useStore } from "@/lib/store";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -25,7 +26,15 @@ const KIND_LABELS: Record<AiIntakeProposal["kind"], string> = {
  * attachment, the raw email text when there isn't, or BillDocumentViewer's own empty state when
  * neither exists. Centralizing this here means the per-kind cards no longer need their own
  * click-to-view link/modal for the same document. */
-function DocumentPane({ proposal }: { proposal: AiIntakeProposal }) {
+function DocumentPane({
+  proposal,
+  expanded,
+  onToggleExpand,
+}: {
+  proposal: AiIntakeProposal;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
+}) {
   if (!proposal.sourceFileData && proposal.sourceEmailBody) {
     return (
       <div className="flex h-full min-h-[300px] flex-col overflow-hidden rounded-md border">
@@ -36,7 +45,14 @@ function DocumentPane({ proposal }: { proposal: AiIntakeProposal }) {
       </div>
     );
   }
-  return <BillDocumentViewer fileName={proposal.sourceFileName} fileData={proposal.sourceFileData} />;
+  return (
+    <BillDocumentViewer
+      fileName={proposal.sourceFileName}
+      fileData={proposal.sourceFileData}
+      expanded={expanded}
+      onToggleExpand={onToggleExpand}
+    />
+  );
 }
 
 /** Shared two-pane review shell used for every pending ai_intake_proposals kind — source document
@@ -52,6 +68,11 @@ function DocumentPane({ proposal }: { proposal: AiIntakeProposal }) {
 export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeProposal; children: React.ReactNode }) {
   const { state } = useStore();
   const [expanded, setExpanded] = useState(false);
+  // There's no host dialog here to resize (unlike Add Bill/Transaction) — this card is inline on
+  // the page — so "Enlarge" instead opens its own full-screen Dialog with both panes. The inline
+  // expanded view is hidden while it's open (rather than left mounted underneath) so the
+  // kind-specific `children` form isn't mounted twice at once with two independently-typed copies.
+  const [fullscreen, setFullscreen] = useState(false);
   const property = proposal.propertyId ? state.properties.find((p) => p.id === proposal.propertyId) : undefined;
   const meta = [
     proposal.providerName && { label: "Provider", value: proposal.providerName },
@@ -61,6 +82,7 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
   const reviewReasons = (proposal.reviewReason ?? "").split("; ").filter(Boolean);
 
   return (
+    <>
     <Card className="border-amber-500/30">
       <CardContent className="space-y-3 p-4">
         <button
@@ -97,15 +119,28 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
           </span>
         </button>
 
-        {expanded && (
+        {expanded && !fullscreen && (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_1fr]">
             <div className="lg:sticky lg:top-4 lg:self-start">
-              <DocumentPane proposal={proposal} />
+              <DocumentPane proposal={proposal} expanded={false} onToggleExpand={() => setFullscreen(true)} />
             </div>
             <div className="min-w-0 space-y-2">{children}</div>
           </div>
         )}
       </CardContent>
     </Card>
+
+    <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+      <DialogContent className="flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-hidden p-4">
+        <DialogTitle className="sr-only">{KIND_LABELS[proposal.kind] ?? proposal.kind}</DialogTitle>
+        <div className="grid flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_1fr]">
+          <div className="overflow-y-auto">
+            <DocumentPane proposal={proposal} expanded onToggleExpand={() => setFullscreen(false)} />
+          </div>
+          <div className="min-w-0 space-y-2 overflow-y-auto pr-1">{children}</div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

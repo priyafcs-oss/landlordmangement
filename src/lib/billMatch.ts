@@ -186,8 +186,11 @@ export function findDuplicateRecord(
       amount: expenseMatch.cost,
       date: expenseMatch.date,
       status: expenseMatch.status,
-      sourceFileName: expenseMatch.invoiceFileName,
-      sourceFileData: expenseMatch.invoiceFileData,
+      // Prefer the actual invoice when there is one; fall back to the statement it was extracted
+      // from (e.g. an agent statement) so the "view existing" link in the warning dialog still
+      // shows something instead of nothing for a statement-derived expense with no invoice yet.
+      sourceFileName: expenseMatch.invoiceFileName ?? expenseMatch.sourceFileName ?? undefined,
+      sourceFileData: expenseMatch.invoiceFileData ?? expenseMatch.sourceFileData ?? undefined,
     };
   }
 

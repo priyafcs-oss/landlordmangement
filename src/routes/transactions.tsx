@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions, fmtModified } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { bucketBy } from "@/lib/group";
 import { usePersistedToggle, usePersistedState } from "@/lib/hooks";
@@ -31,6 +31,7 @@ import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { DocumentLink } from "@/components/DocumentLink";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
+import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { FeeCheckRow } from "@/components/PropertyShared";
 import { verifyAgentFees, reconcileFlatFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
@@ -124,6 +125,10 @@ interface TxRow {
    * Ledger (rent-received) rows never have one. Shown in its own Invoice column. */
   invoiceFileName?: string;
   invoiceFileData?: string;
+  /** When this row was first added / last edited on screen — shown in the Last Modified column,
+   * falling back to createdAt when a row has never been edited since it was added. */
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 function formatMonthLabel(key: string): string {
@@ -131,9 +136,9 @@ function formatMonthLabel(key: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
-type TxSortField = "date" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount";
+type TxSortField = "date" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount" | "modified";
 
-type TxColumnKey = "date" | "provider" | "property" | "category" | "description" | "amount" | "source" | "invoice" | "tenant" | "taxTreatment";
+type TxColumnKey = "date" | "provider" | "property" | "category" | "description" | "amount" | "source" | "invoice" | "tenant" | "taxTreatment" | "modified";
 
 const TX_COLUMN_ORDER_KEY = "txColumnOrder";
 const DEFAULT_TX_COLUMN_ORDER: TxColumnKey[] = [
@@ -147,6 +152,7 @@ const DEFAULT_TX_COLUMN_ORDER: TxColumnKey[] = [
   "invoice",
   "tenant",
   "taxTreatment",
+  "modified",
 ];
 
 /** Drops any key from a stored order that this app version no longer has, and appends (in default
@@ -178,14 +184,22 @@ function txSortValue(r: TxRow, field: TxSortField, propertyLabel: string): strin
       return r.source ?? "";
     case "amount":
       return r.amount;
+    case "modified":
+      return r.updatedAt ?? r.createdAt ?? "";
   }
 }
 
-export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
+export function LedgerTab({
+  propertyId: lockedPropertyId,
+  propertyIds: scopedPropertyIds,
+}: { propertyId?: string; propertyIds?: string[] } = {}) {
   const { state } = useStore();
   const [fy, setFy] = useState("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy" | "provider" | "category">("none");
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
+  const scopedProperties = scopedPropertyIds
+    ? state.properties.filter((p) => scopedPropertyIds.includes(p.id))
+    : state.properties;
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
   const [unitId, setUnitId] = useState("__all__");
@@ -257,8 +271,10 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
           tenantId: e.tenantId,
           tenantName: tenant?.name,
           unitId: tenant?.unitId,
-          sourceFileName: e.sourceFileName,
-          sourceFileData: e.sourceFileData,
+          sourceFileName: e.sourceFileName ?? undefined,
+          sourceFileData: e.sourceFileData ?? undefined,
+          createdAt: e.created_at,
+          updatedAt: e.updatedAt,
         };
       }),
     ...state.expenses.map((e) => {
@@ -292,10 +308,12 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
         tenantName: tenant?.name,
         unitId: e.unitId,
         taxGroup: categoryGroupOf(e.category) ?? (e.taxCategory === "Immediate Deduction" ? "Running Expenses" : "Cost Base (Capital)"),
-        sourceFileName: e.sourceFileName,
-        sourceFileData: e.sourceFileData,
-        invoiceFileName: e.invoiceFileName ?? e.additionalFiles?.[0]?.fileName,
-        invoiceFileData: e.invoiceFileData ?? e.additionalFiles?.[0]?.fileData,
+        sourceFileName: e.sourceFileName ?? undefined,
+        sourceFileData: e.sourceFileData ?? undefined,
+        invoiceFileName: e.invoiceFileName ?? e.additionalFiles?.[0]?.fileName ?? undefined,
+        invoiceFileData: e.invoiceFileData ?? e.additionalFiles?.[0]?.fileData ?? undefined,
+        createdAt: e.created_at,
+        updatedAt: e.updatedAt,
       };
     }),
   ];
@@ -315,6 +333,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
 
   const filtered = allRows
     .filter((r) => fy === "all" || (r.date >= start && r.date <= end))
+    .filter((r) => !scopedPropertyIds || (!!r.propertyId && scopedPropertyIds.includes(r.propertyId)))
     .filter((r) => propertyId === "__all__" || r.propertyId === propertyId)
     .filter((r) => assetType === "__all__" || assetTypeOf(r) === assetType)
     .filter((r) => tenantId === "__all__" || r.tenantId === tenantId)
@@ -442,7 +461,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">All properties</SelectItem>
-                {state.properties.map((p) => (
+                {scopedProperties.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.alias || p.address}
                   </SelectItem>
@@ -450,7 +469,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               </SelectContent>
             </Select>
           )}
-          {!lockedPropertyId && (
+          {!lockedPropertyId && !scopedPropertyIds && (
             <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
               <SelectTrigger className="w-[130px]">
                 <SelectValue />
@@ -470,7 +489,7 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
             <SelectContent>
               <SelectItem value="__all__">All tenants</SelectItem>
               {state.tenants
-                .filter((t) => propertyId === "__all__" || t.propertyId === propertyId)
+                .filter((t) => propertyId !== "__all__" ? t.propertyId === propertyId : !scopedPropertyIds || scopedPropertyIds.includes(t.propertyId))
                 .map((t) => (
                   <SelectItem key={t.id} value={t.id}>
                     {t.name}
@@ -689,7 +708,9 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
 /** Edits a rent-payment ledger row's date/amount/description straight from the Transactions
  * table — previously only deletable there, or from the tenant's own Ledger tab, with no edit at
  * all in either place. Updating recomputes the tenant's paid-up-to date the same way a delete
- * already did (see updateLedger in store.tsx). */
+ * already did (see updateLedger in store.tsx). Shows the same source-document pane as editing an
+ * expense — a rent line posted via an agent statement has one (LedgerEntry.sourceFileName), so
+ * this income-side edit isn't a stripped-down experience next to the expense one. */
 function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string; trigger: React.ReactNode }) {
   const { state, updateLedger } = useStore();
   const entry = state.ledger.find((e) => e.id === ledgerEntryId);
@@ -697,6 +718,9 @@ function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string
   const [date, setDate] = useState(entry?.date ?? "");
   const [amount, setAmount] = useState(entry ? String(entry.credit) : "");
   const [description, setDescription] = useState(entry?.description ?? "");
+  const [sourceDoc, setSourceDoc] = useState<{ fileName?: string; fileData?: string } | null>(null);
+  const [sourceDocRemoved, setSourceDocRemoved] = useState(false);
+  const [docExpanded, setDocExpanded] = useState(false);
 
   const onOpenChange = (o: boolean) => {
     setOpen(o);
@@ -704,14 +728,22 @@ function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string
       setDate(entry.date);
       setAmount(String(entry.credit));
       setDescription(entry.description);
+      setSourceDoc(entry.sourceFileName ? { fileName: entry.sourceFileName, fileData: entry.sourceFileData ?? undefined } : null);
+      setSourceDocRemoved(false);
     }
+    if (!o) setDocExpanded(false);
   };
 
   const save = () => {
     const val = parseFloat(amount);
     if (!val || val <= 0) return toast.error("Enter a valid amount");
     if (!date) return toast.error("Date is required");
-    updateLedger(ledgerEntryId, { date, credit: val, description });
+    updateLedger(ledgerEntryId, {
+      date,
+      credit: val,
+      description,
+      ...(sourceDocRemoved ? { sourceFileName: null, sourceFileData: null } : {}),
+    });
     toast.success("Rent payment updated");
     setOpen(false);
   };
@@ -720,22 +752,47 @@ function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent>
+      <DialogContent
+        className={
+          docExpanded
+            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
+            : "max-w-2xl"
+        }
+      >
         <DialogHeader>
           <DialogTitle>Edit rent payment</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 text-sm">
-          <div className="space-y-1">
-            <Label className="text-xs">Date</Label>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden sm:grid-cols-[minmax(0,1fr)_320px]" : "sm:grid-cols-[240px_1fr]")}>
+          <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
+            <BillDocumentViewer
+              fileName={sourceDoc?.fileName}
+              fileData={sourceDoc?.fileData}
+              expanded={docExpanded}
+              onToggleExpand={() => setDocExpanded((v) => !v)}
+              onRemove={
+                sourceDoc
+                  ? () => {
+                      setSourceDoc(null);
+                      setSourceDocRemoved(true);
+                    }
+                  : undefined
+              }
+              emptyLabel="No source statement — this payment was entered directly."
+            />
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Amount</Label>
-            <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Description</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Date</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Amount</Label>
+              <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Description</Label>
+              <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -795,6 +852,12 @@ function txCell(key: TxColumnKey, r: TxRow, propertyLabel: string | undefined): 
       return r.tenantName ?? "—";
     case "taxTreatment":
       return taxTreatmentLabel(r.category);
+    case "modified":
+      return r.updatedAt ? (
+        <span title={`Added ${fmtModified(r.createdAt) ?? "unknown"}`}>Edited {fmtModified(r.updatedAt)}</span>
+      ) : (
+        <span className="text-muted-foreground">{fmtModified(r.createdAt) ?? "—"}</span>
+      );
   }
 }
 
@@ -809,6 +872,7 @@ const TX_COLUMN_LABELS: Record<TxColumnKey, string> = {
   invoice: "Invoice / Attachment",
   tenant: "Tenant",
   taxTreatment: "Tax Treatment",
+  modified: "Last Modified",
 };
 /** "invoice" has no sortable value of its own (a file link isn't a sort key) — every other column
  * maps 1:1 onto a TxSortField. */
@@ -822,6 +886,7 @@ const TX_COLUMN_SORT_FIELD: Partial<Record<TxColumnKey, TxSortField>> = {
   source: "source",
   tenant: "tenant",
   taxTreatment: "taxTreatment",
+  modified: "modified",
 };
 
 function TxTable({
@@ -864,9 +929,13 @@ function TxTable({
   }
   const noSort = () => {};
   return (
-    <div className="overflow-x-auto">
+    // Bounded height (not just overflow-x-auto with no height cap) so both scrollbars sit right
+    // at the edge of this table, visible without first scrolling to the bottom of a page that can
+    // run to hundreds of rows — previously the horizontal scrollbar only appeared at the very
+    // bottom of the whole (unbounded) table, effectively unreachable on a long list.
+    <div className="max-h-[70vh] overflow-auto">
       <table className="w-full text-sm">
-        <thead>
+        <thead className="sticky top-0 z-10 bg-card">
           <tr className="border-b text-left text-xs text-muted-foreground">
             {visibleColumns.map((key) => {
               const sortField = TX_COLUMN_SORT_FIELD[key];
@@ -913,8 +982,8 @@ function TxTable({
                   <td
                     key={key}
                     className={`px-3 py-2 text-xs ${key === "amount" ? "text-right" : ""} ${
-                      key === "date" ? "whitespace-nowrap" : ""
-                    } ${["provider", "property", "tenant", "category", "taxTreatment"].includes(key) ? "text-muted-foreground" : ""}`}
+                      key === "date" || key === "modified" ? "whitespace-nowrap" : ""
+                    } ${["provider", "property", "tenant", "category", "taxTreatment", "modified"].includes(key) ? "text-muted-foreground" : ""}`}
                   >
                     {txCell(key, r, propertyLabel)}
                   </td>

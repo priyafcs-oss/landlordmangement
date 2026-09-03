@@ -47,6 +47,7 @@ import { LedgerTab } from "@/routes/transactions";
 import { DocumentsContent } from "@/routes/documents";
 import { buildDocumentEntries } from "@/lib/documents";
 import { DocumentsSection } from "@/components/DocumentEntryRow";
+import { AddLoanDialog } from "@/components/AddLoanDialog";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -102,11 +103,26 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   );
   return (
     <div className="space-y-4 text-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium text-muted-foreground">Loans</div>
+        <AddLoanDialog propertyId={propertyId} />
+      </div>
       <div className="space-y-2">
         {loans.length === 0 && <div className="text-xs text-muted-foreground">No loans on file for this property.</div>}
         {loans.map((l) => (
           <div key={l.id} className="rounded border p-3 text-xs">
-            <div className="font-medium">{l.bankName}</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">{l.bankName}</div>
+              <AddLoanDialog
+                loan={l}
+                propertyId={propertyId}
+                trigger={
+                  <Button size="icon" variant="ghost" className="h-6 w-6">
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                }
+              />
+            </div>
             <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
               <span>Balance: {fmtCurrency(l.totalBalance)}</span>
               <span>Rate: {l.interestRate}%</span>

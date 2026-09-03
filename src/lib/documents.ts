@@ -196,9 +196,16 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         };
       }),
     // Only expenses that are themselves reusable reference material — a maintenance job's
-    // invoice, or anything carrying a warranty — not every routine one-off transaction.
+    // invoice, or anything carrying a warranty — not every routine one-off transaction. Falls
+    // back to sourceFileData (the statement a line was extracted from, e.g. an agent-statement
+    // tradesperson deduction) when there's no separate invoice file — since the Source/Invoice
+    // split, a statement-derived Repairs & Maintenance expense often has only that.
     ...state.expenses
-      .filter((e) => (e.invoiceFileData || e.sourceEmailBody) && (e.category === "Repairs & Maintenance" || e.hasWarranty || e.warrantyExpiry))
+      .filter(
+        (e) =>
+          (e.invoiceFileData || e.sourceFileData || e.sourceEmailBody) &&
+          (e.category === "Repairs & Maintenance" || e.hasWarranty || e.warrantyExpiry),
+      )
       .map((e) => ({
         id: e.id,
         kind: "Maintenance" as const,
@@ -210,8 +217,8 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         label: e.itemName,
         amount: e.cost,
         status: e.status,
-        fileName: e.invoiceFileName,
-        fileData: e.invoiceFileData,
+        fileName: e.invoiceFileName ?? e.sourceFileName ?? undefined,
+        fileData: e.invoiceFileData ?? e.sourceFileData ?? undefined,
         subject: e.sourceSubject,
         emailBody: e.sourceEmailBody,
         warrantyExpiry: e.hasWarranty ? e.warrantyExpiry : undefined,

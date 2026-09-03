@@ -136,6 +136,9 @@ export function AddBillDialog({
   const [extractEmpty, setExtractEmpty] = useState(false);
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [pendingNotify, setPendingNotify] = useState(false);
+  // Whether the document pane — and this whole dialog — is enlarged, so "Enlarge" on the source
+  // document grows the review window (document + extracted fields together), not just the pane.
+  const [docExpanded, setDocExpanded] = useState(false);
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? "",
@@ -185,6 +188,7 @@ export function AddBillDialog({
     setConfidence(null);
     setExtractSummary(null);
     setExtractEmpty(false);
+    setDocExpanded(false);
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
@@ -598,7 +602,13 @@ export function AddBillDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+      <DialogContent
+        className={
+          docExpanded
+            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
+            : "max-h-[90vh] max-w-5xl overflow-y-auto"
+        }
+      >
         <DialogHeader>
           <DialogTitle>{initialProposal ? "Review bill" : "New bill"}</DialogTitle>
           <div className="text-xs text-muted-foreground">
@@ -608,8 +618,8 @@ export function AddBillDialog({
           </div>
         </DialogHeader>
 
-        <div className="grid gap-4 text-sm md:grid-cols-[340px_1fr]">
-          <div className="space-y-3">
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-[340px_1fr]")}>
+          <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
             <div
               className={
                 "rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
@@ -683,10 +693,15 @@ export function AddBillDialog({
               )}
             </div>
 
-            <BillDocumentViewer fileName={form.sourceFileName} fileData={form.sourceFileData} />
+            <BillDocumentViewer
+              fileName={form.sourceFileName}
+              fileData={form.sourceFileData}
+              expanded={docExpanded}
+              onToggleExpand={() => setDocExpanded((v) => !v)}
+            />
           </div>
 
-          <div className="space-y-4">
+          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
             <div className="flex items-center gap-2 rounded-md border p-2">
               <Checkbox
                 checked={form.hasInstalments}

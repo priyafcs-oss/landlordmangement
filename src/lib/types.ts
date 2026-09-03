@@ -306,6 +306,12 @@ export interface LedgerEntry {
   description: string;
   debit: number;
   credit: number;
+  /** Server-set on insert — when this row was actually recorded, distinct from its business
+   * `date`. Used by Transactions to show "date added". */
+  created_at?: string;
+  /** Stamped by updateLedger on every edit (see store.tsx) — unset means never edited since it
+   * was added, so Transactions falls back to created_at. Not server/trigger-managed. */
+  updatedAt?: string;
   newPaidUpToDate?: string;
   manual?: boolean;
   linkedInvoiceId?: string;
@@ -314,9 +320,10 @@ export interface LedgerEntry {
   /** How this entry was posted — unset for historical rows predating this field. */
   source?: "manual" | "bank_feed" | "agent_statement";
   /** The statement/document this payment was read off, when there is one (set for
-   * source: "agent_statement" rows) — lets Transactions link straight back to it. */
-  sourceFileName?: string;
-  sourceFileData?: string;
+   * source: "agent_statement" rows) — lets Transactions link straight back to it. `| null` so an
+   * edit can explicitly clear it (updateLedger's DB write only drops `undefined` keys). */
+  sourceFileName?: string | null;
+  sourceFileData?: string | null;
 }
 
 export interface TenantInvoice {
@@ -332,17 +339,41 @@ export interface TenantInvoice {
 
 export interface Loan {
   id: string;
+  /** Server-set on insert. */
+  created_at?: string;
+  /** Stamped by updateLoan on every edit (see store.tsx) — unset means never edited since added. */
+  updatedAt?: string;
   propertyId: string;
   bankName: string;
+  bsb?: string;
+  accountNumber?: string;
+  loanType?: "Principal & Interest" | "Interest Only";
+  purpose?: "Investment" | "Owner Occupied";
+  /** What the loan was originally drawn for — distinct from totalBalance, which is the current
+   * outstanding amount and the only one of the two that existed before manual entry was added. */
+  originalAmount?: number;
   totalBalance: number;
+  /** For a line-of-credit/redraw facility — the maximum that can be owing, distinct from the
+   * amount actually drawn (totalBalance). */
+  creditLimit?: number;
   interestRate: number;
+  rateType?: "Variable" | "Fixed";
   monthlyEmi: number;
+  repaymentFrequency?: "Weekly" | "Fortnightly" | "Monthly";
+  nextRepaymentDate?: string;
   dueDayOfMonth?: number;
   isDirectDebit?: boolean;
+  /** Which account repayments are drawn from — free text, not a linked bank-feed account. */
   linkedBankAccount?: string;
-  status?: "Active" | "Paid Off" | "In Arrears";
+  startDate?: string;
+  maturityDate?: string;
+  /** Whether an offset account exists against this loan — offsetBalance can be 0/unset even when
+   * this is true (a newly-opened offset with nothing in it yet). */
+  hasOffsetAccount?: boolean;
   /** Cash sitting in an offset account against this loan — reduces the interest it accrues. */
   offsetBalance?: number;
+  status?: "Active" | "Paid Off" | "In Arrears";
+  notes?: string;
   /** Which Asset this loan is secured against/funds — mirrors propertyId, set for every asset type. */
   assetId?: string;
 }
@@ -352,6 +383,9 @@ export interface Expense {
   /** Server-set on insert — when this expense was actually recorded, distinct from its business
    * `date`. Used by Documents to show "date added". */
   created_at?: string;
+  /** Stamped by updateExpense on every edit (see store.tsx) — unset means never edited since it
+   * was added, so Transactions falls back to created_at. Not server/trigger-managed. */
+  updatedAt?: string;
   itemName: string;
   cost: number;
   date: string;
@@ -390,18 +424,20 @@ export interface Expense {
    * (Transactions row link, Documents, markBillPaid, ...). Left unset for a line whose only
    * evidence is the statement it was extracted from (see sourceFileName below); a landlord who
    * later forwards the real invoice for one of those attaches it here (or via additionalFiles). */
-  invoiceFileName?: string;
-  invoiceFileData?: string;
+  /** `| null` (not just optional) so an edit can explicitly clear a previously-attached file —
+   * updateExpense's DB write only drops `undefined` keys, so removing a file has to send `null`. */
+  invoiceFileName?: string | null;
+  invoiceFileData?: string | null;
   /** The statement/letter this line was extracted from, when it's a multi-line document rather
    * than a bill of its own (e.g. an agent statement's deduction, a bank/loan statement's interest
    * line, a PEXA settlement adjustment) — same split ledger_entries already has (see
    * LedgerEntry.sourceFileName). Distinct from invoiceFileName so Transactions can tell "here's
    * the statement this was read off" apart from "here's the actual invoice for this line". */
-  sourceFileName?: string;
-  sourceFileData?: string;
+  sourceFileName?: string | null;
+  sourceFileData?: string | null;
   /** Extra files/photos beyond the primary invoice above — same (fileName, fileData) shape,
-   * shown/managed alongside it in AddTransactionDialog. */
-  additionalFiles?: { fileName: string; fileData: string }[];
+   * shown/managed alongside it in AddTransactionDialog. `| null` to explicitly clear the last one. */
+  additionalFiles?: { fileName: string; fileData: string }[] | null;
   hasWarranty: boolean;
   warrantyExpiry?: string;
   rechargeToTenant: boolean;
@@ -800,6 +836,12 @@ export interface BillLineItem {
 
 export interface PropertyBill {
   id: string;
+  /** Server-set on insert — when this bill was actually added, distinct from its own `dueDate`/
+   * `issueDate`. */
+  created_at?: string;
+  /** Stamped by updateBill on every edit (see store.tsx) — unset means never edited since it was
+   * added. Not server/trigger-managed. */
+  updatedAt?: string;
   propertyId?: string;
   /** Which Asset this bill belongs to — set for every asset type, propertyId only for Property. */
   assetId?: string;

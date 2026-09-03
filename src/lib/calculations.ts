@@ -203,6 +203,17 @@ export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Formats a created_at/updatedAt ISO timestamp for "last modified" displays (Transactions,
+ * Bills) — includes the time, not just the date, since same-day edits are the common case these
+ * displays exist to surface. Returns null for an absent/invalid timestamp so callers can fall
+ * back to their own "—"/empty state. */
+export function fmtModified(iso?: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 /** Routine inspection cadence — kept as one constant so the Dashboard alert and the Inspections page never disagree. */
 export const INSPECTION_CADENCE_DAYS = 180;
 

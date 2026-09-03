@@ -72,6 +72,9 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
   const [extractOk, setExtractOk] = useState(false);
   const [extractEmpty, setExtractEmpty] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  // Whether the document pane — and this whole dialog — is enlarged, so "Enlarge" on the source
+  // document grows the review window (document + extracted assets together), not just the pane.
+  const [docExpanded, setDocExpanded] = useState(false);
 
   const blankForm = () => ({
     quantitySurveyor: "",
@@ -95,6 +98,7 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     setItems([blankAsset()]);
     setExtractOk(false);
     setExtractEmpty(false);
+    setDocExpanded(false);
   };
 
   const extract = async (file: File) => {
@@ -214,14 +218,20 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
           <Plus className="h-3 w-3" /> Add depreciation report
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+      <DialogContent
+        className={
+          docExpanded
+            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
+            : "max-h-[90vh] max-w-5xl overflow-y-auto"
+        }
+      >
         <DialogHeader>
           <DialogTitle>New depreciation report</DialogTitle>
           <div className="text-xs text-muted-foreground">Upload a quantity surveyor's report for AI extraction, or enter assets manually.</div>
         </DialogHeader>
 
-        <div className="grid gap-4 text-sm md:grid-cols-[340px_1fr]">
-          <div className="space-y-3">
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-[340px_1fr]")}>
+          <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
             <div
               className={
                 "rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
@@ -277,10 +287,15 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
               )}
             </div>
 
-            <BillDocumentViewer fileName={form.sourceFileName} fileData={form.sourceFileData} />
+            <BillDocumentViewer
+              fileName={form.sourceFileName}
+              fileData={form.sourceFileData}
+              expanded={docExpanded}
+              onToggleExpand={() => setDocExpanded((v) => !v)}
+            />
           </div>
 
-          <div className="space-y-4">
+          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Quantity surveyor">
                 <Input value={form.quantitySurveyor} onChange={(e) => setForm((f) => ({ ...f, quantitySurveyor: e.target.value }))} />

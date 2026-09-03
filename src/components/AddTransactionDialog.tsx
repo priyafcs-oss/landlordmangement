@@ -27,7 +27,7 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory } from "@/lib/calculations";
+import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory, fmtModified } from "@/lib/calculations";
 import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
@@ -152,6 +152,9 @@ export function AddTransactionDialog({
   const [splitting, setSplitting] = useState(false);
   const [extractSummary, setExtractSummary] = useState<{ vendor: string; amount: number; date: string; propertyMatched: boolean } | null>(null);
   const [extractEmpty, setExtractEmpty] = useState(false);
+  // Whether the document pane(s) — and this whole dialog — are enlarged. Shared by both the
+  // source-statement and invoice viewers so either one's "Enlarge" button grows the same dialog.
+  const [docExpanded, setDocExpanded] = useState(false);
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? state.properties[0]?.id ?? "",
@@ -163,13 +166,24 @@ export function AddTransactionDialog({
     periodStart: "",
     periodEnd: "",
     notes: "",
-    sourceFileName: undefined as string | undefined,
-    sourceFileData: undefined as string | undefined,
+    invoiceFileName: undefined as string | undefined,
+    invoiceFileData: undefined as string | undefined,
   });
 
   const [form, setForm] = useState(blankForm());
   const [lineItems, setLineItems] = useState<LineItemRow[]>([blankLineItem()]);
   const [additionalFiles, setAdditionalFiles] = useState<{ fileName: string; fileData: string }[]>([]);
+  // Set once the invoice/receipt file is explicitly removed (rather than just never having been
+  // set) — commitEdit needs to tell "clear this on save" apart from "leave it untouched", since
+  // sending `undefined` to updateExpense is a no-op (see lib/db.ts's stripUndefined) while `null`
+  // actually clears the DB column.
+  const [invoiceRemoved, setInvoiceRemoved] = useState(false);
+  // The statement/letter this line was originally extracted from (Expense.sourceFileName) — shown
+  // read-only (there's no "replace" concept for it here) alongside the invoice above when editing.
+  // Only ever populated from an existing expense; a brand-new manual transaction has no statement
+  // it was read off, only the invoice/receipt being uploaded for it.
+  const [sourceDoc, setSourceDoc] = useState<{ fileName?: string; fileData?: string } | null>(null);
+  const [sourceDocRemoved, setSourceDocRemoved] = useState(false);
   // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset can
   // tell its own result is stale and skip applying it, instead of repopulating a "blank" form
   // with a previous, unrelated upload's data once the Gemini call finally resolves.
@@ -186,6 +200,10 @@ export function AddTransactionDialog({
     setSplitting(false);
     setPeriodOpen(false);
     setNotesOpen(false);
+    setInvoiceRemoved(false);
+    setSourceDoc(null);
+    setSourceDocRemoved(false);
+    setDocExpanded(false);
   };
 
   const addAdditionalFile = (file: File) => {
@@ -202,15 +220,15 @@ export function AddTransactionDialog({
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
   const applyExtracted = (
     data: Pick<ExtractBillResult, "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence">,
-    sourceFileName?: string,
-    sourceFileData?: string,
+    invoiceFileName?: string,
+    invoiceFileData?: string,
   ) => {
     const matchedProperty = data.property_address ? matchPropertyByAddress(state.properties, data.property_address) : undefined;
 
     setForm((f) => ({
       ...f,
-      sourceFileName: sourceFileName ?? f.sourceFileName,
-      sourceFileData: sourceFileData ?? f.sourceFileData,
+      invoiceFileName: invoiceFileName ?? f.invoiceFileName,
+      invoiceFileData: invoiceFileData ?? f.invoiceFileData,
       propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
       payee: data.vendor ?? f.payee,
       date: data.due_date ?? f.date,
@@ -249,8 +267,8 @@ export function AddTransactionDialog({
       ...f,
       payee: payload.itemName ?? f.payee,
       date: payload.date ?? f.date,
-      sourceFileName: initialProposal.sourceFileName ?? f.sourceFileName,
-      sourceFileData: initialProposal.sourceFileData ?? f.sourceFileData,
+      invoiceFileName: initialProposal.sourceFileName ?? f.invoiceFileName,
+      invoiceFileData: initialProposal.sourceFileData ?? f.invoiceFileData,
       propertyId: initialProposal.propertyId ?? f.propertyId,
     }));
     setLineItems([
@@ -267,8 +285,12 @@ export function AddTransactionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProposal?.id]);
 
-  // Editing an existing transaction — pre-fill everything from it, including its primary invoice
-  // file (left-pane preview) and any additional files already attached.
+  // Editing an existing transaction — pre-fill everything from it, including its own invoice/
+  // receipt file (left-pane preview) and any additional files already attached. The statement this
+  // line was originally extracted from (if any — e.g. an agent statement or bank/loan statement)
+  // is kept separate in sourceDoc: it's a different document from the invoice and was previously
+  // silently dropped from this dialog entirely, making it look like a source link had vanished
+  // whenever an expense only had a statement and no invoice yet.
   useEffect(() => {
     if (!expense) return;
     setForm((f) => ({
@@ -281,8 +303,8 @@ export function AddTransactionDialog({
       periodStart: expense.periodStart ?? "",
       periodEnd: expense.periodEnd ?? "",
       notes: expense.notes ?? "",
-      sourceFileName: expense.invoiceFileName,
-      sourceFileData: expense.invoiceFileData,
+      invoiceFileName: expense.invoiceFileName ?? undefined,
+      invoiceFileData: expense.invoiceFileData ?? undefined,
     }));
     setLineItems([
       {
@@ -299,6 +321,9 @@ export function AddTransactionDialog({
       },
     ]);
     setAdditionalFiles(expense.additionalFiles ?? []);
+    setInvoiceRemoved(false);
+    setSourceDoc(expense.sourceFileName ? { fileName: expense.sourceFileName, fileData: expense.sourceFileData ?? undefined } : null);
+    setSourceDocRemoved(false);
     if (expense.periodStart || expense.periodEnd) setPeriodOpen(true);
     if (expense.notes) setNotesOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,7 +342,8 @@ export function AddTransactionDialog({
     try {
       const base64 = await readFileAsBase64(file);
       if (generationRef.current !== generation) return;
-      setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
+      setForm((f) => ({ ...f, invoiceFileName: file.name, invoiceFileData: base64 }));
+      setInvoiceRemoved(false);
 
       const { data, error } = await supabase.functions.invoke<ExtractBillResult>("extract-bill", {
         body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
@@ -416,11 +442,12 @@ export function AddTransactionDialog({
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
       notes: form.notes || undefined,
-      // Never overwritten by "source" — editing doesn't change how this transaction originally
-      // arrived (manual/email/upload), only its own fields.
-      invoiceFileName: form.sourceFileName,
-      invoiceFileData: form.sourceFileData,
-      additionalFiles: additionalFiles.length > 0 ? additionalFiles : undefined,
+      // `null` (not undefined) when explicitly removed, so the DB column actually clears instead
+      // of the write being dropped as a no-op — see lib/db.ts's stripUndefined.
+      invoiceFileName: invoiceRemoved ? null : form.invoiceFileName,
+      invoiceFileData: invoiceRemoved ? null : form.invoiceFileData,
+      additionalFiles: additionalFiles.length > 0 ? additionalFiles : null,
+      ...(sourceDocRemoved ? { sourceFileName: null, sourceFileData: null } : {}),
     });
     setOpen(false);
     toast.success("Transaction updated");
@@ -462,8 +489,8 @@ export function AddTransactionDialog({
               rechargeToTenant: li.rechargeToTenant || undefined,
               tenantId: li.rechargeToTenant ? li.tenantId : undefined,
             },
-            sourceFileName: form.sourceFileName,
-            sourceFileData: form.sourceFileData,
+            sourceFileName: form.invoiceFileName,
+            sourceFileData: form.invoiceFileData,
           });
           continue;
         }
@@ -501,9 +528,9 @@ export function AddTransactionDialog({
           periodEnd: form.periodEnd || undefined,
           notes: form.notes || undefined,
           status: "approved",
-          source: form.sourceFileData ? "upload" : "manual",
-          invoiceFileName: form.sourceFileName,
-          invoiceFileData: form.sourceFileData,
+          source: form.invoiceFileData ? "upload" : "manual",
+          invoiceFileName: form.invoiceFileName,
+          invoiceFileData: form.invoiceFileData,
           additionalFiles: additionalFiles.length > 0 ? additionalFiles : undefined,
         });
       }
@@ -537,7 +564,13 @@ export function AddTransactionDialog({
           )}
         </DialogTrigger>
       )}
-      <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+      <DialogContent
+        className={
+          docExpanded
+            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
+            : "max-h-[90vh] max-w-5xl overflow-y-auto"
+        }
+      >
         <DialogHeader>
           <div className="flex items-center gap-2">
             <DialogTitle>{expense ? "Edit transaction" : initialProposal ? "Review transaction" : "New transaction"}</DialogTitle>
@@ -549,11 +582,31 @@ export function AddTransactionDialog({
               : initialProposal
                 ? "Flagged for review — check the details before saving."
                 : "Upload a receipt for AI extraction, or enter the details manually."}
+            {expense && (expense.updatedAt || expense.created_at) && (
+              <> · {expense.updatedAt ? `Edited ${fmtModified(expense.updatedAt)}` : `Added ${fmtModified(expense.created_at)}`}</>
+            )}
           </div>
         </DialogHeader>
 
-        <div className="grid gap-4 text-sm md:grid-cols-[340px_1fr]">
-          <div className="space-y-3">
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-[340px_1fr]")}>
+          <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
+            {sourceDoc && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">Source statement</div>
+                <div className="text-[11px] text-muted-foreground">The document this line was originally read off — not replaced by editing.</div>
+                <BillDocumentViewer
+                  fileName={sourceDoc.fileName}
+                  fileData={sourceDoc.fileData}
+                  expanded={docExpanded}
+                  onToggleExpand={() => setDocExpanded((v) => !v)}
+                  onRemove={() => {
+                    setSourceDoc(null);
+                    setSourceDocRemoved(true);
+                  }}
+                />
+              </div>
+            )}
+
             <div
               className={"rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")}
               onDragOver={(e) => {
@@ -579,10 +632,10 @@ export function AddTransactionDialog({
                   <FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </div>
               </div>
-              {form.sourceFileName && (
+              {form.invoiceFileName && (
                 <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
-                  <span className="truncate text-xs">{form.sourceFileName}</span>
-                  <Button size="sm" variant="ghost" className="h-6 shrink-0 gap-1 text-xs" onClick={() => openBillDocument(form.sourceFileName, form.sourceFileData)}>
+                  <span className="truncate text-xs">{form.invoiceFileName}</span>
+                  <Button size="sm" variant="ghost" className="h-6 shrink-0 gap-1 text-xs" onClick={() => openBillDocument(form.invoiceFileName, form.invoiceFileData)}>
                     <Eye className="h-3 w-3" /> View
                   </Button>
                 </div>
@@ -615,7 +668,21 @@ export function AddTransactionDialog({
               )}
             </div>
 
-            <BillDocumentViewer fileName={form.sourceFileName} fileData={form.sourceFileData} />
+            {sourceDoc && <div className="text-xs font-medium text-muted-foreground">Invoice / receipt</div>}
+            <BillDocumentViewer
+              fileName={form.invoiceFileName}
+              fileData={form.invoiceFileData}
+              expanded={docExpanded}
+              onToggleExpand={() => setDocExpanded((v) => !v)}
+              onRemove={
+                form.invoiceFileName
+                  ? () => {
+                      setForm((f) => ({ ...f, invoiceFileName: undefined, invoiceFileData: undefined }));
+                      setInvoiceRemoved(true);
+                    }
+                  : undefined
+              }
+            />
 
             <div className="space-y-1 rounded-md border p-2">
               <div className="flex items-center justify-between">
@@ -664,7 +731,7 @@ export function AddTransactionDialog({
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
             <div className="space-y-2 rounded-md border p-3">
               <div className="text-xs font-medium">Details</div>
               <div className="grid gap-3 sm:grid-cols-2">

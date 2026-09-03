@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CheckCircle2, Trash2, Plus, Pencil, Mail } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS } from "@/lib/calculations";
+import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
 import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
@@ -86,6 +86,9 @@ export function BillDetailDialog({
   const [selectedId, setSelectedId] = useState(bill.id);
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [scheduleRows, setScheduleRows] = useState<InstalmentEditRow[]>([]);
+  // Whether the document pane — and this whole dialog — is enlarged, so "Enlarge" on the source
+  // document grows the review window (document + editable fields together), not just the pane.
+  const [docExpanded, setDocExpanded] = useState(false);
 
   const siblings = (bill.billGroupId ? state.bills.filter((b) => b.billGroupId === bill.billGroupId) : [bill]).sort(
     (a, b) => (a.dueDate < b.dueDate ? -1 : 1),
@@ -262,22 +265,41 @@ export function BillDetailDialog({
       onOpenChange={(o) => {
         setOpen(o);
         if (o) resetFrom(bill);
+        else setDocExpanded(false);
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+      <DialogContent
+        className={
+          docExpanded
+            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
+            : "max-h-[90vh] max-w-4xl overflow-y-auto"
+        }
+      >
         <DialogHeader>
           <div className="flex items-center gap-2">
             <DialogTitle>{selected.providerName || selected.billType}</DialogTitle>
             <Badge variant={selected.status === "Paid" ? "secondary" : "outline"}>{selected.status}</Badge>
           </div>
-          <div className="text-xs text-muted-foreground">Review and update bill details.</div>
+          <div className="text-xs text-muted-foreground">
+            Review and update bill details.
+            {(selected.updatedAt || selected.created_at) && (
+              <> · {selected.updatedAt ? `Edited ${fmtModified(selected.updatedAt)}` : `Added ${fmtModified(selected.created_at)}`}</>
+            )}
+          </div>
         </DialogHeader>
 
-        <div className="grid gap-4 text-sm md:grid-cols-2">
-          <BillDocumentViewer fileName={selected.sourceFileName} fileData={selected.sourceFileData} />
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-2")}>
+          <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
+            <BillDocumentViewer
+              fileName={selected.sourceFileName}
+              fileData={selected.sourceFileData}
+              expanded={docExpanded}
+              onToggleExpand={() => setDocExpanded((v) => !v)}
+            />
+          </div>
 
-          <div className="space-y-4">
+          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
             {siblings.length > 1 && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="flex items-center justify-between">

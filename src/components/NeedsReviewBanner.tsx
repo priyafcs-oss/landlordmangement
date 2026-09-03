@@ -138,8 +138,8 @@ export function NeedsReviewBanner() {
                     </div>
                   )}
                   <DocumentViewLinks
-                    fileName={e.invoiceFileName}
-                    fileData={e.invoiceFileData}
+                    fileName={e.invoiceFileName ?? undefined}
+                    fileData={e.invoiceFileData ?? undefined}
                     subject={e.sourceSubject}
                     emailBody={e.sourceEmailBody}
                   />

@@ -1,7 +1,10 @@
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Pencil } from "lucide-react";
 import { fmtCurrency } from "@/lib/calculations";
+import { AddLoanDialog } from "@/components/AddLoanDialog";
 
 /** Portfolio-wide loan rollup — reachable from the Assets left-nav. */
 export function LoanSummaryTab() {
@@ -11,8 +14,9 @@ export function LoanSummaryTab() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-base">Loan Summary</CardTitle>
+        <AddLoanDialog />
       </CardHeader>
       <CardContent className="space-y-3">
         {state.loans.length === 0 && <div className="text-sm text-muted-foreground">No loans on file.</div>}
@@ -24,9 +28,19 @@ export function LoanSummaryTab() {
                 <span className="font-medium">
                   {l.bankName} — {prop?.alias || prop?.address || "Unlinked"}
                 </span>
-                <Badge variant={l.status === "Paid Off" ? "secondary" : l.status === "In Arrears" ? "destructive" : "outline"}>
-                  {l.status ?? "Active"}
-                </Badge>
+                <div className="flex items-center gap-1">
+                  <Badge variant={l.status === "Paid Off" ? "secondary" : l.status === "In Arrears" ? "destructive" : "outline"}>
+                    {l.status ?? "Active"}
+                  </Badge>
+                  <AddLoanDialog
+                    loan={l}
+                    trigger={
+                      <Button size="icon" variant="ghost" className="h-6 w-6">
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    }
+                  />
+                </div>
               </div>
               <div className="mt-1 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                 <span>Balance: {fmtCurrency(l.totalBalance)}</span>

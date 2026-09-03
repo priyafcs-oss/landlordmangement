@@ -383,8 +383,8 @@ function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClos
               {docs.map((t) => (
                 <DocumentLink
                   key={t.id}
-                  fileName={t.invoiceFileName}
-                  fileData={t.invoiceFileData}
+                  fileName={t.invoiceFileName ?? undefined}
+                  fileData={t.invoiceFileData ?? undefined}
                   className="flex items-center gap-2 rounded border p-2 text-xs text-primary underline"
                 >
                   <FileText className="h-3.5 w-3.5" /> {t.invoiceFileName || t.itemName}
