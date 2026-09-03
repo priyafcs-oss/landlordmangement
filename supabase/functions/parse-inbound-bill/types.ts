@@ -8,6 +8,11 @@ export interface NormalizedBillInput {
   /** MIME type of pdfBase64, e.g. "application/pdf" or "image/png". Defaults to "application/pdf" if unset. */
   attachmentMimeType?: string;
   textBody?: string;
+  /** Set only by the "Upload statement to this loan" button (see upload-document/index.ts) —
+   * asserts this document is a statement for a specific existing Loan, so the router skips
+   * classification entirely and parse-loan-statement resolves the match/property directly from
+   * the loan record instead of the usual fuzzy property/lender matching. */
+  loanIdHint?: string;
 }
 
 /** A later instalment printed on the same notice (e.g. quarterly council/water rates) — not yet due. */
@@ -219,6 +224,15 @@ export interface ParsedLoanStatementFields {
   interest_charged: number | null;
   repayments_made: number | null;
   closing_balance: number | null;
+  /** The portion of repayments_made that reduced principal this period, when the statement
+   * breaks it out separately from interest_charged. Null if not stated/not broken out. */
+  principal_paid: number | null;
+  /** The fixed repayment amount due each period. Null if not stated. */
+  emi_amount_due: number | null;
+  /** YYYY-MM-DD — the next scheduled repayment date. Null if not stated. */
+  next_emi_due_date: string | null;
+  /** Last 4 digits of the loan/account number printed on the statement. Null if not shown. */
+  account_number_last4: string | null;
   /** The statement's own print date — distinct from period_end. Null if not stated. */
   document_date: string | null;
   /** The account holder name printed on the statement. Null if not stated. */

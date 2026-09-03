@@ -29,6 +29,7 @@ import type {
   DepreciationItem,
   ValuationSnapshot,
   LoanBalanceSnapshot,
+  LoanStatement,
   CashBuffer,
   InsurancePolicy,
   MaintenanceItem,
@@ -124,6 +125,7 @@ const empty: AppState = {
   depreciationItems: [],
   valuationSnapshots: [],
   loanBalanceSnapshots: [],
+  loanStatements: [],
   buffers: [],
   ledger: [],
   invoices: [],
@@ -194,6 +196,7 @@ interface StoreCtx {
   addLoan: (l: Omit<Loan, "id">) => void;
   updateLoan: (id: string, l: Partial<Loan>) => void;
   deleteLoan: (id: string) => void;
+  addLoanStatement: (s: Omit<LoanStatement, "id">) => void;
 
   /** Returns the generated id synchronously (same pattern as findOrCreateEntity), so callers that
    * need to link a related row (e.g. a PropertyBill's linkedExpenseId) can use it immediately. */
@@ -380,6 +383,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         depreciationItems,
         valuationSnapshots,
         loanBalanceSnapshots,
+        loanStatements,
         buffers,
         ledger,
         invoices,
@@ -411,6 +415,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         selectAll<DepreciationItem>(TABLES.depreciationItems),
         selectAll<ValuationSnapshot>(TABLES.valuationSnapshots),
         selectAll<LoanBalanceSnapshot>(TABLES.loanBalanceSnapshots),
+        selectAll<LoanStatement>(TABLES.loanStatements),
         selectAll<CashBuffer>(TABLES.buffers),
         selectAll<LedgerEntry>(TABLES.ledger),
         selectAll<TenantInvoice>(TABLES.invoices),
@@ -460,6 +465,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         depreciationItems,
         valuationSnapshots,
         loanBalanceSnapshots,
+        loanStatements,
         buffers,
         ledger,
         invoices,
@@ -619,6 +625,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Financial/paperwork trail — always purged, in both modes.
       void deleteWhere(TABLES.loans, "propertyId", id);
       void deleteWhereIn(TABLES.loanBalanceSnapshots, "loanId", loanIds);
+      void deleteWhereIn(TABLES.loanStatements, "loanId", loanIds);
       void deleteWhere(TABLES.expenses, "propertyId", id);
       void deleteWhere(TABLES.inspections, "propertyId", id);
       void deleteWhere(TABLES.maintenanceRequests, "propertyId", id);
@@ -659,6 +666,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         depreciationItems: s.depreciationItems.filter((d) => d.assetId !== assetId),
         valuationSnapshots: s.valuationSnapshots.filter((v) => v.assetId !== assetId),
         loanBalanceSnapshots: s.loanBalanceSnapshots.filter((ls) => !loanIds.includes(ls.loanId)),
+        loanStatements: s.loanStatements.filter((ls) => !loanIds.includes(ls.loanId)),
         loans: s.loans.filter((l) => l.propertyId !== id),
         expenses: s.expenses.filter((e) => e.propertyId !== id),
         inspections: s.inspections.filter((i) => i.propertyId !== id),
@@ -892,6 +900,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteLoan: (id) => {
       void deleteRow(TABLES.loans, id);
       set((s) => ({ ...s, loans: s.loans.filter((x) => x.id !== id) }));
+    },
+    addLoanStatement: (ls) => {
+      const row: LoanStatement = { ...ls, id: uid("lst") };
+      void upsertRow(TABLES.loanStatements, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, loanStatements: [...s.loanStatements, row] }));
     },
 
     addExpense: (e) => {

@@ -27,6 +27,12 @@ export async function routeInboundDocument(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<RouteResult> {
+  // "Upload statement to this loan" already asserts the document type — classifying it again
+  // would just be redundant Gemini cost/latency and a source of misroute risk.
+  if (input.loanIdHint) {
+    return { ...(await parseLoanStatement(supabase, input, emailMessageId)), documentType: "loan_statement" };
+  }
+
   // Best-effort — classification is still useful without it, so a lookup failure shouldn't
   // block the whole pipeline the way a genuine classification failure does below.
   const { data: entities } = await supabase.from("entities").select("name");

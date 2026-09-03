@@ -218,6 +218,27 @@ export interface LoanBalanceSnapshot {
   balance: number;
 }
 
+/** One row per applied "loan_statement" AI proposal — richer than LoanBalanceSnapshot (which
+ * only ever captures date+balance): carries the interest/principal split for that statement
+ * period and a link back to the source PDF, driving the per-loan Statement History chart/list. */
+export interface LoanStatement {
+  id: string;
+  created_at?: string;
+  loanId: string;
+  propertyId?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  interestCharged?: number;
+  principalPaid?: number;
+  repaymentsMade?: number;
+  closingBalance?: number;
+  sourceFileName?: string;
+  sourceFileData?: string;
+  /** Which ai_intake_proposals row this came from — traceability only, nothing reads it back. */
+  proposalId?: string;
+  appliedAt?: string;
+}
+
 /**
  * A cash-reserve target. currentBalance is entered manually by the landlord — there's no
  * "Cash Account" asset type yet, so this deliberately doesn't try to link to one; it's just a
@@ -1002,6 +1023,17 @@ export interface LoanStatementProposalPayload {
   interestCharged?: number;
   repaymentsMade?: number;
   closingBalance?: number;
+  /** The portion of repaymentsMade that reduced principal this period, when the statement
+   * breaks it out separately from interestCharged. */
+  principalPaid?: number;
+  /** The fixed repayment amount due each period, when stated — applied to Loan.monthlyEmi. */
+  emiAmountDue?: number;
+  /** YYYY-MM-DD — the next scheduled repayment date, when stated — applied to
+   * Loan.nextRepaymentDate/dueDayOfMonth. */
+  nextEmiDueDate?: string;
+  /** Last 4 digits of the loan/account number printed on the statement — applied to
+   * Loan.accountNumber. */
+  accountNumberLast4?: string;
   confidence: number;
 }
 
@@ -1203,6 +1235,7 @@ export interface AppState {
   depreciationItems: DepreciationItem[];
   valuationSnapshots: ValuationSnapshot[];
   loanBalanceSnapshots: LoanBalanceSnapshot[];
+  loanStatements: LoanStatement[];
   buffers: CashBuffer[];
   ledger: LedgerEntry[];
   invoices: TenantInvoice[];

@@ -8,6 +8,8 @@ interface UploadRequest {
   fileBase64?: string;
   fileName?: string;
   mimeType?: string;
+  /** Set by the "Upload statement to this loan" button — see NormalizedBillInput.loanIdHint. */
+  loanId?: string;
 }
 
 /** Gemini reads PDFs and common image formats natively as inlineData — anything else is rejected. */
@@ -70,6 +72,7 @@ Deno.serve(async (req) => {
     pdfBase64: body.fileBase64,
     pdfFileName: body.fileName,
     attachmentMimeType: body.mimeType,
+    loanIdHint: body.loanId,
   };
 
   const supabase = createClient(

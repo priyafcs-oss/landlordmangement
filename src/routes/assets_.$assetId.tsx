@@ -26,6 +26,7 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
+  FileUp,
 } from "lucide-react";
 import { usePersistedToggle } from "@/lib/hooks";
 import {
@@ -48,6 +49,8 @@ import { DocumentsContent } from "@/routes/documents";
 import { buildDocumentEntries } from "@/lib/documents";
 import { DocumentsSection } from "@/components/DocumentEntryRow";
 import { AddLoanDialog } from "@/components/AddLoanDialog";
+import { LoanStatementHistory } from "@/components/LoanStatementHistory";
+import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -117,21 +120,34 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
           <div key={l.id} className="rounded border p-3 text-xs">
             <div className="flex items-center justify-between gap-2">
               <div className="font-medium">{l.bankName}</div>
-              <AddLoanDialog
-                loan={l}
-                propertyId={propertyId}
-                trigger={
-                  <Button size="icon" variant="ghost" className="h-6 w-6">
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                }
-              />
+              <div className="flex items-center gap-1">
+                <UploadDocumentDialog
+                  loanId={l.id}
+                  trigger={
+                    <Button size="icon" variant="ghost" className="h-6 w-6" title="Upload statement">
+                      <FileUp className="h-3 w-3" />
+                    </Button>
+                  }
+                />
+                <AddLoanDialog
+                  loan={l}
+                  propertyId={propertyId}
+                  trigger={
+                    <Button size="icon" variant="ghost" className="h-6 w-6">
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  }
+                />
+              </div>
             </div>
             <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
               <span>Balance: {fmtCurrency(l.totalBalance)}</span>
               <span>Rate: {l.interestRate}%</span>
               <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
               <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
+            </div>
+            <div className="mt-2">
+              <LoanStatementHistory loanId={l.id} />
             </div>
           </div>
         ))}

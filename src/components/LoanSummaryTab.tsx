@@ -2,9 +2,11 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Pencil } from "lucide-react";
+import { Pencil, FileUp } from "lucide-react";
 import { fmtCurrency } from "@/lib/calculations";
 import { AddLoanDialog } from "@/components/AddLoanDialog";
+import { LoanStatementHistory } from "@/components/LoanStatementHistory";
+import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 
 /** Portfolio-wide loan rollup — reachable from the Assets left-nav. */
 export function LoanSummaryTab() {
@@ -32,6 +34,14 @@ export function LoanSummaryTab() {
                   <Badge variant={l.status === "Paid Off" ? "secondary" : l.status === "In Arrears" ? "destructive" : "outline"}>
                     {l.status ?? "Active"}
                   </Badge>
+                  <UploadDocumentDialog
+                    loanId={l.id}
+                    trigger={
+                      <Button size="icon" variant="ghost" className="h-6 w-6" title="Upload statement">
+                        <FileUp className="h-3 w-3" />
+                      </Button>
+                    }
+                  />
                   <AddLoanDialog
                     loan={l}
                     trigger={
@@ -46,6 +56,9 @@ export function LoanSummaryTab() {
                 <span>Balance: {fmtCurrency(l.totalBalance)}</span>
                 <span>Rate: {l.interestRate}%</span>
                 <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
+              </div>
+              <div className="mt-2">
+                <LoanStatementHistory loanId={l.id} />
               </div>
             </div>
           );

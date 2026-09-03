@@ -1618,7 +1618,7 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
 }
 
 function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateLoan, addExpense, markProposalApplied } = useStore();
+  const { state, updateLoan, addExpense, addLoanStatement, markProposalApplied } = useStore();
   const payload = proposal.payload as LoanStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [loanId, setLoanId] = useState(proposal.matchedLoanId ?? "");
@@ -1628,9 +1628,38 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
 
   const confirm = () => {
     if (!loanId) return toast.error("Select which loan this statement is for");
+    // Every field below is behind its own presence check — a statement missing emi/due-date/
+    // account-last-4 must never overwrite manually-entered data with a blank (updateRow's
+    // stripUndefined in lib/db.ts drops undefined keys too, as a second safety net).
     const patch: Record<string, unknown> = {};
     if (payload.closingBalance !== undefined) patch.totalBalance = payload.closingBalance;
+    if (payload.emiAmountDue !== undefined) patch.monthlyEmi = payload.emiAmountDue;
+    if (payload.nextEmiDueDate) {
+      patch.nextRepaymentDate = payload.nextEmiDueDate;
+      patch.dueDayOfMonth = new Date(payload.nextEmiDueDate).getDate();
+    }
+    if (payload.accountNumberLast4) patch.accountNumber = payload.accountNumberLast4;
+    // updateLoan snapshots totalBalance into loanBalanceSnapshots whenever the patch includes it
+    // (see store.tsx) — applying a statement will therefore also produce a balance-snapshot row
+    // alongside the loan_statements row added below. That's intentional overlap, not a bug: the
+    // snapshot feeds the portfolio-wide Dashboard trend (every balance-changing edit, manual or
+    // statement-driven), while loan_statements is this specific loan's interest/principal history.
     if (Object.keys(patch).length > 0) updateLoan(loanId, patch as Partial<Loan>);
+
+    addLoanStatement({
+      loanId,
+      propertyId,
+      periodStart: payload.periodStart,
+      periodEnd: payload.periodEnd,
+      interestCharged: payload.interestCharged,
+      principalPaid: payload.principalPaid,
+      repaymentsMade: payload.repaymentsMade,
+      closingBalance: payload.closingBalance,
+      sourceFileName: proposal.sourceFileName,
+      sourceFileData: proposal.sourceFileData,
+      proposalId: proposal.id,
+    });
+
     if (logInterest && payload.interestCharged) {
       const loan = state.loans.find((l) => l.id === loanId);
       addExpense({
@@ -1695,12 +1724,24 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
             <div className="font-medium">{payload.interestCharged ? fmtCurrency(payload.interestCharged) : "—"}</div>
           </div>
           <div>
+            <div className="text-muted-foreground">Principal paid</div>
+            <div className="font-medium">{payload.principalPaid ? fmtCurrency(payload.principalPaid) : "—"}</div>
+          </div>
+          <div>
             <div className="text-muted-foreground">Repayments made</div>
             <div className="font-medium">{payload.repaymentsMade ? fmtCurrency(payload.repaymentsMade) : "—"}</div>
           </div>
           <div>
             <div className="text-muted-foreground">Closing balance</div>
             <div className="font-medium">{payload.closingBalance ? fmtCurrency(payload.closingBalance) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">EMI due</div>
+            <div className="font-medium">{payload.emiAmountDue ? fmtCurrency(payload.emiAmountDue) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Next due date</div>
+            <div className="font-medium">{payload.nextEmiDueDate || "—"}</div>
           </div>
         </div>
 

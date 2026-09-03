@@ -25,6 +25,7 @@ export const TABLES = {
   depreciationItems: "depreciation_items",
   valuationSnapshots: "valuation_snapshots",
   loanBalanceSnapshots: "loan_balance_snapshots",
+  loanStatements: "loan_statements",
   buffers: "buffers",
   insurancePolicies: "insurance_policies",
   maintenanceItems: "maintenance_items",

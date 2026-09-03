@@ -10,7 +10,11 @@ Extract the fields defined in the response schema as strict JSON.
 - lender_name: the bank/lender's name.
 - period_start, period_end: YYYY-MM-DD, the statement's covering period, null if not stated.
 - interest_charged, repayments_made: the total amounts over this statement period, null if not stated.
+- principal_paid: the portion of repayments_made that reduced the principal this period, distinct from interest_charged — null if not stated or not broken out separately.
 - closing_balance: the loan's outstanding balance at the end of this statement, null if not stated.
+- emi_amount_due: the fixed repayment amount due each period (the EMI/instalment amount), null if not stated.
+- next_emi_due_date: YYYY-MM-DD, the next scheduled repayment date, null if not stated.
+- account_number_last4: the last 4 digits of the loan/account number printed on the statement, null if not shown.
 - document_date: the statement's own print date, distinct from period_end — null if not stated.
 - addressed_to: the account holder name printed on the statement — null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
@@ -24,7 +28,11 @@ const SCHEMA = {
     period_end: { type: "STRING", nullable: true },
     interest_charged: { type: "NUMBER", nullable: true },
     repayments_made: { type: "NUMBER", nullable: true },
+    principal_paid: { type: "NUMBER", nullable: true },
     closing_balance: { type: "NUMBER", nullable: true },
+    emi_amount_due: { type: "NUMBER", nullable: true },
+    next_emi_due_date: { type: "STRING", nullable: true },
+    account_number_last4: { type: "STRING", nullable: true },
     document_date: { type: "STRING", nullable: true },
     addressed_to: { type: "STRING", nullable: true },
     confidence: { type: "NUMBER" },
@@ -84,8 +92,22 @@ export async function parseLoanStatement(
 
   if (!parsed.lender_name) return { ok: false, error: "Missing lender_name" };
 
-  const matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "");
-  const matchedLoanId = await matchLoan(supabase, matchedPropertyId, parsed.lender_name);
+  // A loanIdHint (from the "Upload statement to this loan" button) already tells us exactly
+  // which loan/property this is for — deterministic, skipping the fuzzy address/lender matching
+  // below, which stays for the ordinary email/global-upload path where no hint exists.
+  let matchedPropertyId: string | null = null;
+  let matchedLoanId: string | null = null;
+  if (input.loanIdHint) {
+    const { data: loan } = await supabase.from("loans").select("id, propertyId").eq("id", input.loanIdHint).maybeSingle();
+    if (loan) {
+      matchedLoanId = loan.id;
+      matchedPropertyId = loan.propertyId ?? null;
+    }
+  }
+  if (!matchedLoanId) {
+    matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "");
+    matchedLoanId = await matchLoan(supabase, matchedPropertyId, parsed.lender_name);
+  }
 
   const row = {
     id: `prop_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
@@ -108,7 +130,11 @@ export async function parseLoanStatement(
       periodEnd: parsed.period_end ?? undefined,
       interestCharged: parsed.interest_charged ?? undefined,
       repaymentsMade: parsed.repayments_made ?? undefined,
+      principalPaid: parsed.principal_paid ?? undefined,
       closingBalance: parsed.closing_balance ?? undefined,
+      emiAmountDue: parsed.emi_amount_due ?? undefined,
+      nextEmiDueDate: parsed.next_emi_due_date ?? undefined,
+      accountNumberLast4: parsed.account_number_last4 ?? undefined,
       confidence: parsed.confidence,
     },
   };
