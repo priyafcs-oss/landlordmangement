@@ -3195,6 +3195,169 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
   );
 }
 
+function currentFiguresFormOf(prop: Property) {
+  return {
+    pmFeePercent: prop.pmFeePercent?.toString() ?? "",
+    councilRatesAnnual: prop.councilRatesAnnual?.toString() ?? "",
+    waterRatesAnnual: prop.waterRatesAnnual?.toString() ?? "",
+    insuranceAnnual: prop.insuranceAnnual?.toString() ?? "",
+    strataFeesAnnual: prop.strataFeesAnnual?.toString() ?? "",
+    landTaxAnnual: prop.landTaxAnnual?.toString() ?? "",
+    repairsMaintenanceAnnual: prop.repairsMaintenanceAnnual?.toString() ?? "",
+  };
+}
+
+/**
+ * The known-fixed-cost inputs that feed both the Annual Forecast card on the P&L tab and the
+ * Cost Base tab — one dedicated, always-editable place to review/correct them, rather than only
+ * reachable through the smaller "Edit property details" dialog. Confirming an AI-read bill
+ * (Council Rates, Water, Strata, or a no-instalment Insurance invoice) through Add Bill already
+ * writes its matching field here automatically (see ANNUAL_COST_FIELD in AddBillDialog) — this
+ * page is where that auto-filled figure shows up, and where it can be corrected or filled in by
+ * hand for anything that hasn't come through a bill yet (Land Tax, Repairs & Maintenance have no
+ * bill type of their own to auto-fill from).
+ */
+export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; tenants: Tenant[] }) {
+  const { updateProperty } = useStore();
+  const [form, setForm] = useState(() => currentFiguresFormOf(prop));
+
+  const activeTenant = tenants.find((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
+  const weeklyRent =
+    activeTenant &&
+    (activeTenant.rentFrequency === "Weekly"
+      ? activeTenant.rentAmount
+      : activeTenant.rentFrequency === "Fortnightly"
+        ? activeTenant.rentAmount / 2
+        : (activeTenant.rentAmount * 12) / 52);
+  const annualRent = weeklyRent ? weeklyRent * 52 : 0;
+
+  const pmFeePercent = parseFloat(form.pmFeePercent) || 0;
+  const annualPmCost = (annualRent * pmFeePercent) / 100;
+
+  const expenseFields: { key: keyof typeof form; label: string }[] = [
+    { key: "councilRatesAnnual", label: "Council Rates ($)" },
+    { key: "waterRatesAnnual", label: "Water Rates ($)" },
+    { key: "insuranceAnnual", label: "Insurance ($)" },
+    { key: "strataFeesAnnual", label: "Strata / Body Corp ($)" },
+    { key: "landTaxAnnual", label: "Land Tax ($)" },
+    { key: "repairsMaintenanceAnnual", label: "Repairs & Maintenance ($)" },
+  ];
+  const totalAnnualExpenses = expenseFields.reduce((s, f) => s + (parseFloat(form[f.key]) || 0), 0);
+
+  const save = () => {
+    updateProperty(prop.id, {
+      pmFeePercent: form.pmFeePercent ? parseFloat(form.pmFeePercent) : undefined,
+      councilRatesAnnual: form.councilRatesAnnual ? parseFloat(form.councilRatesAnnual) : undefined,
+      waterRatesAnnual: form.waterRatesAnnual ? parseFloat(form.waterRatesAnnual) : undefined,
+      insuranceAnnual: form.insuranceAnnual ? parseFloat(form.insuranceAnnual) : undefined,
+      strataFeesAnnual: form.strataFeesAnnual ? parseFloat(form.strataFeesAnnual) : undefined,
+      landTaxAnnual: form.landTaxAnnual ? parseFloat(form.landTaxAnnual) : undefined,
+      repairsMaintenanceAnnual: form.repairsMaintenanceAnnual ? parseFloat(form.repairsMaintenanceAnnual) : undefined,
+    });
+    toast.success("Current figures saved");
+  };
+
+  return (
+    <div className="space-y-4 text-sm">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Current Figures</CardTitle>
+          <div className="text-xs text-muted-foreground">
+            Annual costs used for the P&L Annual Forecast and Cost Base — confirming a matching AI-read bill (Council Rates,
+            Water, Strata, Insurance) fills these in automatically, and they're always editable here too.
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="space-y-2">
+            <div className="text-xs font-medium">Rental Income</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Weekly rent (from current tenancy)">
+                <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                  {weeklyRent ? fmtCurrency(weeklyRent) : "Not set — add a tenant under Tenancy"}
+                </div>
+              </Field>
+              <Field label="Annual rent">
+                <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">{fmtCurrency(annualRent)}</div>
+              </Field>
+            </div>
+          </div>
+
+          <div className="space-y-2 border-t pt-4">
+            <div className="text-xs font-medium">Property Management</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="PM fee rate (%)">
+                <Input
+                  type="number"
+                  value={form.pmFeePercent}
+                  onChange={(e) => setForm((f) => ({ ...f, pmFeePercent: e.target.value }))}
+                />
+              </Field>
+              <Field label="Annual PM cost">
+                <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">{fmtCurrency(annualPmCost)}</div>
+              </Field>
+            </div>
+          </div>
+
+          <div className="space-y-2 border-t pt-4">
+            <div className="text-xs font-medium">Annual Expenses</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {expenseFields.map((f) => (
+                <Field key={f.key} label={f.label}>
+                  <Input type="number" value={form[f.key]} onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))} />
+                </Field>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border-t pt-4">
+            <div>
+              <div className="text-xs text-muted-foreground">Total annual expenses</div>
+              <div className="text-lg font-semibold text-destructive">{fmtCurrency(totalAnnualExpenses)}</div>
+            </div>
+            <Button onClick={save}>Save Figures</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Current-year baseline figures from known fixed costs (Property's own annual-cost fields, the
+ * current loan, current tenants' rent) — not YTD actuals, not a prediction of rent changes,
+ * vacancies or rate rises. Shared by the P&L tab's "Annual Forecast" card and the Forecasts tab's
+ * year-0 starting point, so the two always agree on today's numbers.
+ */
+function computeAnnualBaseline(prop: Property, loan: Loan | undefined, tenants: Tenant[]) {
+  const activeTenants = tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
+  const annualRent = activeTenants.reduce(
+    (s, t) => s + (t.rentFrequency === "Weekly" ? t.rentAmount * 52 : t.rentFrequency === "Fortnightly" ? t.rentAmount * 26 : t.rentAmount * 12),
+    0,
+  );
+  const opExLines: [string, number][] = (
+    [
+      ["Council rates", prop.councilRatesAnnual ?? 0],
+      ["Water rates", prop.waterRatesAnnual ?? 0],
+      ["Insurance", prop.insuranceAnnual ?? 0],
+      ["Strata fees", prop.strataFeesAnnual ?? 0],
+      ["Land tax", prop.landTaxAnnual ?? 0],
+      ["Repairs & maintenance (est.)", prop.repairsMaintenanceAnnual ?? 0],
+    ] as [string, number][]
+  ).filter(([, amount]) => amount > 0);
+  const pmFee = prop.pmFeePercent ? (annualRent * prop.pmFeePercent) / 100 : 0;
+  if (prop.pmFeePercent) opExLines.push(["Property management fee (est.)", pmFee]);
+  const opEx = opExLines.reduce((s, [, amount]) => s + amount, 0);
+
+  const annualInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
+  const annualEmiTotal = loan ? loan.monthlyEmi * 12 : 0;
+  const annualPrincipal = loan && loan.loanType !== "Interest Only" ? Math.max(0, annualEmiTotal - annualInterest) : 0;
+  const totalLoanRepayments = loan ? annualInterest + annualPrincipal : 0;
+
+  const netCashflow = annualRent - opEx - totalLoanRepayments;
+
+  return { annualRent, opExLines, opEx, pmFee, annualInterest, annualPrincipal, totalLoanRepayments, netCashflow };
+}
+
 export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
@@ -3244,34 +3407,20 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   // Annual Forecast — a separate, full-year projection from known fixed costs (Property's own
   // annual-cost fields, the current loan, the current tenant's rent), not the YTD actuals above.
   // Only meaningful for the year still in progress; a closed past FY has actuals, not a forecast.
-  const activeTenantsForForecast = tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
-  const forecastAnnualRent = activeTenantsForForecast.reduce(
-    (s, t) => s + (t.rentFrequency === "Weekly" ? t.rentAmount * 52 : t.rentFrequency === "Fortnightly" ? t.rentAmount * 26 : t.rentAmount * 12),
-    0,
-  );
-  const forecastOpExLines: [string, number][] = (
-    [
-      ["Council rates", prop.councilRatesAnnual ?? 0],
-      ["Water rates", prop.waterRatesAnnual ?? 0],
-      ["Insurance", prop.insuranceAnnual ?? 0],
-      ["Strata fees", prop.strataFeesAnnual ?? 0],
-      ["Land tax", prop.landTaxAnnual ?? 0],
-      ["Repairs & maintenance (est.)", prop.repairsMaintenanceAnnual ?? 0],
-    ] as [string, number][]
-  ).filter(([, amount]) => amount > 0);
-  if (prop.pmFeePercent) forecastOpExLines.push(["Property management fee (est.)", (forecastAnnualRent * prop.pmFeePercent) / 100]);
-  const forecastOpEx = forecastOpExLines.reduce((s, [, amount]) => s + amount, 0);
+  const {
+    annualRent: forecastAnnualRent,
+    opExLines: forecastOpExLines,
+    opEx: forecastOpEx,
+    annualInterest: forecastAnnualInterest,
+    annualPrincipal: forecastAnnualPrincipal,
+    totalLoanRepayments: forecastTotalLoanRepayments,
+    netCashflow: forecastCashflow,
+  } = computeAnnualBaseline(prop, loan, tenants);
 
   const depreciationItems = state.depreciationItems.filter((d) => d.assetId === prop.assetId);
   const forecastDepreciation = buildDepreciationSchedule(depreciationItems).find((s) => s.fy === currentFY)?.total ?? 0;
 
-  const forecastAnnualInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
-  const forecastAnnualEmiTotal = loan ? loan.monthlyEmi * 12 : 0;
-  const forecastAnnualPrincipal = loan && loan.loanType !== "Interest Only" ? Math.max(0, forecastAnnualEmiTotal - forecastAnnualInterest) : 0;
-  const forecastTotalLoanRepayments = loan ? forecastAnnualInterest + forecastAnnualPrincipal : 0;
-
   const forecastNetIncome = forecastAnnualRent - forecastOpEx - forecastAnnualInterest;
-  const forecastCashflow = forecastAnnualRent - forecastOpEx - forecastTotalLoanRepayments;
   const forecastTaxableResult = forecastNetIncome - forecastDepreciation;
 
   return (

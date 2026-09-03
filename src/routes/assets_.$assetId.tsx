@@ -27,6 +27,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   FileUp,
+  SlidersHorizontal,
 } from "lucide-react";
 import { usePersistedToggle } from "@/lib/hooks";
 import {
@@ -36,6 +37,7 @@ import {
   PropertyBillsTab,
   PropertyCostBaseTab,
   DepreciationTab,
+  PropertyCurrentFiguresTab,
   PropertyPnLTab,
   PropertyTenancyTab,
   PropertyProvidersTab,
@@ -67,6 +69,7 @@ type Section =
   | "loans"
   | "costbase"
   | "depreciation"
+  | "currentFigures"
   | "pnl"
   | "providers"
   | "tenancy"
@@ -87,6 +90,7 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "loans", label: "Loans", icon: Landmark, group: "Finance" },
   { section: "costbase", label: "Cost Base", icon: Calculator, group: "Finance" },
   { section: "depreciation", label: "Depreciation", icon: LineChart, group: "Finance" },
+  { section: "currentFigures", label: "Current Figures", icon: SlidersHorizontal, group: "Finance" },
   { section: "pnl", label: "P&L", icon: FileText, group: "Finance" },
   { section: "tenancy", label: "Tenancy", icon: BadgeCheck, group: "Property" },
   { section: "insurance", label: "Insurance", icon: ShieldCheck, group: "Property" },
@@ -328,6 +332,7 @@ function PropertyAssetPage() {
         {section === "loans" && <PropertyLoansTab propertyId={prop.id} />}
         {section === "costbase" && <PropertyCostBaseTab prop={prop} expenses={expenses} depreciationItems={depreciationItems} />}
         {section === "depreciation" && <DepreciationTab assetId={asset.id} />}
+        {section === "currentFigures" && <PropertyCurrentFiguresTab prop={prop} tenants={tenants} />}
         {section === "pnl" && <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
         {section === "providers" && <PropertyProvidersTab propertyId={prop.id} />}
         {section === "tenancy" && <PropertyTenancyTab propertyId={prop.id} />}
