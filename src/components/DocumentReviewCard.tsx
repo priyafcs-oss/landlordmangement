@@ -133,7 +133,7 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
     <Dialog open={fullscreen} onOpenChange={setFullscreen}>
       <DialogContent className="flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-hidden p-4">
         <DialogTitle className="sr-only">{KIND_LABELS[proposal.kind] ?? proposal.kind}</DialogTitle>
-        <div className="grid flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_1fr]">
+        <div className="grid flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="overflow-y-auto">
             <DocumentPane proposal={proposal} expanded onToggleExpand={() => setFullscreen(false)} />
           </div>

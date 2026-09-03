@@ -368,6 +368,10 @@ export interface Loan {
   bankName: string;
   bsb?: string;
   accountNumber?: string;
+  /** The lender's own name for this loan product, e.g. "Home Loan", "Investment Loan", "Line of
+   * Credit" — free text since wording varies bank to bank. Distinct from loanType (the repayment
+   * structure) and purpose (why it was drawn) below. */
+  productType?: string;
   loanType?: "Principal & Interest" | "Interest Only";
   purpose?: "Investment" | "Owner Occupied";
   /** What the loan was originally drawn for — distinct from totalBalance, which is the current
@@ -1011,6 +1015,11 @@ export interface LoanDocumentProposalPayload {
   interestRate?: number;
   monthlyRepayment?: number;
   startDate?: string;
+  maturityDate?: string;
+  nextRepaymentDate?: string;
+  productType?: string;
+  bsb?: string;
+  accountNumber?: string;
   hasOffsetAccount?: boolean;
   confidence: number;
 }

@@ -289,7 +289,7 @@ export function BillDetailDialog({
           </div>
         </DialogHeader>
 
-        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-2")}>
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-2")}>
           <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
             <BillDocumentViewer
               fileName={selected.sourceFileName}

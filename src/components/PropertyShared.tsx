@@ -1558,8 +1558,16 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
       assetId: property.assetId,
       bankName: payload.lenderName,
       totalBalance: payload.loanAmount ?? 0,
+      originalAmount: payload.loanAmount,
       interestRate: payload.interestRate ?? 0,
       monthlyEmi: payload.monthlyRepayment ?? 0,
+      startDate: payload.startDate,
+      maturityDate: payload.maturityDate,
+      nextRepaymentDate: payload.nextRepaymentDate,
+      productType: payload.productType,
+      bsb: payload.bsb,
+      accountNumber: payload.accountNumber,
+      hasOffsetAccount: payload.hasOffsetAccount,
       status: "Active",
     });
     markProposalApplied(proposal.id, { propertyId });
@@ -1598,6 +1606,18 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           <div>
             <div className="text-muted-foreground">Start date</div>
             <div className="font-medium">{payload.startDate || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Maturity date</div>
+            <div className="font-medium">{payload.maturityDate || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Product type</div>
+            <div className="font-medium">{payload.productType || "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">BSB / account</div>
+            <div className="font-medium">{payload.bsb || payload.accountNumber ? `${payload.bsb ?? "—"} / ${payload.accountNumber ?? "—"}` : "—"}</div>
           </div>
           <div>
             <div className="text-muted-foreground">Offset account</div>

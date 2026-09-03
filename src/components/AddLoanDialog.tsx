@@ -35,6 +35,11 @@ interface ExtractResult {
   interest_rate?: number | null;
   monthly_repayment?: number | null;
   start_date?: string | null;
+  maturity_date?: string | null;
+  next_repayment_date?: string | null;
+  product_type?: string | null;
+  bsb?: string | null;
+  account_number?: string | null;
   has_offset_account?: boolean | null;
   confidence?: number;
 }
@@ -80,6 +85,7 @@ export function AddLoanDialog({
     bankName: loan?.bankName ?? "",
     bsb: loan?.bsb ?? "",
     accountNumber: loan?.accountNumber ?? "",
+    productType: loan?.productType ?? "",
     loanType: (loan?.loanType ?? "Principal & Interest") as Loan["loanType"],
     purpose: (loan?.purpose ?? "Investment") as Loan["purpose"],
     originalAmount: loan?.originalAmount !== undefined ? String(loan.originalAmount) : "",
@@ -155,6 +161,11 @@ export function AddLoanDialog({
         interestRate: data.interest_rate != null ? String(data.interest_rate) : f.interestRate,
         monthlyEmi: data.monthly_repayment != null ? String(data.monthly_repayment) : f.monthlyEmi,
         startDate: data.start_date || f.startDate,
+        maturityDate: data.maturity_date || f.maturityDate,
+        nextRepaymentDate: data.next_repayment_date || f.nextRepaymentDate,
+        productType: data.product_type || f.productType,
+        bsb: data.bsb || f.bsb,
+        accountNumber: data.account_number || f.accountNumber,
         hasOffsetAccount: data.has_offset_account ?? f.hasOffsetAccount,
       }));
 
@@ -189,6 +200,7 @@ export function AddLoanDialog({
       bankName: form.bankName.trim(),
       bsb: form.bsb.trim() || undefined,
       accountNumber: form.accountNumber.trim() || undefined,
+      productType: form.productType.trim() || undefined,
       loanType: form.loanType,
       purpose: form.purpose,
       originalAmount: form.originalAmount ? parseFloat(form.originalAmount) || 0 : undefined,
@@ -249,7 +261,7 @@ export function AddLoanDialog({
           className={
             isEdit
               ? "space-y-4 text-sm"
-              : "grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-[340px_1fr]")
+              : "grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")
           }
         >
           {!isEdit && (
@@ -362,6 +374,9 @@ export function AddLoanDialog({
             <div className="space-y-2 rounded-md border p-3">
               <div className="text-xs font-medium">Loan details</div>
               <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Product type">
+                  <Input value={form.productType} onChange={(e) => setForm((f) => ({ ...f, productType: e.target.value }))} placeholder="e.g. Home Loan" />
+                </Field>
                 <Field label="Loan type">
                   <Select value={form.loanType} onValueChange={(v) => setForm((f) => ({ ...f, loanType: v as Loan["loanType"] }))}>
                     <SelectTrigger>

@@ -618,7 +618,7 @@ export function AddBillDialog({
           </div>
         </DialogHeader>
 
-        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_1fr]" : "md:grid-cols-[340px_1fr]")}>
+        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")}>
           <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
             <div
               className={

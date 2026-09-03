@@ -207,6 +207,15 @@ export interface ParsedLoanDocumentFields {
   interest_rate: number | null;
   monthly_repayment: number | null;
   start_date: string | null; // YYYY-MM-DD
+  /** YYYY-MM-DD — when the loan term ends. Null if not stated. */
+  maturity_date: string | null;
+  /** YYYY-MM-DD — the first/next scheduled repayment date. Null if not stated. */
+  next_repayment_date: string | null;
+  /** The lender's own name for this loan product, e.g. "Home Loan", "Investment Loan", "Line of
+   * Credit" — free text since wording varies bank to bank. Null if not stated. */
+  product_type: string | null;
+  bsb: string | null;
+  account_number: string | null;
   has_offset_account: boolean | null;
   /** The document's own date — distinct from start_date (loan commencement can post-date it). Null if not stated. */
   document_date: string | null;

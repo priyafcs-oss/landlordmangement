@@ -9,7 +9,12 @@ Extract the fields defined in the response schema as strict JSON.
 - property_address: the property this loan is secured against.
 - lender_name: the bank/lender's name.
 - loan_amount, interest_rate (as a percentage, e.g. 6.25 not 0.0625), monthly_repayment: null if not stated.
-- start_date: YYYY-MM-DD, null if not stated.
+- start_date: YYYY-MM-DD, when the loan commences — null if not stated.
+- maturity_date: YYYY-MM-DD, when the loan term ends — null if not stated.
+- next_repayment_date: YYYY-MM-DD, the first/next scheduled repayment date — null if not stated.
+- product_type: the lender's own name for this loan product, e.g. "Home Loan", "Investment Loan", "Line of Credit" — null if not stated.
+- bsb: the BSB printed on the document, null if not shown.
+- account_number: the loan/account number printed on the document, null if not shown.
 - has_offset_account: true/false if the document mentions an offset account attached to this loan, else null.
 - document_date: the document's own date, distinct from start_date (loan commencement can post-date the document) — null if not stated.
 - addressed_to: the borrower's name as printed — null if not stated.
@@ -24,6 +29,11 @@ const SCHEMA = {
     interest_rate: { type: "NUMBER", nullable: true },
     monthly_repayment: { type: "NUMBER", nullable: true },
     start_date: { type: "STRING", nullable: true },
+    maturity_date: { type: "STRING", nullable: true },
+    next_repayment_date: { type: "STRING", nullable: true },
+    product_type: { type: "STRING", nullable: true },
+    bsb: { type: "STRING", nullable: true },
+    account_number: { type: "STRING", nullable: true },
     has_offset_account: { type: "BOOLEAN", nullable: true },
     document_date: { type: "STRING", nullable: true },
     addressed_to: { type: "STRING", nullable: true },
@@ -85,6 +95,11 @@ export async function parseLoanDocument(
       interestRate: parsed.interest_rate ?? undefined,
       monthlyRepayment: parsed.monthly_repayment ?? undefined,
       startDate: parsed.start_date ?? undefined,
+      maturityDate: parsed.maturity_date ?? undefined,
+      nextRepaymentDate: parsed.next_repayment_date ?? undefined,
+      productType: parsed.product_type ?? undefined,
+      bsb: parsed.bsb ?? undefined,
+      accountNumber: parsed.account_number ?? undefined,
       hasOffsetAccount: parsed.has_offset_account ?? undefined,
       confidence: parsed.confidence,
     },
