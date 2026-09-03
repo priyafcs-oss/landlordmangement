@@ -472,8 +472,8 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
         status: "approved",
         source: "upload",
         notes: "Settlement adjustment from a PEXA record / Statement of Adjustments.",
-        invoiceFileName: proposal.sourceFileName,
-        invoiceFileData: proposal.sourceFileData,
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
       });
     }
     markProposalApplied(proposal.id, { propertyId });
@@ -849,8 +849,8 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         rawPropertyAddress: proposal.rawPropertyAddress,
         sourceSubject: proposal.sourceSubject,
         sourceEmailBody: proposal.sourceEmailBody,
-        invoiceFileName: proposal.sourceFileName,
-        invoiceFileData: proposal.sourceFileData,
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
       });
       if (recharge) {
         rechargedCount++;
@@ -1646,8 +1646,8 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         source: "upload",
         periodStart: payload.periodStart || undefined,
         periodEnd: payload.periodEnd || undefined,
-        invoiceFileName: proposal.sourceFileName,
-        invoiceFileData: proposal.sourceFileData,
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
       });
     }
     markProposalApplied(proposal.id, { propertyId });
@@ -1764,8 +1764,8 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         rechargeToTenant: false,
         status: "approved",
         source: "upload",
-        invoiceFileName: proposal.sourceFileName,
-        invoiceFileData: proposal.sourceFileData,
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
       });
       count++;
     });

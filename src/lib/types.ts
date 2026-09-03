@@ -385,13 +385,20 @@ export interface Expense {
    * (not zero) for rows where GST was never captured, so a Transactions GST total can tell "no GST
    * on this line" apart from "GST unknown/not entered". */
   gst?: number;
-  /** The primary invoice/receipt file, if any — kept for backward compatibility with every
-   * existing reader (Transactions row link, Documents, markBillPaid, ...). A transaction that
-   * genuinely needs more than one file (e.g. the agent statement that first reported a deduction,
-   * PLUS the actual bill PDF forwarded later) puts the rest in additionalFiles below rather than
-   * overwriting this one. */
+  /** The actual bill/receipt for this specific line, if one was captured separately from the
+   * document that first reported it — kept for backward compatibility with every existing reader
+   * (Transactions row link, Documents, markBillPaid, ...). Left unset for a line whose only
+   * evidence is the statement it was extracted from (see sourceFileName below); a landlord who
+   * later forwards the real invoice for one of those attaches it here (or via additionalFiles). */
   invoiceFileName?: string;
   invoiceFileData?: string;
+  /** The statement/letter this line was extracted from, when it's a multi-line document rather
+   * than a bill of its own (e.g. an agent statement's deduction, a bank/loan statement's interest
+   * line, a PEXA settlement adjustment) — same split ledger_entries already has (see
+   * LedgerEntry.sourceFileName). Distinct from invoiceFileName so Transactions can tell "here's
+   * the statement this was read off" apart from "here's the actual invoice for this line". */
+  sourceFileName?: string;
+  sourceFileData?: string;
   /** Extra files/photos beyond the primary invoice above — same (fileName, fileData) shape,
    * shown/managed alongside it in AddTransactionDialog. */
   additionalFiles?: { fileName: string; fileData: string }[];
