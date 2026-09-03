@@ -2,8 +2,7 @@ import { useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Field } from "@/components/Field";
+import { Field, Stat } from "@/components/Field";
 import {
   Select,
   SelectContent,
@@ -21,8 +20,9 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, Eye, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { todayISO } from "@/lib/calculations";
+import { todayISO, fmtCurrency, itemAnnualClaims } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
+import { matchPropertyByAddress } from "@/lib/addressMatch";
 import {
   openBillDocument,
   MAX_AI_UPLOAD_BYTES,
@@ -37,10 +37,14 @@ import type { DepreciationItem } from "@/lib/types";
 
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
+type Division = NonNullable<DepreciationItem["division"]>;
+type Method = NonNullable<DepreciationItem["method"]>;
+
 interface AssetRow {
   key: string;
   description: string;
-  division: NonNullable<DepreciationItem["division"]>;
+  division: Division;
+  method: Method;
   cost: string;
   lifeYears: string;
 }
@@ -52,33 +56,48 @@ interface ExtractResult {
   report_reference?: string;
   report_date?: string;
   effective_from?: string;
+  property_address?: string;
   items?: { description: string; division?: string; cost: number; life_years?: number }[];
+}
+
+/** Division 43 (capital works) is only ever claimable on a straight-line basis under ATO rules —
+ * unlike Div 40 (plant & equipment), it has no diminishing-value option, so the Method field is
+ * locked to Prime Cost whenever a row's tax category is Div 43. */
+function defaultMethodForDivision(division: Division): Method {
+  return division === "Div 43" ? "Prime Cost" : "Diminishing Value";
 }
 
 const blankAsset = (): AssetRow => ({
   key: uid("da"),
   description: "",
   division: "Div 40",
+  method: defaultMethodForDivision("Div 40"),
   cost: "",
   lifeYears: "",
 });
 
-function mapDivision(raw?: string): NonNullable<DepreciationItem["division"]> {
+function mapDivision(raw?: string): Division {
   return (raw ?? "").toLowerCase().includes("43") || (raw ?? "").toLowerCase().includes("capital works") ? "Div 43" : "Div 40";
 }
 
 /**
  * Bulk QS-report upload for depreciation — mirrors AddBillDialog's document-pane-plus-extract
  * shape. Always scoped to a single already-known assetId (called from a property's own
- * Depreciation tab), so unlike AddBillDialog there's no property picker.
+ * Depreciation tab), so unlike AddBillDialog there's no property picker — the property section
+ * below is read-only context plus an address-mismatch check, not a switcher.
  */
 export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
-  const { addDepreciationItem } = useStore();
+  const { state, addDepreciationItem } = useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [extractOk, setExtractOk] = useState(false);
   const [extractEmpty, setExtractEmpty] = useState(false);
+  const [extractedAddress, setExtractedAddress] = useState<string | undefined>();
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+
+  const asset = state.assets.find((a) => a.id === assetId);
+  const prop = asset ? state.properties.find((p) => p.id === asset.linkedPropertyId || p.assetId === asset.id) : undefined;
 
   const blankForm = () => ({
     quantitySurveyor: "",
@@ -102,6 +121,8 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     setItems([blankAsset()]);
     setExtractOk(false);
     setExtractEmpty(false);
+    setExtractedAddress(undefined);
+    setBannerDismissed(false);
   };
 
   const extract = async (file: File) => {
@@ -139,16 +160,22 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         reportDate: data.report_date ?? f.reportDate,
         effectiveFrom: data.effective_from ?? f.effectiveFrom,
       }));
+      setExtractedAddress(data.property_address || undefined);
+      setBannerDismissed(false);
 
       if (data.items?.length) {
         setItems(
-          data.items.map((it) => ({
-            key: uid("da"),
-            description: it.description ?? "",
-            division: mapDivision(it.division),
-            cost: it.cost ? String(it.cost) : "",
-            lifeYears: it.life_years ? String(it.life_years) : String(suggestEffectiveLife(it.description ?? "") ?? ""),
-          })),
+          data.items.map((it) => {
+            const division = mapDivision(it.division);
+            return {
+              key: uid("da"),
+              description: it.description ?? "",
+              division,
+              method: defaultMethodForDivision(division),
+              cost: it.cost ? String(it.cost) : "",
+              lifeYears: it.life_years ? String(it.life_years) : String(suggestEffectiveLife(it.description ?? "") ?? ""),
+            };
+          }),
         );
         setExtractOk(true);
         toast.success(`Extracted ${data.items.length} asset(s) — review before saving`);
@@ -175,11 +202,48 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
   const updateItem = (key: string, patch: Partial<AssetRow>) =>
     setItems((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
+  const onDivisionChange = (row: AssetRow, division: Division) =>
+    // Switching a row to Div 43 forces Prime Cost along with it — see defaultMethodForDivision.
+    updateItem(row.key, { division, method: division === "Div 43" ? "Prime Cost" : row.method });
+
   const onDescriptionBlur = (row: AssetRow) => {
     if (row.lifeYears) return;
     const suggested = suggestEffectiveLife(row.description);
     if (suggested) updateItem(row.key, { lifeYears: String(suggested) });
   };
+
+  // Every item in one report shares the same start date for pro-rating its first year's claim —
+  // effectiveFrom (settlement/purchase date) if known, else the report's own date, else today.
+  const startISO = form.effectiveFrom || form.reportDate || todayISO();
+  const itemPreviews = items.map((it) => {
+    const cost = parseFloat(it.cost) || 0;
+    const life = parseFloat(it.lifeYears) || 1;
+    return { key: it.key, division: it.division, cost, claims: cost > 0 ? itemAnnualClaims(cost, life, it.method, startISO) : [] };
+  });
+  const totalClaimable = itemPreviews.reduce((s, p) => s + p.cost, 0);
+  const year1Div40 = itemPreviews.filter((p) => p.division === "Div 40").reduce((s, p) => s + (p.claims[0] ?? 0), 0);
+  const year1Div43 = itemPreviews.filter((p) => p.division === "Div 43").reduce((s, p) => s + (p.claims[0] ?? 0), 0);
+  const scheduleYears = items.reduce((max, it) => Math.max(max, parseFloat(it.lifeYears) || 0), 0);
+  const maxYears = Math.min(50, Math.ceil(scheduleYears));
+  const annualRows = Array.from({ length: maxYears }, (_, i) => {
+    const div40 = itemPreviews.filter((p) => p.division === "Div 40").reduce((s, p) => s + (p.claims[i] ?? 0), 0);
+    const div43 = itemPreviews.filter((p) => p.division === "Div 43").reduce((s, p) => s + (p.claims[i] ?? 0), 0);
+    return { year: i + 1, div40, div43, total: div40 + div43 };
+  });
+
+  const propertyMismatch = (() => {
+    if (!extractedAddress || !prop) return undefined;
+    const matched = matchPropertyByAddress(state.properties, extractedAddress);
+    if (matched && matched.id !== prop.id) return { extracted: extractedAddress, actual: prop.alias || prop.address };
+    return undefined;
+  })();
+
+  const missingAssetDetails = items.some((it) => it.description.trim() && !(parseFloat(it.cost) > 0 && parseFloat(it.lifeYears) > 0));
+  const bannerReasons: string[] = [];
+  if (extractEmpty) bannerReasons.push("No asset line items could be read from this file — add them manually below.");
+  if (missingAssetDetails) bannerReasons.push("Some assets are missing a cost or an effective life.");
+  if (propertyMismatch) bannerReasons.push(`The report reads as "${propertyMismatch.extracted}" — different to ${propertyMismatch.actual}. Check the address before saving.`);
+  const showBanner = !bannerDismissed && !!form.sourceFileName && bannerReasons.length > 0;
 
   const save = () => {
     if (!assetId) return toast.error("No property/asset selected");
@@ -194,7 +258,7 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         purchaseCost: parseFloat(it.cost) || 0,
         effectiveLifeYears: parseFloat(it.lifeYears) || 1,
         purchaseDate: form.effectiveFrom || undefined,
-        method: "Diminishing Value",
+        method: it.method,
         division: it.division,
         reportId,
         quantitySurveyor: form.quantitySurveyor || undefined,
@@ -209,6 +273,18 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     setOpen(false);
     reset();
     toast.success(`Added ${valid.length} depreciation item(s) from report`);
+  };
+
+  const keepDocumentFiledOnly = () => {
+    setOpen(false);
+    reset();
+    toast("Closed without saving any depreciation items.");
+  };
+
+  const addMissingAssetDetails = () => {
+    setBannerDismissed(true);
+    if (items.every((it) => !it.description.trim())) addItem();
+    toast("Fill in the highlighted assets below, then save.");
   };
 
   return (
@@ -283,18 +359,56 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
                   <CheckCircle2 className="h-3 w-3 shrink-0" /> Assets extracted — review before saving.
                 </div>
               )}
-              {extractEmpty && (
-                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  Couldn't find asset line items — the document is still attached, fill in the assets manually.
-                </div>
-              )}
             </div>
 
             <BillDocumentViewer fileName={form.sourceFileName} fileData={form.sourceFileData} />
           </div>
 
           <div className="space-y-4 overflow-y-auto pl-1">
+            {showBanner && (
+              <div className="space-y-2 rounded-md border border-amber-400 bg-amber-50 p-3 text-xs text-amber-900">
+                <div className="flex items-center gap-1 font-medium">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Check the incomplete report details
+                </div>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {bannerReasons.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBannerDismissed(true)}>
+                    I reviewed the shown details
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addMissingAssetDetails}>
+                    Add missing asset details
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={keepDocumentFiledOnly}>
+                    Keep document filed only
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Stat label="Total claimable" value={fmtCurrency(totalClaimable)} strong />
+              <Stat label="Year 1 · Div 40" value={fmtCurrency(year1Div40)} />
+              <Stat label="Year 1 · Div 43" value={fmtCurrency(year1Div43)} />
+              <Stat label="Schedule" value={scheduleYears > 0 ? `${Math.ceil(scheduleYears)} yrs` : "—"} />
+            </div>
+
+            {prop && (
+              <div className="space-y-1 rounded-md border p-3">
+                <div className="text-xs font-medium text-muted-foreground">Property</div>
+                <div className="text-sm">{prop.alias || prop.address}</div>
+                {propertyMismatch && (
+                  <div className="flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    <AlertTriangle className="h-3 w-3 shrink-0" />
+                    The report reads as "{propertyMismatch.extracted}" — different to the property you opened this from ({propertyMismatch.actual}). Please check the address before saving.
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Quantity surveyor">
                 <Input value={form.quantitySurveyor} onChange={(e) => setForm((f) => ({ ...f, quantitySurveyor: e.target.value }))} />
@@ -311,43 +425,97 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
             </div>
 
             <div className="space-y-2 rounded-md border p-3">
-              <div className="text-xs font-medium">Depreciating assets</div>
-              {items.map((it) => (
-                <div key={it.key} className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
-                  <Field label="Description">
-                    <Input
-                      value={it.description}
-                      onChange={(e) => updateItem(it.key, { description: e.target.value })}
-                      onBlur={() => onDescriptionBlur(it)}
-                      placeholder="e.g. hot water system, carpet"
-                    />
-                  </Field>
-                  <Field label="Division">
-                    <Select value={it.division} onValueChange={(v) => updateItem(it.key, { division: v as AssetRow["division"] })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Div 40">Div 40</SelectItem>
-                        <SelectItem value="Div 43">Div 43</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Cost">
-                    <Input type="number" value={it.cost} onChange={(e) => updateItem(it.key, { cost: e.target.value })} />
-                  </Field>
-                  <Field label="Life (yrs)">
-                    <Input type="number" value={it.lifeYears} onChange={(e) => updateItem(it.key, { lifeYears: e.target.value })} />
-                  </Field>
-                  <Button size="icon" variant="ghost" onClick={() => removeItem(it.key)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium">Depreciating assets</div>
+                <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={addItem}>
+                  <Plus className="h-3 w-3" /> Add item
+                </Button>
+              </div>
+              {items.map((it, idx) => (
+                <div key={it.key} className="space-y-2 rounded border p-2">
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <Field label="Asset">
+                        <Input
+                          value={it.description}
+                          onChange={(e) => updateItem(it.key, { description: e.target.value })}
+                          onBlur={() => onDescriptionBlur(it)}
+                          placeholder="e.g. hot water system, carpet"
+                        />
+                      </Field>
+                    </div>
+                    <Button size="icon" variant="ghost" onClick={() => removeItem(it.key)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    <Field label="Tax category">
+                      <Select value={it.division} onValueChange={(v) => onDivisionChange(it, v as Division)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Div 40">Division 40</SelectItem>
+                          <SelectItem value="Div 43">Division 43</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Opening value">
+                      <Input type="number" value={it.cost} onChange={(e) => updateItem(it.key, { cost: e.target.value })} />
+                    </Field>
+                    <Field label="Method">
+                      <Select
+                        value={it.method}
+                        onValueChange={(v) => updateItem(it.key, { method: v as Method })}
+                        disabled={it.division === "Div 43"}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Prime Cost">Prime cost</SelectItem>
+                          <SelectItem value="Diminishing Value">Diminishing value</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Effective life (yrs)">
+                      <Input type="number" value={it.lifeYears} onChange={(e) => updateItem(it.key, { lifeYears: e.target.value })} />
+                    </Field>
+                    <Field label="Year 1 deduction">
+                      <Input disabled value={fmtCurrency(itemPreviews[idx]?.claims[0] ?? 0)} />
+                    </Field>
+                  </div>
                 </div>
               ))}
-              <Button size="sm" variant="outline" className="gap-1" onClick={addItem}>
-                <Plus className="h-3 w-3" /> Add item
-              </Button>
             </div>
+
+            {annualRows.length > 0 && (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="text-xs font-medium">Annual deductions (from the report)</div>
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-background text-muted-foreground">
+                      <tr>
+                        <th className="py-1 text-left font-normal">Year</th>
+                        <th className="py-1 text-right font-normal">Div 40</th>
+                        <th className="py-1 text-right font-normal">Div 43</th>
+                        <th className="py-1 text-right font-normal">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {annualRows.map((r) => (
+                        <tr key={r.year} className="border-t">
+                          <td className="py-1">Year {r.year}</td>
+                          <td className="py-1 text-right">{fmtCurrency(r.div40)}</td>
+                          <td className="py-1 text-right">{fmtCurrency(r.div43)}</td>
+                          <td className="py-1 text-right font-medium">{fmtCurrency(r.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>

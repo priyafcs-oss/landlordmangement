@@ -474,12 +474,53 @@ export interface DepreciationScheduleYear {
 }
 
 /**
- * Projects each item's annual depreciation claim across financial years — Prime Cost is a flat
- * cost/life every year for `life` years; Diminishing Value is a standard 200%-declining-balance
- * projection with the first year pro-rated by days held. Simplified (no low-value pooling, no
- * part-year private-use apportionment beyond first-year day-counting, no pre-2017 150% DV rate) —
- * matches the rigor of the rest of this app's finance screens, not a full ATO Div 40/43 engine.
+ * A single item's annual depreciation claim, indexed by year-since-start (index 0 = the first,
+ * pro-rated year) rather than by financial year — the building block `buildDepreciationSchedule`
+ * folds into a portfolio-wide FY-keyed view, and that the "Add depreciation report" dialog reuses
+ * directly to preview a report's own Year 1/2/3… schedule before it has an assetId's worth of
+ * financial-year history to anchor to. Prime Cost is a flat cost/life every year for `life` years;
+ * Diminishing Value is a standard 200%-declining-balance projection. Both pro-rate their first
+ * entry by days held between `startISO` and that financial year's end (30 June), so a mid-year
+ * start doesn't overstate year one. Simplified (no low-value pooling, no part-year private-use
+ * apportionment beyond first-year day-counting, no pre-2017 150% DV rate) — matches the rigor of
+ * the rest of this app's finance screens, not a full ATO Div 40/43 engine.
  */
+export function itemAnnualClaims(cost: number, effectiveLifeYears: number, method: DepreciationItem["method"], startISO: string): number[] {
+  const life = effectiveLifeYears > 0 ? effectiveLifeYears : 1;
+  const start = startISO || todayISO();
+  const { end: firstFyEnd } = fyRange(ausFinancialYear(start));
+  const daysHeldFirstYear = Math.max(1, Math.min(365, Math.round((new Date(firstFyEnd).getTime() - new Date(start).getTime()) / 86400000) + 1));
+
+  const claims: number[] = [];
+  if (method === "Prime Cost") {
+    // Pro-rate the first year by days held — otherwise a mid-year purchase claimed a full year's
+    // cost/life in its first year (overstating that year) and the schedule fell short of `cost`
+    // after exactly `life` years instead of finishing with a matching partial claim at the tail.
+    const annual = cost / life;
+    let claimed = 0;
+    let i = 0;
+    while (claimed < cost - 0.01 && i < Math.ceil(life) + 1) {
+      const claim = Math.min(i === 0 ? annual * (daysHeldFirstYear / 365) : annual, cost - claimed);
+      claims.push(claim);
+      claimed += claim;
+      i++;
+    }
+  } else {
+    let opening = cost;
+    const rate = 2 / life;
+    let i = 0;
+    while (opening > 1 && i < Math.ceil(life) + 1) {
+      const claim = Math.min(i === 0 ? opening * rate * (daysHeldFirstYear / 365) : opening * rate, opening);
+      claims.push(claim);
+      opening -= claim;
+      i++;
+    }
+  }
+  return claims;
+}
+
+/** Projects every item's annual depreciation claim across financial years — see
+ * `itemAnnualClaims` for the per-item math this aggregates. */
 export function buildDepreciationSchedule(items: DepreciationItem[]): DepreciationScheduleYear[] {
   const byFy = new Map<string, { div40: number; div43: number }>();
   const addToFy = (fy: string, division: "Div 40" | "Div 43", amount: number) => {
@@ -490,57 +531,11 @@ export function buildDepreciationSchedule(items: DepreciationItem[]): Depreciati
   };
 
   for (const item of items) {
-    const cost = item.purchaseCost;
-    const life = item.effectiveLifeYears > 0 ? item.effectiveLifeYears : 1;
     const division = item.division ?? "Div 40";
-    const method = item.method ?? "Diminishing Value";
     const start = item.purchaseDate || item.effectiveFrom || todayISO();
-    const startFy = ausFinancialYear(start);
-    const startYear = parseInt(startFy.split("-")[0], 10);
-
-    if (method === "Prime Cost") {
-      // Pro-rate the first year by days held, same as Diminishing Value below — otherwise a
-      // mid-year purchase claimed a full year's cost/life in its first FY (overstating that year)
-      // and the schedule fell short of `cost` after exactly `life` years instead of finishing with
-      // a matching partial claim in a final part-year.
-      const annual = cost / life;
-      let claimed = 0;
-      let i = 0;
-      while (claimed < cost - 0.01 && i < Math.ceil(life) + 1) {
-        const fy = `${startYear + i}-${startYear + i + 1}`;
-        let claim: number;
-        if (i === 0) {
-          const { end } = fyRange(fy);
-          const daysHeld = Math.max(1, Math.min(365, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1));
-          claim = annual * (daysHeld / 365);
-        } else {
-          claim = annual;
-        }
-        claim = Math.min(claim, cost - claimed);
-        addToFy(fy, division, claim);
-        claimed += claim;
-        i++;
-      }
-    } else {
-      let opening = cost;
-      const rate = 2 / life;
-      let i = 0;
-      while (opening > 1 && i < Math.ceil(life) + 1) {
-        const fy = `${startYear + i}-${startYear + i + 1}`;
-        let claim: number;
-        if (i === 0) {
-          const { end } = fyRange(fy);
-          const daysHeld = Math.max(1, Math.min(365, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1));
-          claim = opening * rate * (daysHeld / 365);
-        } else {
-          claim = opening * rate;
-        }
-        claim = Math.min(claim, opening);
-        addToFy(fy, division, claim);
-        opening -= claim;
-        i++;
-      }
-    }
+    const startYear = parseInt(ausFinancialYear(start).split("-")[0], 10);
+    const claims = itemAnnualClaims(item.purchaseCost, item.effectiveLifeYears, item.method ?? "Diminishing Value", start);
+    claims.forEach((claim, i) => addToFy(`${startYear + i}-${startYear + i + 1}`, division, claim));
   }
 
   return Array.from(byFy.entries())
