@@ -3241,6 +3241,39 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   const netCashflow = totalIncome - totalExpenses;
   const transactionCount = rentEntries.length + outgoing.length + extraIncome.length;
 
+  // Annual Forecast — a separate, full-year projection from known fixed costs (Property's own
+  // annual-cost fields, the current loan, the current tenant's rent), not the YTD actuals above.
+  // Only meaningful for the year still in progress; a closed past FY has actuals, not a forecast.
+  const activeTenantsForForecast = tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
+  const forecastAnnualRent = activeTenantsForForecast.reduce(
+    (s, t) => s + (t.rentFrequency === "Weekly" ? t.rentAmount * 52 : t.rentFrequency === "Fortnightly" ? t.rentAmount * 26 : t.rentAmount * 12),
+    0,
+  );
+  const forecastOpExLines: [string, number][] = (
+    [
+      ["Council rates", prop.councilRatesAnnual ?? 0],
+      ["Water rates", prop.waterRatesAnnual ?? 0],
+      ["Insurance", prop.insuranceAnnual ?? 0],
+      ["Strata fees", prop.strataFeesAnnual ?? 0],
+      ["Land tax", prop.landTaxAnnual ?? 0],
+      ["Repairs & maintenance (est.)", prop.repairsMaintenanceAnnual ?? 0],
+    ] as [string, number][]
+  ).filter(([, amount]) => amount > 0);
+  if (prop.pmFeePercent) forecastOpExLines.push(["Property management fee (est.)", (forecastAnnualRent * prop.pmFeePercent) / 100]);
+  const forecastOpEx = forecastOpExLines.reduce((s, [, amount]) => s + amount, 0);
+
+  const depreciationItems = state.depreciationItems.filter((d) => d.assetId === prop.assetId);
+  const forecastDepreciation = buildDepreciationSchedule(depreciationItems).find((s) => s.fy === currentFY)?.total ?? 0;
+
+  const forecastAnnualInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
+  const forecastAnnualEmiTotal = loan ? loan.monthlyEmi * 12 : 0;
+  const forecastAnnualPrincipal = loan && loan.loanType !== "Interest Only" ? Math.max(0, forecastAnnualEmiTotal - forecastAnnualInterest) : 0;
+  const forecastTotalLoanRepayments = loan ? forecastAnnualInterest + forecastAnnualPrincipal : 0;
+
+  const forecastNetIncome = forecastAnnualRent - forecastOpEx - forecastAnnualInterest;
+  const forecastCashflow = forecastAnnualRent - forecastOpEx - forecastTotalLoanRepayments;
+  const forecastTaxableResult = forecastNetIncome - forecastDepreciation;
+
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap gap-1.5">
@@ -3365,6 +3398,104 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
           </Card>
         </div>
       </div>
+
+      {isCurrentFY && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Annual Forecast — FY {fy}</CardTitle>
+            <div className="text-xs text-muted-foreground">
+              Projected full-year figures from known fixed costs — current rent, the property's own annual-cost fields, and the
+              current loan. Not the YTD actuals above, and not a prediction of rent changes, vacancies or rate rises.
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-emerald-600">Income</div>
+                  <div className="flex justify-between">
+                    <span>{forecastAnnualRent > 0 ? "Rental income" : "Rental income (not set)"}</span>
+                    <span>{fmtCurrency(forecastAnnualRent)}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-destructive">Operating expenses</div>
+                  {forecastOpExLines.length === 0 && (
+                    <div className="text-xs text-muted-foreground">No annual cost fields set — add them under Details.</div>
+                  )}
+                  {forecastOpExLines.map(([label, amount]) => (
+                    <div key={label} className="flex justify-between">
+                      <span>{label}</span>
+                      <span>{fmtCurrency(amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between border-t pt-1 font-medium">
+                    <span>Total operating expenses</span>
+                    <span>{fmtCurrency(forecastOpEx)}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-xs font-medium">Depreciation</div>
+                  {depreciationItems.length === 0 && <div className="text-xs text-muted-foreground">No depreciation schedule set up.</div>}
+                  <div className="flex justify-between border-t pt-1 font-medium">
+                    <span>Total depreciation</span>
+                    <span>{fmtCurrency(forecastDepreciation)}</span>
+                  </div>
+                </div>
+
+                {loan && (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium">Loan repayments</div>
+                    <div className="flex justify-between">
+                      <span>Interest ({loan.bankName})</span>
+                      <span>{fmtCurrency(forecastAnnualInterest)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Principal</span>
+                      <span>{fmtCurrency(forecastAnnualPrincipal)}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-1 font-medium">
+                      <span>Total loan repayments</span>
+                      <span>{fmtCurrency(forecastTotalLoanRepayments)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 self-start rounded-md bg-muted/30 p-3">
+                <div>
+                  <div className="flex items-center justify-between font-medium">
+                    <span>Net income (annual)</span>
+                    <span className={forecastNetIncome < 0 ? "text-destructive" : "text-emerald-600"}>{fmtCurrency(forecastNetIncome)}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">Income − operating expenses − loan interest; depreciation excluded</div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between font-medium">
+                    <span>Cashflow (annual)</span>
+                    <span className={forecastCashflow < 0 ? "text-destructive" : "text-emerald-600"}>{fmtCurrency(forecastCashflow)}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Income − operating expenses − loan repayments (interest and principal); depreciation excluded
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between font-medium">
+                    <span>Taxable rental result (annual)</span>
+                    <span className={forecastTaxableResult < 0 ? "text-destructive" : "text-emerald-600"}>{fmtCurrency(forecastTaxableResult)}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Net income − depreciation; principal paydown isn't claimable. The dollar tax impact depends on your other
+                    income and rate — your accountant applies this to your return.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Button asChild size="sm" variant="outline" className="gap-1">
         <Link to="/transactions">
