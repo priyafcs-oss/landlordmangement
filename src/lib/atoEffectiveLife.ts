@@ -49,3 +49,8 @@ export function lookupAtoEffectiveLife(description: string): AtoEffectiveLifeMat
 export function suggestEffectiveLife(description: string): number | undefined {
   return lookupAtoEffectiveLife(description)?.years;
 }
+
+/** Every category label, for a browsable/searchable picker (a <datalist>) rather than requiring
+ * the exact keyword substring lookupAtoEffectiveLife matches on to be typed blind. Picking one of
+ * these verbatim is guaranteed to match: each label contains at least one of its own keywords. */
+export const ATO_EFFECTIVE_LIFE_LABELS: string[] = ATO_EFFECTIVE_LIFE.map((e) => e.label);

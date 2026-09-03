@@ -65,7 +65,7 @@ interface ExtractResult {
   report_date?: string;
   effective_from?: string;
   property_address?: string;
-  items?: { description: string; division?: string; cost: number; life_years?: number }[];
+  items?: { description: string; division?: string; cost: number; life_years?: number; annual_claims?: number[] }[];
 }
 
 /** Division 43 (capital works) is only ever claimable on a straight-line basis under ATO rules —
@@ -261,6 +261,12 @@ export function AddDepreciationReportDialog({
         setItems(
           data.items.map((it) => {
             const division = mapDivision(it.division);
+            // When the report prints its own year-by-year table for this item, that's the real
+            // record — seed every year as an override straight away so what's shown (and what
+            // gets saved) is what the report actually says, not our own cost/life/method
+            // projection. Years beyond what the report listed still fall back to the projection.
+            const overrides: Record<number, string> = {};
+            (it.annual_claims ?? []).forEach((v, i) => (overrides[i] = String(v)));
             return {
               key: uid("da"),
               description: it.description ?? "",
@@ -268,12 +274,17 @@ export function AddDepreciationReportDialog({
               method: defaultMethodForDivision(division),
               cost: it.cost ? String(it.cost) : "",
               lifeYears: it.life_years ? String(it.life_years) : String(suggestEffectiveLife(it.description ?? "") ?? ""),
-              overrides: {},
+              overrides,
             };
           }),
         );
+        const withOwnSchedule = data.items.filter((it) => it.annual_claims?.length).length;
         setExtractOk(true);
-        toast.success(`Extracted ${data.items.length} asset(s) — review before saving`);
+        toast.success(
+          withOwnSchedule > 0
+            ? `Extracted ${data.items.length} asset(s), ${withOwnSchedule} with the report's own year-by-year figures — review before saving`
+            : `Extracted ${data.items.length} asset(s) — review before saving`,
+        );
       } else {
         setExtractEmpty(true);
         toast.warning("Couldn't find asset line items in this file — add them manually below");
@@ -339,6 +350,10 @@ export function AddDepreciationReportDialog({
   // default to the start of the current financial year instead, so the preview shows a full,
   // round Year 1 rather than an arbitrary partial one.
   const startISO = form.effectiveFrom || fyRange(ausFinancialYear(todayISO())).start;
+  // "Year 1" is relative to the item — this maps it back to an actual financial year (e.g. "Year 1
+  // (2020-2021)") so it's visible which real year each row is, not just an ordinal.
+  const startFyYear = parseInt(ausFinancialYear(startISO).split("-")[0], 10);
+  const fyLabelForYearIndex = (i: number) => `${startFyYear + i}-${startFyYear + i + 1}`;
 
   const itemPreviews = items.map((it) => {
     const cost = parseFloat(it.cost) || 0;
@@ -706,7 +721,9 @@ export function AddDepreciationReportDialog({
                                   const overridden = it.overrides[i] !== undefined && it.overrides[i] !== "";
                                   return (
                                     <tr key={i} className="border-t">
-                                      <td className="px-2 py-1">Year {i + 1}</td>
+                                      <td className="px-2 py-1">
+                                        Year {i + 1} <span className="text-muted-foreground">({fyLabelForYearIndex(i)})</span>
+                                      </td>
                                       <td className="px-2 py-1">
                                         <Input
                                           type="number"
@@ -749,11 +766,11 @@ export function AddDepreciationReportDialog({
                 <div className="max-h-64 overflow-y-auto">
                   <table className="w-full table-fixed text-xs">
                     <colgroup>
-                      <col style={{ width: "14%" }} />
-                      <col style={{ width: "26%" }} />
-                      <col style={{ width: "26%" }} />
                       <col style={{ width: "22%" }} />
-                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "24%" }} />
+                      <col style={{ width: "24%" }} />
+                      <col style={{ width: "20%" }} />
+                      <col style={{ width: "10%" }} />
                     </colgroup>
                     <thead className="sticky top-0 bg-background text-muted-foreground">
                       <tr>
@@ -767,7 +784,9 @@ export function AddDepreciationReportDialog({
                     <tbody>
                       {annualRows.map((r, i) => (
                         <tr key={r.year} className="border-t">
-                          <td className="py-1">Year {r.year}</td>
+                          <td className="py-1">
+                            Year {r.year} <span className="text-muted-foreground">({fyLabelForYearIndex(i)})</span>
+                          </td>
                           <td className="py-1 pl-2">
                             <Input
                               type="number"
@@ -807,11 +826,11 @@ export function AddDepreciationReportDialog({
                 </div>
                 <table className="w-full table-fixed border-t pt-2 text-xs font-medium">
                   <colgroup>
-                    <col style={{ width: "14%" }} />
-                    <col style={{ width: "26%" }} />
-                    <col style={{ width: "26%" }} />
                     <col style={{ width: "22%" }} />
-                    <col style={{ width: "12%" }} />
+                    <col style={{ width: "24%" }} />
+                    <col style={{ width: "24%" }} />
+                    <col style={{ width: "20%" }} />
+                    <col style={{ width: "10%" }} />
                   </colgroup>
                   <tbody>
                     <tr>

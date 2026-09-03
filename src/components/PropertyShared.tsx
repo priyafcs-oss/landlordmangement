@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
-import { lookupAtoEffectiveLife } from "@/lib/atoEffectiveLife";
+import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord } from "@/lib/billMatch";
 import {
   verifyAgentFees,
@@ -1336,8 +1336,15 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
         purchaseCost: it.cost,
         effectiveLifeYears: it.lifeYears || 1,
         purchaseDate: payload.effectiveFrom || undefined,
-        method: "Diminishing Value",
+        // Div 43 (capital works) is only ever claimable straight-line under ATO rules — same lock
+        // applied everywhere else a division/method pair gets set (AddDepreciationReportDialog,
+        // NewDepreciationItemDialog).
+        method: it.division === "Div 43" ? "Prime Cost" : "Diminishing Value",
         division: it.division,
+        // The report's own printed per-year figures, when Gemini found a year-by-year table for
+        // this item — the permanent record from here on, not re-derived from cost/life/method on
+        // every read (see the annualClaims field doc on DepreciationItem).
+        annualClaims: it.annualClaims,
         reportId,
         quantitySurveyor: payload.quantitySurveyor || undefined,
         reportReference: payload.reportReference || undefined,
@@ -2944,13 +2951,28 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <Field label="Item name">
-              <Input value={description} onChange={(e) => setDescription(e.target.value)} onBlur={onDescriptionBlur} placeholder="e.g. hot water system, carpet, air conditioner" />
+              <Input
+                list="ato-effective-life-options"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onBlur={onDescriptionBlur}
+                placeholder="Start typing to search the ATO list, or enter your own"
+              />
+              <datalist id="ato-effective-life-options">
+                {ATO_EFFECTIVE_LIFE_LABELS.map((label) => (
+                  <option key={label} value={label} />
+                ))}
+              </datalist>
             </Field>
-            {atoMatch && (
+            {atoMatch ? (
               <div className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
                 <CheckCircle2 className="h-3 w-3 shrink-0" />
                 Matched ATO reference: {atoMatch.label} — {atoMatch.years} years
               </div>
+            ) : (
+              description.trim() && (
+                <div className="mt-1 text-xs text-muted-foreground">No ATO reference found — enter the effective life manually.</div>
+              )
             )}
           </div>
           <Field label="Cost">

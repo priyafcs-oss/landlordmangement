@@ -193,7 +193,19 @@ export interface ParsedDepreciationReportFields {
   report_reference: string | null;
   report_date: string | null; // YYYY-MM-DD
   effective_from: string | null; // YYYY-MM-DD
-  items: { description: string; division: "Div 40" | "Div 43" | null; cost: number; life_years: number | null }[];
+  items: {
+    description: string;
+    division: "Div 40" | "Div 43" | null;
+    cost: number;
+    life_years: number | null;
+    /** This item's own Year 1, Year 2, ... claim amounts exactly as printed in the report's
+     * year-by-year table, in order — most QS reports include one per item (often titled "Years 1
+     * to 10" or similar, continuing on later pages/tables for the item's full life). Null/omitted
+     * if the report doesn't break this item down by year (a summary-only report), in which case
+     * the app projects it from cost/life/method instead — but that's an approximation, so the
+     * report's own stated figures always take priority when they're actually printed. */
+    annual_claims: number[] | null;
+  }[];
   /** "Prepared for" name on the report cover page, if present — often the owner name. Null if not stated. */
   addressed_to: string | null;
   confidence: number;

@@ -1013,7 +1013,7 @@ export interface DepreciationReportProposalPayload {
   reportReference?: string;
   reportDate?: string;
   effectiveFrom?: string;
-  items: { description: string; division: "Div 40" | "Div 43"; cost: number; lifeYears?: number }[];
+  items: { description: string; division: "Div 40" | "Div 43"; cost: number; lifeYears?: number; annualClaims?: number[] }[];
   confidence: number;
 }
 

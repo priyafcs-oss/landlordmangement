@@ -15,6 +15,7 @@ Extract the fields defined in the response schema as strict JSON.
   - division: "Div 40" for plant & equipment (removable items — appliances, carpet, blinds), "Div 43" for capital works (structural/building costs), or null if you cannot tell.
   - cost: the item's depreciable cost/value as shown in the schedule.
   - life_years: the effective life in years, if stated, else null.
+  - annual_claims: many QS reports include a year-by-year table for each item (often titled "Years 1 to 10", sometimes continuing across several such tables to cover the item's full effective life) — a real row of dollar amounts per year, NOT a formula. If this item has one, extract every year's amount IN ORDER starting from Year 1, across every such table for this item (don't stop at just the first table if more years are printed further in the document). The first year is often a smaller, part-year amount, and — if the schedule runs the item's full effective life — the very last year is often smaller too (part-year again, or whatever residual amount is left to claim). Extract those exactly as printed, not rounded to match the other years. If this item has no such year-by-year table (a summary-only report with just a total figure per item), leave this null — do not invent or calculate one.
 Do not invent items or values — only extract what the document actually lists.
 - addressed_to: the "prepared for" name on the report cover page, if present — often the property owner. Null if not stated.
 - confidence is YOUR OWN 0-1 estimate of how certain this extraction is.`;
@@ -36,6 +37,7 @@ const SCHEMA = {
           division: { type: "STRING", nullable: true },
           cost: { type: "NUMBER" },
           life_years: { type: "NUMBER", nullable: true },
+          annual_claims: { type: "ARRAY", items: { type: "NUMBER" }, nullable: true },
         },
         required: ["description", "cost"],
       },
@@ -107,6 +109,7 @@ export async function parseDepreciationReport(
         division: it.division ?? "Div 40",
         cost: it.cost,
         lifeYears: it.life_years ?? undefined,
+        annualClaims: it.annual_claims ?? undefined,
       })),
       confidence: parsed.confidence,
     },
