@@ -260,6 +260,7 @@ export type Database = {
       }
       depreciation_items: {
         Row: {
+          annualClaims: Json | null
           assetId: string
           created_at: string
           description: string
@@ -272,12 +273,14 @@ export type Database = {
           purchaseDate: string | null
           quantitySurveyor: string | null
           reportDate: string | null
+          reportAnnualSummary: Json | null
           reportId: string | null
           reportReference: string | null
           sourceFileData: string | null
           sourceFileName: string | null
         }
         Insert: {
+          annualClaims?: Json | null
           assetId: string
           created_at?: string
           description: string
@@ -290,12 +293,14 @@ export type Database = {
           purchaseDate?: string | null
           quantitySurveyor?: string | null
           reportDate?: string | null
+          reportAnnualSummary?: Json | null
           reportId?: string | null
           reportReference?: string | null
           sourceFileData?: string | null
           sourceFileName?: string | null
         }
         Update: {
+          annualClaims?: Json | null
           assetId?: string
           created_at?: string
           description?: string
@@ -308,6 +313,7 @@ export type Database = {
           purchaseDate?: string | null
           quantitySurveyor?: string | null
           reportDate?: string | null
+          reportAnnualSummary?: Json | null
           reportId?: string | null
           reportReference?: string | null
           sourceFileData?: string | null

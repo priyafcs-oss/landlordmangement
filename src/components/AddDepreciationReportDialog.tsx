@@ -17,10 +17,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, Eye, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, FileUp, AlertTriangle, Eye, CheckCircle2, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { todayISO, fmtCurrency, itemAnnualClaims } from "@/lib/calculations";
+import { todayISO, fmtCurrency, itemAnnualClaims, ausFinancialYear, fyRange } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import {
@@ -47,6 +47,9 @@ interface AssetRow {
   method: Method;
   cost: string;
   lifeYears: string;
+  /** Hand-typed overrides of the computed Year N claim, keyed by year index (0 = Year 1) —
+   * sparse, so a row that's never been touched costs nothing and still tracks the live formula. */
+  overrides: Record<number, string>;
 }
 
 interface ExtractResult {
@@ -74,6 +77,7 @@ const blankAsset = (): AssetRow => ({
   method: defaultMethodForDivision("Div 40"),
   cost: "",
   lifeYears: "",
+  overrides: {},
 });
 
 function mapDivision(raw?: string): Division {
@@ -95,6 +99,11 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
   const [extractedAddress, setExtractedAddress] = useState<string | undefined>();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  // Hand-typed overrides of the report-level Annual Deductions table, keyed by year index — this
+  // is the report's OWN stated Year N Div 40/Div 43 total (see reportAnnualSummary on
+  // DepreciationItem), independent of any single item's own override.
+  const [reportOverrides, setReportOverrides] = useState<Record<number, { div40?: string; div43?: string }>>({});
 
   const asset = state.assets.find((a) => a.id === assetId);
   const prop = asset ? state.properties.find((p) => p.id === asset.linkedPropertyId || p.assetId === asset.id) : undefined;
@@ -123,6 +132,8 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     setExtractEmpty(false);
     setExtractedAddress(undefined);
     setBannerDismissed(false);
+    setExpandedKeys(new Set());
+    setReportOverrides({});
   };
 
   const extract = async (file: File) => {
@@ -174,6 +185,7 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
               method: defaultMethodForDivision(division),
               cost: it.cost ? String(it.cost) : "",
               lifeYears: it.life_years ? String(it.life_years) : String(suggestEffectiveLife(it.description ?? "") ?? ""),
+              overrides: {},
             };
           }),
         );
@@ -202,6 +214,31 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
   const updateItem = (key: string, patch: Partial<AssetRow>) =>
     setItems((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
+  const setOverride = (row: AssetRow, yearIndex: number, value: string) =>
+    updateItem(row.key, { overrides: { ...row.overrides, [yearIndex]: value } });
+  const resetOverride = (row: AssetRow, yearIndex: number) => {
+    const next = { ...row.overrides };
+    delete next[yearIndex];
+    updateItem(row.key, { overrides: next });
+  };
+
+  const setReportOverride = (yearIndex: number, field: "div40" | "div43", value: string) =>
+    setReportOverrides((prev) => ({ ...prev, [yearIndex]: { ...prev[yearIndex], [field]: value } }));
+  const resetReportOverride = (yearIndex: number) =>
+    setReportOverrides((prev) => {
+      const next = { ...prev };
+      delete next[yearIndex];
+      return next;
+    });
+
+  const toggleExpanded = (key: string) =>
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   const onDivisionChange = (row: AssetRow, division: Division) =>
     // Switching a row to Div 43 forces Prime Cost along with it — see defaultMethodForDivision.
     updateItem(row.key, { division, method: division === "Div 43" ? "Prime Cost" : row.method });
@@ -212,24 +249,54 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     if (suggested) updateItem(row.key, { lifeYears: String(suggested) });
   };
 
-  // Every item in one report shares the same start date for pro-rating its first year's claim —
-  // effectiveFrom (settlement/purchase date) if known, else the report's own date, else today.
-  const startISO = form.effectiveFrom || form.reportDate || todayISO();
+  // Every item in one report shares the same start date for pro-rating its first year's claim.
+  // Only an actual Effective From counts as a real anchor — falling back to the report date (or
+  // today) would pro-rate Year 1 against a date that has nothing to do with when the asset was
+  // actually acquired, understating it for no real reason. Until Effective From is filled in,
+  // default to the start of the current financial year instead, so the preview shows a full,
+  // round Year 1 rather than an arbitrary partial one.
+  const startISO = form.effectiveFrom || fyRange(ausFinancialYear(todayISO())).start;
+
   const itemPreviews = items.map((it) => {
     const cost = parseFloat(it.cost) || 0;
     const life = parseFloat(it.lifeYears) || 1;
-    return { key: it.key, division: it.division, cost, claims: cost > 0 ? itemAnnualClaims(cost, life, it.method, startISO) : [] };
+    const computed = cost > 0 ? itemAnnualClaims(cost, life, it.method, startISO) : [];
+    const overrideMaxIndex = Object.keys(it.overrides).reduce((max, k) => Math.max(max, parseInt(k, 10)), -1);
+    const years = Math.max(computed.length, overrideMaxIndex + 1);
+    const claims = Array.from({ length: years }, (_, i) => {
+      const raw = it.overrides[i];
+      if (raw !== undefined && raw !== "") {
+        const n = parseFloat(raw);
+        if (Number.isFinite(n)) return n;
+      }
+      return computed[i] ?? 0;
+    });
+    return { key: it.key, division: it.division, cost, computed, claims };
   });
+
   const totalClaimable = itemPreviews.reduce((s, p) => s + p.cost, 0);
-  const year1Div40 = itemPreviews.filter((p) => p.division === "Div 40").reduce((s, p) => s + (p.claims[0] ?? 0), 0);
-  const year1Div43 = itemPreviews.filter((p) => p.division === "Div 43").reduce((s, p) => s + (p.claims[0] ?? 0), 0);
   const scheduleYears = items.reduce((max, it) => Math.max(max, parseFloat(it.lifeYears) || 0), 0);
-  const maxYears = Math.min(50, Math.ceil(scheduleYears));
-  const annualRows = Array.from({ length: maxYears }, (_, i) => {
-    const div40 = itemPreviews.filter((p) => p.division === "Div 40").reduce((s, p) => s + (p.claims[i] ?? 0), 0);
-    const div43 = itemPreviews.filter((p) => p.division === "Div 43").reduce((s, p) => s + (p.claims[i] ?? 0), 0);
-    return { year: i + 1, div40, div43, total: div40 + div43 };
+  const maxYears = Math.max(Math.ceil(scheduleYears), ...itemPreviews.map((p) => p.claims.length), 0);
+  // The report's own Year N Div 40/Div 43 total defaults to the sum of every item's own (already
+  // override-aware) claim for that year, but can be hand-corrected independently at the report
+  // level too — e.g. to match the source document's own rounding, without having to track down
+  // which single item accounts for the difference.
+  const annualRows = Array.from({ length: Math.min(50, maxYears) }, (_, i) => {
+    const computedDiv40 = itemPreviews.filter((p) => p.division === "Div 40").reduce((s, p) => s + (p.claims[i] ?? 0), 0);
+    const computedDiv43 = itemPreviews.filter((p) => p.division === "Div 43").reduce((s, p) => s + (p.claims[i] ?? 0), 0);
+    const override = reportOverrides[i];
+    const div40Raw = override?.div40;
+    const div43Raw = override?.div43;
+    const div40 = div40Raw !== undefined && div40Raw !== "" && Number.isFinite(parseFloat(div40Raw)) ? parseFloat(div40Raw) : computedDiv40;
+    const div43 = div43Raw !== undefined && div43Raw !== "" && Number.isFinite(parseFloat(div43Raw)) ? parseFloat(div43Raw) : computedDiv43;
+    return { year: i + 1, div40, div43, total: div40 + div43, computedDiv40, computedDiv43, overridden: !!(div40Raw || div43Raw) };
   });
+  const year1Div40 = annualRows[0]?.div40 ?? 0;
+  const year1Div43 = annualRows[0]?.div43 ?? 0;
+  const grandTotal = annualRows.reduce(
+    (acc, r) => ({ div40: acc.div40 + r.div40, div43: acc.div43 + r.div43, total: acc.total + r.total }),
+    { div40: 0, div43: 0, total: 0 },
+  );
 
   const propertyMismatch = (() => {
     if (!extractedAddress || !prop) return undefined;
@@ -247,11 +314,18 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
 
   const save = () => {
     if (!assetId) return toast.error("No property/asset selected");
-    const valid = items.filter((it) => it.description.trim() && parseFloat(it.cost) > 0);
-    if (valid.length === 0) return toast.error("Add at least one asset with a description and cost");
-
     const reportId = uid("dr");
-    for (const it of valid) {
+    // Materialized once, at save time, from the (possibly hand-corrected) Annual Deductions
+    // table — denormalized onto every item below, same as quantitySurveyor/reportDate/etc.
+    const reportAnnualSummary = annualRows.map((r) => ({
+      div40: Math.round(r.div40 * 100) / 100,
+      div43: Math.round(r.div43 * 100) / 100,
+    }));
+    let savedCount = 0;
+    items.forEach((it, idx) => {
+      if (!it.description.trim() || !(parseFloat(it.cost) > 0)) return;
+      savedCount++;
+      const preview = itemPreviews[idx];
       addDepreciationItem({
         assetId,
         description: it.description.trim(),
@@ -260,6 +334,10 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         purchaseDate: form.effectiveFrom || undefined,
         method: it.method,
         division: it.division,
+        // Materialized now, at save time, so this item's schedule is locked in from here on —
+        // see the annualClaims field doc on DepreciationItem for why.
+        annualClaims: preview.claims.map((c) => Math.round(c * 100) / 100),
+        reportAnnualSummary,
         reportId,
         quantitySurveyor: form.quantitySurveyor || undefined,
         reportReference: form.reportReference || undefined,
@@ -268,11 +346,13 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         sourceFileName: form.sourceFileName,
         sourceFileData: form.sourceFileData,
       });
-    }
+    });
+
+    if (savedCount === 0) return toast.error("Add at least one asset with a description and cost");
 
     setOpen(false);
     reset();
-    toast.success(`Added ${valid.length} depreciation item(s) from report`);
+    toast.success(`Added ${savedCount} depreciation item(s) from report`);
   };
 
   const keepDocumentFiledOnly = () => {
@@ -431,89 +511,210 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
                   <Plus className="h-3 w-3" /> Add item
                 </Button>
               </div>
-              {items.map((it, idx) => (
-                <div key={it.key} className="space-y-2 rounded border p-2">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <Field label="Asset">
+              {items.map((it, idx) => {
+                const preview = itemPreviews[idx];
+                const isExpanded = expandedKeys.has(it.key);
+                return (
+                  <div key={it.key} className="space-y-2 rounded border p-2">
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <Field label="Asset">
+                          <Input
+                            value={it.description}
+                            onChange={(e) => updateItem(it.key, { description: e.target.value })}
+                            onBlur={() => onDescriptionBlur(it)}
+                            placeholder="e.g. hot water system, carpet"
+                          />
+                        </Field>
+                      </div>
+                      <Button size="icon" variant="ghost" title="Delete asset" onClick={() => removeItem(it.key)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      <Field label="Tax category">
+                        <Select value={it.division} onValueChange={(v) => onDivisionChange(it, v as Division)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Div 40">Division 40</SelectItem>
+                            <SelectItem value="Div 43">Division 43</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="Opening value">
+                        <Input type="number" value={it.cost} onChange={(e) => updateItem(it.key, { cost: e.target.value })} />
+                      </Field>
+                      <Field label="Method">
+                        <Select
+                          value={it.method}
+                          onValueChange={(v) => updateItem(it.key, { method: v as Method })}
+                          disabled={it.division === "Div 43"}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Prime Cost">Prime cost</SelectItem>
+                            <SelectItem value="Diminishing Value">Diminishing value</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="Effective life (yrs)">
+                        <Input type="number" value={it.lifeYears} onChange={(e) => updateItem(it.key, { lifeYears: e.target.value })} />
+                      </Field>
+                      <Field label="Year 1 deduction">
                         <Input
-                          value={it.description}
-                          onChange={(e) => updateItem(it.key, { description: e.target.value })}
-                          onBlur={() => onDescriptionBlur(it)}
-                          placeholder="e.g. hot water system, carpet"
+                          type="number"
+                          value={it.overrides[0] ?? ""}
+                          placeholder={(preview?.computed[0] ?? 0).toFixed(2)}
+                          onChange={(e) => setOverride(it, 0, e.target.value)}
                         />
                       </Field>
                     </div>
-                    <Button size="icon" variant="ghost" onClick={() => removeItem(it.key)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {preview && preview.claims.length > 1 && (
+                      <div>
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => toggleExpanded(it.key)}
+                        >
+                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                          {isExpanded ? "Hide" : "Edit"} full schedule ({preview.claims.length} years)
+                        </button>
+                        {isExpanded && (
+                          <div className="mt-2 max-h-56 overflow-y-auto rounded border">
+                            <table className="w-full text-xs" data-testid="item-schedule-table">
+                              <thead className="sticky top-0 bg-muted/40 text-muted-foreground">
+                                <tr>
+                                  <th className="px-2 py-1 text-left font-normal">Year</th>
+                                  <th className="px-2 py-1 text-left font-normal">Amount</th>
+                                  <th className="w-8 px-2 py-1"></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {preview.claims.map((_, i) => {
+                                  const overridden = it.overrides[i] !== undefined && it.overrides[i] !== "";
+                                  return (
+                                    <tr key={i} className="border-t">
+                                      <td className="px-2 py-1">Year {i + 1}</td>
+                                      <td className="px-2 py-1">
+                                        <Input
+                                          type="number"
+                                          className="h-7"
+                                          value={it.overrides[i] ?? ""}
+                                          placeholder={(preview.computed[i] ?? 0).toFixed(2)}
+                                          onChange={(e) => setOverride(it, i, e.target.value)}
+                                        />
+                                      </td>
+                                      <td className="px-2 py-1">
+                                        {overridden && (
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-6 w-6"
+                                            title="Reset to computed value"
+                                            onClick={() => resetOverride(it, i)}
+                                          >
+                                            <RotateCcw className="h-3 w-3" />
+                                          </Button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                    <Field label="Tax category">
-                      <Select value={it.division} onValueChange={(v) => onDivisionChange(it, v as Division)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Div 40">Division 40</SelectItem>
-                          <SelectItem value="Div 43">Division 43</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="Opening value">
-                      <Input type="number" value={it.cost} onChange={(e) => updateItem(it.key, { cost: e.target.value })} />
-                    </Field>
-                    <Field label="Method">
-                      <Select
-                        value={it.method}
-                        onValueChange={(v) => updateItem(it.key, { method: v as Method })}
-                        disabled={it.division === "Div 43"}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Prime Cost">Prime cost</SelectItem>
-                          <SelectItem value="Diminishing Value">Diminishing value</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="Effective life (yrs)">
-                      <Input type="number" value={it.lifeYears} onChange={(e) => updateItem(it.key, { lifeYears: e.target.value })} />
-                    </Field>
-                    <Field label="Year 1 deduction">
-                      <Input disabled value={fmtCurrency(itemPreviews[idx]?.claims[0] ?? 0)} />
-                    </Field>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {annualRows.length > 0 && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="text-xs font-medium">Annual deductions (from the report)</div>
                 <div className="max-h-64 overflow-y-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full table-fixed text-xs">
+                    <colgroup>
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "26%" }} />
+                      <col style={{ width: "26%" }} />
+                      <col style={{ width: "22%" }} />
+                      <col style={{ width: "12%" }} />
+                    </colgroup>
                     <thead className="sticky top-0 bg-background text-muted-foreground">
                       <tr>
                         <th className="py-1 text-left font-normal">Year</th>
                         <th className="py-1 text-right font-normal">Div 40</th>
                         <th className="py-1 text-right font-normal">Div 43</th>
                         <th className="py-1 text-right font-normal">Total</th>
+                        <th className="py-1"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {annualRows.map((r) => (
+                      {annualRows.map((r, i) => (
                         <tr key={r.year} className="border-t">
                           <td className="py-1">Year {r.year}</td>
-                          <td className="py-1 text-right">{fmtCurrency(r.div40)}</td>
-                          <td className="py-1 text-right">{fmtCurrency(r.div43)}</td>
+                          <td className="py-1 pl-2">
+                            <Input
+                              type="number"
+                              className="h-7 text-right"
+                              value={reportOverrides[i]?.div40 ?? ""}
+                              placeholder={r.computedDiv40.toFixed(2)}
+                              onChange={(e) => setReportOverride(i, "div40", e.target.value)}
+                            />
+                          </td>
+                          <td className="py-1 pl-2">
+                            <Input
+                              type="number"
+                              className="h-7 text-right"
+                              value={reportOverrides[i]?.div43 ?? ""}
+                              placeholder={r.computedDiv43.toFixed(2)}
+                              onChange={(e) => setReportOverride(i, "div43", e.target.value)}
+                            />
+                          </td>
                           <td className="py-1 text-right font-medium">{fmtCurrency(r.total)}</td>
+                          <td className="py-1 text-center">
+                            {r.overridden && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-6 w-6"
+                                title="Reset to computed value"
+                                onClick={() => resetReportOverride(i)}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                <table className="w-full table-fixed border-t pt-2 text-xs font-medium">
+                  <colgroup>
+                    <col style={{ width: "14%" }} />
+                    <col style={{ width: "26%" }} />
+                    <col style={{ width: "26%" }} />
+                    <col style={{ width: "22%" }} />
+                    <col style={{ width: "12%" }} />
+                  </colgroup>
+                  <tbody>
+                    <tr>
+                      <td className="pt-2">Total (Year 1–{annualRows.length})</td>
+                      <td className="pt-2 text-right">{fmtCurrency(grandTotal.div40)}</td>
+                      <td className="pt-2 text-right">{fmtCurrency(grandTotal.div43)}</td>
+                      <td className="pt-2 text-right">{fmtCurrency(grandTotal.total)}</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

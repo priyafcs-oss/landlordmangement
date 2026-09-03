@@ -191,6 +191,21 @@ export interface DepreciationItem {
   purchaseDate?: string;
   method?: "Diminishing Value" | "Prime Cost";
   division?: "Div 40" | "Div 43";
+  /** This item's Year 1..N claim schedule, materialized (and hand-editable) at save time in the
+   * "Add depreciation report" dialog — index 0 is Year 1. Once saved it's the permanent record,
+   * not re-derived from purchaseCost/effectiveLifeYears/method on every read: those may have
+   * already fed a lodged tax return, so a later tweak to the projection formula (buildDepreciation
+   * Schedule's itemAnnualClaims) must never silently change a historical item's numbers. Absent on
+   * items saved before this field existed — those still fall back to the live formula. */
+  annualClaims?: number[];
+  /** The report's own Year 1..N Div 40/Div 43 totals as reviewed/edited once in the "Add
+   * depreciation report" dialog — identical across every item sharing one reportId (same
+   * denormalization as quantitySurveyor/reportDate/etc. below). This is the authoritative
+   * schedule for the report: buildDepreciationSchedule reads a reportId group from here rather
+   * than re-summing each item's own annualClaims, so the property's depreciation totals always
+   * match what was actually reviewed against the report, even if that differs slightly from a
+   * straight per-item allocation (rounding, or a figure corrected only at the report level). */
+  reportAnnualSummary?: { div40: number; div43: number }[];
   /** Items added together via one "Add depreciation report" upload share one id — same
    * denormalized-grouping pattern as PropertyBill.billGroupId, no separate report table. */
   reportId?: string;

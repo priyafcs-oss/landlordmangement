@@ -530,11 +530,33 @@ export function buildDepreciationSchedule(items: DepreciationItem[]): Depreciati
     byFy.set(fy, entry);
   };
 
+  // A reportId group with a saved reportAnnualSummary was reviewed against its source document as
+  // one whole schedule — read from that single authoritative total per year rather than re-summing
+  // each item's own (individually-editable) annualClaims, so the property's depreciation totals
+  // always match what the report actually said. Only one pass per reportId; items without a
+  // reportId, or an older report saved before this field existed, fall through to the per-item
+  // loop below instead.
+  const coveredByReportSummary = new Set<string>();
   for (const item of items) {
+    if (!item.reportId || !item.reportAnnualSummary?.length || coveredByReportSummary.has(item.reportId)) continue;
+    coveredByReportSummary.add(item.reportId);
+    const start = item.purchaseDate || item.effectiveFrom || todayISO();
+    const startYear = parseInt(ausFinancialYear(start).split("-")[0], 10);
+    item.reportAnnualSummary.forEach((y, i) => {
+      addToFy(`${startYear + i}-${startYear + i + 1}`, "Div 40", y.div40);
+      addToFy(`${startYear + i}-${startYear + i + 1}`, "Div 43", y.div43);
+    });
+  }
+
+  for (const item of items) {
+    if (item.reportId && coveredByReportSummary.has(item.reportId)) continue;
     const division = item.division ?? "Div 40";
     const start = item.purchaseDate || item.effectiveFrom || todayISO();
     const startYear = parseInt(ausFinancialYear(start).split("-")[0], 10);
-    const claims = itemAnnualClaims(item.purchaseCost, item.effectiveLifeYears, item.method ?? "Diminishing Value", start);
+    // A saved annualClaims schedule is the permanent record (possibly hand-edited to match the
+    // source report, or already reflected on a lodged tax return) — only items saved before that
+    // field existed fall back to re-deriving it live from cost/life/method.
+    const claims = item.annualClaims ?? itemAnnualClaims(item.purchaseCost, item.effectiveLifeYears, item.method ?? "Diminishing Value", start);
     claims.forEach((claim, i) => addToFy(`${startYear + i}-${startYear + i + 1}`, division, claim));
   }
 
