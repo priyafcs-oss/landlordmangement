@@ -95,6 +95,10 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "notes", label: "Notes", icon: StickyNote, group: "Property" },
 ];
 
+/** Every distinct group name in NAV (currently "Finance" and "Property") — used to default the
+ * sidebar to fully collapsed on first load and to drive the accordion behaviour below. */
+const ALL_NAV_GROUPS = Array.from(new Set(NAV.map((item) => item.group).filter((g): g is string => !!g)));
+
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
   const loans = state.loans.filter((l) => l.propertyId === propertyId);
@@ -142,15 +146,12 @@ function PropertyAssetPage() {
   const { state, loading } = useStore();
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>("summary");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // All groups start collapsed on first landing; toggling one open auto-collapses every other
+  // group (accordion behaviour) rather than letting several stack open at once.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(ALL_NAV_GROUPS));
   const [sidebarCollapsed, toggleSidebar] = usePersistedToggle("assetSidebarCollapsed");
   const toggleGroup = (group: string) =>
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
+    setCollapsedGroups((prev) => (prev.has(group) ? new Set(ALL_NAV_GROUPS.filter((g) => g !== group)) : new Set(ALL_NAV_GROUPS)));
 
   const asset = state.assets.find((a) => a.id === assetId);
   // Looked up both directions (Asset.linkedPropertyId -> Property.id, and Property.assetId ->
