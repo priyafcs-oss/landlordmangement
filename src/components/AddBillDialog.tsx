@@ -38,7 +38,7 @@ import {
 } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
-import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
+import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, isSupportedDocumentFile } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -316,6 +316,9 @@ export function AddBillDialog({
   }, [initialProposal?.id]);
 
   const extract = async (file: File) => {
+    if (!isSupportedDocumentFile(file)) {
+      return toast.error(`${file.name} isn't a PDF or image — the AI reader (and the preview pane) only support those. Try exporting/saving it as a PDF first.`);
+    }
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return toast.error(
         `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,

@@ -33,6 +33,21 @@ export function isImageFileName(fileName?: string): boolean {
 }
 
 /**
+ * Every AI-extraction dialog's dropzone only reads a PDF or image — the edge functions already
+ * reject anything else (see isSupportedAttachment in each `extract-*`/`upload-document` function),
+ * but that check only ran server-side, after the file was already read and attached as the
+ * "source document" locally. A spreadsheet or Word doc dropped in still looked accepted (shown in
+ * the dropzone, offered for preview) right up until BillDocumentViewer tried to render it through
+ * the browser's PDF plugin and failed with an opaque "Failed to load PDF document" — nothing told
+ * the landlord the file itself was the problem. Checking here, before the file is read at all,
+ * lets every dialog reject it immediately with a clear reason instead of a round trip to Gemini
+ * (or a broken preview) to discover the same thing.
+ */
+export function isSupportedDocumentFile(file: File): boolean {
+  return file.type === "application/pdf" || file.type.startsWith("image/");
+}
+
+/**
  * Different upload paths in this app inconsistently store either a full data URL
  * (`data:application/pdf;base64,...`, e.g. ExpenseDialog/tenant document uploads) or the raw
  * base64 payload alone with the prefix already stripped (e.g. AddBillDialog/AddTransactionDialog) —

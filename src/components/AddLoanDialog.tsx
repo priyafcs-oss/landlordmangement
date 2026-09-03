@@ -23,7 +23,7 @@ import {
 import { Plus, Trash2, FileUp, AlertTriangle, Eye, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, isSupportedDocumentFile } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { Loan } from "@/lib/types";
 
@@ -126,6 +126,9 @@ export function AddLoanDialog({
   };
 
   const extract = async (file: File) => {
+    if (!isSupportedDocumentFile(file)) {
+      return toast.error(`${file.name} isn't a PDF or image — the AI reader (and the preview pane) only support those. Try exporting/saving it as a PDF first.`);
+    }
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return toast.error(
         `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,

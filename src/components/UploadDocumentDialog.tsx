@@ -13,7 +13,7 @@ import { FileUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useStore } from "@/lib/store";
 import { ProposalReviewDialog } from "@/components/PropertyShared";
-import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
+import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, isSupportedDocumentFile } from "@/lib/files";
 import { toast } from "sonner";
 
 interface UploadResult {
@@ -60,6 +60,9 @@ export function UploadDocumentDialog({
   const currentReviewId = reviewQueue[0] ?? null;
 
   const uploadOne = async (file: File): Promise<UploadResult | { ok: false; error: string }> => {
+    if (!isSupportedDocumentFile(file)) {
+      return { ok: false, error: `${file.name} isn't a PDF or image — the AI reader only supports those. Try exporting/saving it as a PDF first.` };
+    }
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return {
         ok: false,
