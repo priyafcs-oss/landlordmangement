@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.extract-depreciation-report]
 verify_jwt = false
 
+[functions.extract-loan-document]
+verify_jwt = false
+
 [functions.extract-agency-agreement]
 verify_jwt = false
 

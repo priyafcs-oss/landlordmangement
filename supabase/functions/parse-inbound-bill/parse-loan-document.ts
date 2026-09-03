@@ -32,7 +32,7 @@ const SCHEMA = {
   required: ["property_address", "lender_name", "confidence"],
 };
 
-async function callGemini(input: NormalizedBillInput): Promise<ParsedLoanDocumentFields> {
+export async function extractLoanDocumentFields(input: NormalizedBillInput): Promise<ParsedLoanDocumentFields> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
   const parts = buildDocumentParts(PROMPT, input);
@@ -56,7 +56,7 @@ export async function parseLoanDocument(
 
   let parsed: ParsedLoanDocumentFields;
   try {
-    parsed = await callGemini(input);
+    parsed = await extractLoanDocumentFields(input);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Gemini extraction failed" };
   }
