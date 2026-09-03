@@ -13,7 +13,14 @@ import { FileUp } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useStore } from "@/lib/store";
 import { ProposalReviewDialog } from "@/components/PropertyShared";
-import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, isSupportedDocumentFile } from "@/lib/files";
+import {
+  MAX_AI_UPLOAD_BYTES,
+  formatFileSize,
+  readFileAsBase64,
+  isSupportedDocumentFile,
+  ACCEPTED_DOCUMENT_TYPES_LABEL,
+  ACCEPTED_DOCUMENT_TYPES_ACCEPT,
+} from "@/lib/files";
 import { toast } from "sonner";
 
 interface UploadResult {
@@ -50,6 +57,7 @@ export function UploadDocumentDialog({
   const { refresh } = useStore();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
   // Ordered ids of proposals ready to review — reviewing the front one and dismissing/confirming
@@ -177,13 +185,35 @@ export function UploadDocumentDialog({
               immediately; the rest keep processing in the background and appear one after another as you finish
               each review.
             </p>
-            <Input
-              type="file"
-              accept="application/pdf,image/*"
-              multiple
-              disabled={busy}
-              onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
-            />
+            <div
+              className={
+                "rounded-md border-2 border-dashed p-6 text-center transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
+              }
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (e.dataTransfer.files.length > 0) setFiles(Array.from(e.dataTransfer.files));
+              }}
+            >
+              <div className="flex flex-col items-center gap-2">
+                <FileUp className="h-8 w-8 text-muted-foreground" />
+                <div className="text-sm text-muted-foreground">Drop files here, or choose them below.</div>
+                <div className="text-xs text-muted-foreground">Accepts {ACCEPTED_DOCUMENT_TYPES_LABEL}</div>
+                <Input
+                  type="file"
+                  accept={ACCEPTED_DOCUMENT_TYPES_ACCEPT}
+                  multiple
+                  disabled={busy}
+                  className="max-w-[260px]"
+                  onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
+                />
+              </div>
+            </div>
             {files.length > 0 && !busy && (
               <p className="text-xs text-muted-foreground">
                 {files.length} file{files.length === 1 ? "" : "s"} selected

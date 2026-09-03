@@ -38,7 +38,17 @@ import {
 } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
-import { openBillDocument, base64ToBlob, mimeForFileName, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, isSupportedDocumentFile } from "@/lib/files";
+import {
+  openBillDocument,
+  base64ToBlob,
+  mimeForFileName,
+  MAX_AI_UPLOAD_BYTES,
+  formatFileSize,
+  readFileAsBase64,
+  isSupportedDocumentFile,
+  ACCEPTED_DOCUMENT_TYPES_LABEL,
+  ACCEPTED_DOCUMENT_TYPES_ACCEPT,
+} from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -625,7 +635,7 @@ export function AddBillDialog({
           <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
             <div
               className={
-                "rounded-md border border-dashed p-3 transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
+                "rounded-md border-2 border-dashed p-6 text-center transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
               }
               onDragOver={(e) => {
                 e.preventDefault();
@@ -634,23 +644,22 @@ export function AddBillDialog({
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
             >
-              <div className="flex flex-col gap-2">
-                <div className="text-xs text-muted-foreground">
+              <div className="flex flex-col items-center gap-2">
+                <FileUp className="h-8 w-8 text-muted-foreground" />
+                <div className="text-sm text-muted-foreground">
                   {busy ? "Reading document…" : "Drop a bill here, or choose a file."}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="file"
-                    accept="application/pdf,image/*"
-                    className="h-8 text-xs"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void extract(f);
-                    }}
-                  />
-                  <FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </div>
+                <div className="text-xs text-muted-foreground">Accepts {ACCEPTED_DOCUMENT_TYPES_LABEL}</div>
+                <Input
+                  type="file"
+                  accept={ACCEPTED_DOCUMENT_TYPES_ACCEPT}
+                  className="h-8 max-w-[240px] text-xs"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void extract(f);
+                  }}
+                />
               </div>
               {form.sourceFileName && (
                 <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">

@@ -20,7 +20,18 @@ const IMAGE_EXT_MIME: Record<string, string> = {
   jpeg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
 };
+
+/** Shown on every upload dropzone so a landlord knows what will actually work before dropping it
+ * — kept as one list so it can't drift from IMAGE_EXT_MIME/isSupportedDocumentFile above. */
+export const ACCEPTED_DOCUMENT_TYPES_LABEL = "PDF, JPG, PNG, WebP, GIF, HEIC";
+/** `accept` attribute for every upload `<input type="file">` — deliberately the exact types we
+ * both preview (isImageFileName) and forward to Gemini, not the browser's broad "image/*" (which
+ * would let the OS picker offer formats like BMP/TIFF/SVG that aren't in IMAGE_EXT_MIME and would
+ * hit the same "can't preview this" failure mode a non-image/PDF file did). */
+export const ACCEPTED_DOCUMENT_TYPES_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif";
 
 export function mimeForFileName(fileName?: string): string {
   const ext = (fileName ?? "").toLowerCase().split(".").pop() ?? "";
