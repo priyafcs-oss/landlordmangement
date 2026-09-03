@@ -5,11 +5,15 @@ import { base64ToBlobUrl, isImageFileName, mimeForFileName } from "@/lib/files";
 
 /** Chrome/Edge's built-in PDF viewer opens with its own toolbar and page-thumbnail sidebar by
  * default, which — inside an already-small iframe — eats width that should go to the page
- * itself. These are standard PDF "open parameters" the built-in viewer honors as a URL fragment;
- * appending them (harmless on blob: URLs, and a no-op for images) hides both so the document
- * fills the pane instead of sharing it with browser chrome. */
+ * itself; on top of that its default zoom fits the whole PAGE HEIGHT into the viewport, which
+ * for a tall/portrait page inside a wide-but-short pane (the common shape here, especially once
+ * enlarged) renders the page tiny with large empty bars either side rather than filling the
+ * pane. `view=FitH` (a standard Adobe/PDF "open parameter" the built-in viewer honors as a URL
+ * fragment) fits the page to the pane's WIDTH instead, so the page itself is the large thing on
+ * screen and any overflow scrolls vertically — appending these fragments is harmless on blob:
+ * URLs and a no-op for images. */
 function pdfViewerSrc(url: string): string {
-  return `${url}#toolbar=0&navpanes=0`;
+  return `${url}#toolbar=0&navpanes=0&view=FitH`;
 }
 
 /** Shared left-pane document preview for every bill/transaction review surface — renders the
