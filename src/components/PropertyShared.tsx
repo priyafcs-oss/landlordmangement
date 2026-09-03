@@ -45,6 +45,7 @@ import {
   Search,
   Calculator,
   Eye,
+  Landmark,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
@@ -111,6 +112,8 @@ import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64 } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
+import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
 import { bucketBy } from "@/lib/group";
@@ -3679,6 +3682,358 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
           Full EOFY report <ArrowRight className="h-3 w-3" />
         </Link>
       </Button>
+    </div>
+  );
+}
+
+const FORECAST_YEARS = 40;
+
+function fmtWhole(n: number): string {
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
+}
+
+function fmtAxisDollars(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}m`;
+  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1000)}k`;
+  return `${sign}$${Math.round(abs)}`;
+}
+
+function forecastAssumptionsDefaults(prop: Property, loan?: Loan) {
+  return {
+    rentGrowth: "3",
+    expenseGrowth: "3",
+    capitalGrowth: "3",
+    avgLoanInterest: (loan?.interestRate ?? prop.interestRate ?? 5.85).toString(),
+    pmFeePercent: (prop.pmFeePercent ?? 6).toString(),
+  };
+}
+
+/** Implied historical trend average growth (CAGR) in property value since purchase — what the
+ * "Refresh HTAG" button offers as a data-backed alternative to guessing a capital growth rate. */
+function historicalTrendAverageGrowth(prop: Property): number | null {
+  if (!prop.purchasePrice || !prop.purchaseDate || !prop.currentValue) return null;
+  const years = (Date.now() - new Date(prop.purchaseDate).getTime()) / (365.25 * 24 * 3600 * 1000);
+  if (years < 0.5) return null;
+  return (Math.pow(prop.currentValue / prop.purchasePrice, 1 / years) - 1) * 100;
+}
+
+/** Simple annual amortization of a loan at an assumed rate over its remaining term. Interest-only
+ * loans never reduce principal; principal & interest loans use a standard annuity payment. */
+function projectLoanBalance(openingBalance: number, ratePct: number, termYears: number, interestOnly: boolean, years: number) {
+  const r = ratePct / 100;
+  const n = Math.max(termYears, 1);
+  const annualPayment = r === 0 ? openingBalance / n : (openingBalance * r) / (1 - Math.pow(1 + r, -n));
+  const balances = [openingBalance];
+  const repayments = [0];
+  let balance = openingBalance;
+  for (let i = 1; i <= years; i++) {
+    const interest = balance * r;
+    const payment = balance <= 0 ? 0 : interestOnly ? interest : Math.min(annualPayment, balance + interest);
+    const principal = interestOnly ? 0 : Math.max(payment - interest, 0);
+    balance = Math.max(balance - principal, 0);
+    balances.push(balance);
+    repayments.push(payment);
+  }
+  return { balances, repayments };
+}
+
+function buildForecast(
+  prop: Property,
+  loan: Loan | undefined,
+  tenants: Tenant[],
+  assumptions: { rentGrowth: number; expenseGrowth: number; capitalGrowth: number; avgLoanInterest: number; pmFeePercent: number },
+) {
+  const baseline = computeAnnualBaseline(prop, loan, tenants);
+  const baseOpEx = baseline.opEx - baseline.pmFee;
+  const openingBalance = loan?.totalBalance ?? 0;
+  const remainingTermYears = loan?.maturityDate
+    ? Math.max(1, Math.round((new Date(loan.maturityDate).getTime() - Date.now()) / (365.25 * 24 * 3600 * 1000)))
+    : 30;
+  const interestOnly = loan?.loanType === "Interest Only";
+  const { balances: debtByYear, repayments: loanRepaymentsByYear } = projectLoanBalance(
+    openingBalance,
+    assumptions.avgLoanInterest,
+    remainingTermYears,
+    interestOnly,
+    FORECAST_YEARS,
+  );
+
+  const rentGrowth = assumptions.rentGrowth / 100;
+  const expenseGrowth = assumptions.expenseGrowth / 100;
+  const capitalGrowth = assumptions.capitalGrowth / 100;
+  const pmFeeRate = assumptions.pmFeePercent / 100;
+
+  const rows: {
+    year: number;
+    propertyValue: number;
+    debt: number;
+    rent: number;
+    expenses: number;
+    netCF: number;
+    cumulativeCF: number;
+  }[] = [];
+  let cumulativeCF = 0;
+  for (let i = 0; i <= FORECAST_YEARS; i++) {
+    const rent = baseline.annualRent * Math.pow(1 + rentGrowth, i);
+    const pmFee = rent * pmFeeRate;
+    const opEx = baseOpEx * Math.pow(1 + expenseGrowth, i);
+    const expenses = pmFee + opEx + loanRepaymentsByYear[i];
+    const netCF = rent - expenses;
+    cumulativeCF += netCF;
+    rows.push({
+      year: i,
+      propertyValue: prop.currentValue * Math.pow(1 + capitalGrowth, i),
+      debt: debtByYear[i],
+      rent,
+      expenses,
+      netCF,
+      cumulativeCF,
+    });
+  }
+
+  let cashflowNeutralYear: number | null = null;
+  for (const row of rows) {
+    if (row.netCF >= 0) {
+      cashflowNeutralYear = row.year;
+      break;
+    }
+  }
+  if (cashflowNeutralYear === null) {
+    const last = rows[rows.length - 1];
+    const prev = rows[rows.length - 6];
+    const trendPerYear = (last.netCF - prev.netCF) / (last.year - prev.year);
+    if (trendPerYear > 0) {
+      cashflowNeutralYear = last.year + Math.max(1, Math.ceil(-last.netCF / trendPerYear));
+    }
+  }
+
+  return { rows, cashflowNeutralYear, openingBalance };
+}
+
+const FORECAST_CHART_CONFIG: ChartConfig = {
+  propertyValue: { label: "Property value", color: "var(--primary)" },
+  debt: { label: "Debt", color: "var(--muted-foreground)" },
+  netCF: { label: "Net CF /yr", color: "var(--chart-3)" },
+  cumulativeCF: { label: "Cumulative CF", color: "var(--primary)" },
+  expenses: { label: "Expenses", color: "var(--destructive)" },
+};
+
+export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; loan?: Loan; tenants: Tenant[] }) {
+  const [form, setForm] = useState(() => forecastAssumptionsDefaults(prop, loan));
+
+  const assumptions = {
+    rentGrowth: parseFloat(form.rentGrowth) || 0,
+    expenseGrowth: parseFloat(form.expenseGrowth) || 0,
+    capitalGrowth: parseFloat(form.capitalGrowth) || 0,
+    avgLoanInterest: parseFloat(form.avgLoanInterest) || 0,
+    pmFeePercent: parseFloat(form.pmFeePercent) || 0,
+  };
+
+  const { rows, cashflowNeutralYear, openingBalance } = useMemo(
+    () => buildForecast(prop, loan, tenants, assumptions),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [prop, loan, tenants, form.rentGrowth, form.expenseGrowth, form.capitalGrowth, form.avgLoanInterest, form.pmFeePercent],
+  );
+
+  const year0 = rows[0];
+  const year40 = rows[FORECAST_YEARS];
+  const valueGrowth = year40.propertyValue - prop.currentValue;
+  const valueGrowthPct = prop.currentValue ? (valueGrowth / prop.currentValue) * 100 : 0;
+  const debtPaidOff = openingBalance - year40.debt;
+
+  const refreshHtag = () => {
+    const rate = historicalTrendAverageGrowth(prop);
+    if (rate === null) {
+      toast.error("Add a purchase price, purchase date and current value under Property Details to calculate historical growth");
+      return;
+    }
+    setForm((f) => ({ ...f, capitalGrowth: rate.toFixed(1) }));
+    toast.success(`Capital growth set to ${rate.toFixed(1)}% p.a. — this property's own trend since purchase`);
+  };
+
+  const resetTo3 = () => setForm((f) => ({ ...f, rentGrowth: "3", expenseGrowth: "3", capitalGrowth: "3" }));
+
+  const milestoneYears = [10, 20, 30, 40];
+  const chartTicks = [0, 5, 10, 15, 20, 25, 30, 35, 40];
+
+  return (
+    <div className="space-y-4 text-sm">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
+          <CardTitle className="text-base">Forecast Assumptions</CardTitle>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="gap-1" onClick={refreshHtag}>
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh HTAG
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1" onClick={resetTo3}>
+              <History className="h-3.5 w-3.5" /> Reset to 3%
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Rent Growth (% p.a.)">
+              <Input type="number" value={form.rentGrowth} onChange={(e) => setForm((f) => ({ ...f, rentGrowth: e.target.value }))} />
+            </Field>
+            <Field label="Expense Growth (% p.a.)">
+              <Input type="number" value={form.expenseGrowth} onChange={(e) => setForm((f) => ({ ...f, expenseGrowth: e.target.value }))} />
+            </Field>
+            <Field label="Capital Growth (% p.a.)">
+              <Input type="number" value={form.capitalGrowth} onChange={(e) => setForm((f) => ({ ...f, capitalGrowth: e.target.value }))} />
+            </Field>
+            <Field label="Avg Loan Interest (%)">
+              <Input type="number" value={form.avgLoanInterest} onChange={(e) => setForm((f) => ({ ...f, avgLoanInterest: e.target.value }))} />
+            </Field>
+            <Field label="PM Fee (% of rent)">
+              <Input type="number" value={form.pmFeePercent} onChange={(e) => setForm((f) => ({ ...f, pmFeePercent: e.target.value }))} />
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Cashflow Neutral</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-emerald-600">
+              {cashflowNeutralYear === null ? "Not projected" : cashflowNeutralYear === 0 ? "Already positive" : `Year ${cashflowNeutralYear}`}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {cashflowNeutralYear !== null && cashflowNeutralYear > FORECAST_YEARS
+                ? `Beyond the ${FORECAST_YEARS}-year chart · `
+                : ""}
+              Current annual cashflow: {fmtWhole(year0.netCF)}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Property Value (Year {FORECAST_YEARS})</CardTitle>
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold">{fmtWhole(year40.propertyValue)}</div>
+            <div className="text-xs text-muted-foreground">
+              +{fmtWhole(valueGrowth)} ({valueGrowthPct.toFixed(1)}%)
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Debt at Year {FORECAST_YEARS}</CardTitle>
+            <Landmark className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-destructive">{fmtWhole(year40.debt)}</div>
+            <div className="text-xs text-muted-foreground">
+              {openingBalance > 0 ? `${fmtWhole(debtPaidOff)} paid off` : "No loan on this property"}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{FORECAST_YEARS}-Year Investment Forecast</CardTitle>
+          <div className="text-xs text-muted-foreground">Projected property value, debt, expenses and cumulative cashflow</div>
+        </CardHeader>
+        <CardContent>
+          <ChartContainer config={FORECAST_CHART_CONFIG} className="aspect-auto h-[340px] w-full">
+            <ComposedChart data={rows} margin={{ left: 4, right: 4, top: 4, bottom: 0 }}>
+              <CartesianGrid vertical={false} strokeDasharray="3 3" />
+              <XAxis
+                dataKey="year"
+                tickLine={false}
+                axisLine={false}
+                fontSize={11}
+                ticks={chartTicks}
+                tickFormatter={(y: number) => `Yr ${y}`}
+              />
+              <YAxis
+                yAxisId="left"
+                tickLine={false}
+                axisLine={false}
+                fontSize={11}
+                width={56}
+                tickFormatter={fmtAxisDollars}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tickLine={false}
+                axisLine={false}
+                fontSize={11}
+                width={56}
+                tickFormatter={fmtAxisDollars}
+              />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    labelFormatter={(y) => `Yr ${y}`}
+                    formatter={(value, name, item) => (
+                      <div className="flex w-full items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{FORECAST_CHART_CONFIG[item.dataKey as string]?.label ?? name}</span>
+                        <span className="font-mono font-medium tabular-nums text-foreground">{fmtWhole(value as number)}</span>
+                      </div>
+                    )}
+                  />
+                }
+              />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Line yAxisId="left" type="monotone" dataKey="propertyValue" stroke="var(--color-propertyValue)" dot={false} strokeWidth={2} />
+              <Line yAxisId="left" type="monotone" dataKey="debt" stroke="var(--color-debt)" dot={false} strokeWidth={2} />
+              <Line yAxisId="left" type="monotone" dataKey="cumulativeCF" stroke="var(--color-cumulativeCF)" strokeDasharray="4 3" dot={false} strokeWidth={1.5} />
+              <Line yAxisId="right" type="monotone" dataKey="netCF" stroke="var(--color-netCF)" dot={false} strokeWidth={2} />
+              <Line yAxisId="right" type="monotone" dataKey="expenses" stroke="var(--color-expenses)" dot={false} strokeWidth={1.5} />
+            </ComposedChart>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Key Milestones</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-muted-foreground">
+                <th className="py-1.5 font-medium">Year</th>
+                <th className="py-1.5 font-medium">Property Value</th>
+                <th className="py-1.5 font-medium">Total Debt</th>
+                <th className="py-1.5 font-medium">Annual Rent</th>
+                <th className="py-1.5 font-medium">Expenses</th>
+                <th className="py-1.5 font-medium">Net Cashflow</th>
+              </tr>
+            </thead>
+            <tbody>
+              {milestoneYears.map((y) => {
+                const row = rows[y];
+                return (
+                  <tr key={y} className="border-b last:border-0">
+                    <td className="py-1.5 font-medium">Year {y}</td>
+                    <td className="py-1.5">{fmtWhole(row.propertyValue)}</td>
+                    <td className="py-1.5">{fmtWhole(row.debt)}</td>
+                    <td className="py-1.5">{fmtWhole(row.rent)}</td>
+                    <td className="py-1.5 text-destructive">{fmtWhole(row.expenses)}</td>
+                    <td className={`py-1.5 ${row.netCF < 0 ? "text-destructive" : "text-emerald-600"}`}>{fmtWhole(row.netCF)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      <div className="text-xs text-muted-foreground">
+        Projected from the assumptions above, compounded annually from today's rent, costs, property value and loan balance —
+        not a guarantee of future performance.
+      </div>
     </div>
   );
 }
