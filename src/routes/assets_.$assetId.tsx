@@ -29,10 +29,12 @@ import {
   FileUp,
   SlidersHorizontal,
   TrendingUp,
+  Activity,
 } from "lucide-react";
 import { usePersistedToggle } from "@/lib/hooks";
 import {
   PropertySummaryTab,
+  PropertyPerformanceTab,
   PropertyDetailsTab,
   PropertyPurchaseTab,
   PropertyBillsTab,
@@ -65,6 +67,7 @@ export const Route = createFileRoute("/assets_/$assetId")({
 
 type Section =
   | "summary"
+  | "performance"
   | "purchase"
   | "transactions"
   | "bills"
@@ -86,6 +89,7 @@ type Section =
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
   { section: "summary", label: "Performance & Summary", icon: LayoutDashboard },
+  { section: "performance", label: "Performance", icon: Activity },
   { section: "purchase", label: "Purchase & Acquisition", icon: ShoppingCart },
   { section: "providers", label: "Providers", icon: Users2 },
   { section: "transactions", label: "Transactions", icon: Receipt, group: "Finance" },
@@ -330,6 +334,7 @@ function PropertyAssetPage() {
 
       <div className="min-w-0 flex-1 p-4 sm:p-6">
         {section === "summary" && <PropertySummaryTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
+        {section === "performance" && <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
         {section === "purchase" && <PropertyPurchaseTab prop={prop} loan={loan} />}
         {section === "transactions" && <LedgerTab propertyId={prop.id} />}
         {section === "bills" && <PropertyBillsTab propertyId={prop.id} />}

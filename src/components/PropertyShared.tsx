@@ -2546,6 +2546,469 @@ export function PropertySummaryTab({
   );
 }
 
+/** Expense categories (from CATEGORY_GROUPS' "Cost Base (Capital)" group) that represent money
+ * spent to ACQUIRE the property — legal/agent/inspection fees — distinct from stampDuty (its own
+ * Property field, added separately below) and from post-purchase capital works (Capital
+ * Improvement, Initial Repairs), which grow the cost base for CGT but were never part of "what did
+ * settlement actually cost". */
+const BUYING_COST_CATEGORIES: ExpenseCategory[] = [
+  "Conveyancer Fees",
+  "Conveyancing / Legal (Purchase)",
+  "Buyer's Agent Fee",
+  "Building / Pest Inspection (Purchase)",
+];
+
+function fmtCompactCurrency(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1000)}k`;
+  return `${sign}${fmtCurrency(abs)}`;
+}
+
+/**
+ * Bisection IRR solver over a simplified annual cashflow model — a lump initial outflow, the
+ * recorded net cashflow spread evenly across the (possibly fractional) years held, and a terminal
+ * value discounted at the end of that period. This isn't a full irregular-cashflow IRR (this app
+ * doesn't track exact historical per-period cashflow, only a lump total — see recordedNetCashflow
+ * below), but unlike a plain start/end CAGR it does discount interim cashflows for their timing,
+ * which is the actual difference between "IRR" and "annualised return" a landlord would expect to
+ * see reported separately.
+ */
+function solveIrr(cashInvested: number, annualCashflow: number, years: number, terminalValue: number): number | null {
+  if (!(cashInvested > 0) || !(years > 0)) return null;
+  const npv = (r: number) => {
+    let sum = -cashInvested;
+    const fullYears = Math.floor(years);
+    for (let t = 1; t <= fullYears; t++) sum += annualCashflow / Math.pow(1 + r, t);
+    const fracYear = years - fullYears;
+    if (fracYear > 0.001) sum += (annualCashflow * fracYear) / Math.pow(1 + r, years);
+    sum += terminalValue / Math.pow(1 + r, years);
+    return sum;
+  };
+  let lo = -0.99;
+  let hi = 5;
+  let npvLo = npv(lo);
+  const npvHi = npv(hi);
+  if (!Number.isFinite(npvLo) || !Number.isFinite(npvHi) || npvLo * npvHi > 0) return null;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const npvMid = npv(mid);
+    if (Math.abs(npvMid) < 1) return mid;
+    if (npvMid > 0 === npvLo > 0) {
+      lo = mid;
+      npvLo = npvMid;
+    } else {
+      hi = mid;
+    }
+  }
+  return (lo + hi) / 2;
+}
+
+interface ValuePoint {
+  date: string;
+  value: number;
+}
+
+/** Geometric (compounding) interpolation between known actual value points, monthly steps — fills
+ * in the dashed "Estimated" trend line the value-journey chart draws between sparse real data (a
+ * ValuationSnapshot is only taken when currentValue actually changes, see snapshotValuation in
+ * store.tsx, so most properties only have a couple of real points). Falls back to linear
+ * interpolation if either endpoint is zero/negative, where geometric interpolation is undefined. */
+function interpolateValueJourney(points: ValuePoint[]): ValuePoint[] {
+  if (points.length < 2) return points;
+  const out: ValuePoint[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const aDate = new Date(a.date);
+    const bDate = new Date(b.date);
+    const totalMonths = Math.max(1, Math.round((bDate.getTime() - aDate.getTime()) / (30.44 * 24 * 3600 * 1000)));
+    for (let m = i === 0 ? 0 : 1; m <= totalMonths; m++) {
+      const t = m / totalMonths;
+      const value = a.value > 0 && b.value > 0 ? a.value * Math.pow(b.value / a.value, t) : a.value + (b.value - a.value) * t;
+      const d = new Date(aDate);
+      d.setMonth(d.getMonth() + m);
+      out.push({ date: d.toISOString().slice(0, 10), value });
+    }
+  }
+  return out;
+}
+
+/** Minimal, dependency-free line chart — a value trend line doesn't need a charting library, and
+ * this app doesn't otherwise pull one in (see the plain-CSS bars used elsewhere, e.g. this tab's
+ * own "where the return came from" bars, or PropertyPnLTab's "Where it goes"). Draws the
+ * interpolated "Estimated" series as a dashed path and every real data point (purchase price,
+ * ValuationSnapshots, today's value) as a solid dot. */
+function ValueJourneyChart({ actualPoints, estimatedPoints }: { actualPoints: ValuePoint[]; estimatedPoints: ValuePoint[] }) {
+  const width = 600;
+  const height = 180;
+  const padding = { top: 10, right: 10, bottom: 20, left: 8 };
+  const values = estimatedPoints.map((p) => p.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const valueRange = maxValue - minValue || 1;
+  const startTime = new Date(estimatedPoints[0].date).getTime();
+  const endTime = new Date(estimatedPoints[estimatedPoints.length - 1].date).getTime();
+  const timeRange = endTime - startTime || 1;
+
+  const x = (date: string) => padding.left + ((new Date(date).getTime() - startTime) / timeRange) * (width - padding.left - padding.right);
+  const y = (value: number) => padding.top + (1 - (value - minValue) / valueRange) * (height - padding.top - padding.bottom);
+
+  const pathD = estimatedPoints.map((p, i) => `${i === 0 ? "M" : "L"} ${x(p.date).toFixed(1)} ${y(p.value).toFixed(1)}`).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-48 w-full text-muted-foreground" preserveAspectRatio="none">
+      <line x1={padding.left} y1={y(maxValue)} x2={width - padding.right} y2={y(maxValue)} stroke="currentColor" strokeOpacity={0.15} />
+      <line x1={padding.left} y1={y(minValue)} x2={width - padding.right} y2={y(minValue)} stroke="currentColor" strokeOpacity={0.15} />
+      <text x={padding.left} y={Math.max(10, y(maxValue) - 4)} fontSize={10} fill="currentColor">
+        {fmtCompactCurrency(maxValue)}
+      </text>
+      <text x={padding.left} y={Math.min(height - 24, y(minValue) + 12)} fontSize={10} fill="currentColor">
+        {fmtCompactCurrency(minValue)}
+      </text>
+      <path d={pathD} fill="none" stroke="var(--primary)" strokeWidth={2} strokeDasharray="5 4" />
+      {actualPoints.map((p) => (
+        <circle key={p.date} cx={x(p.date)} cy={y(p.value)} r={3.5} fill="var(--primary)" />
+      ))}
+      <text x={padding.left} y={height - 4} fontSize={10} fill="currentColor">
+        {new Date(estimatedPoints[0].date).toLocaleDateString("en-AU", { month: "short", year: "numeric" })}
+      </text>
+      <text x={width - padding.right} y={height - 4} fontSize={10} fill="currentColor" textAnchor="end">
+        {new Date(estimatedPoints[estimatedPoints.length - 1].date).toLocaleDateString("en-AU", { month: "short", year: "numeric" })}
+      </text>
+    </svg>
+  );
+}
+
+function PerfTile({ label, value, caption }: { label: string; value: string; caption?: string }) {
+  return (
+    <div className="rounded-md bg-muted p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-base font-semibold">{value}</div>
+      {caption && <div className="mt-0.5 text-xs text-muted-foreground">{caption}</div>}
+    </div>
+  );
+}
+
+/**
+ * Whole-of-hold performance — how this property has actually done since purchase, distinct from
+ * PropertySummaryTab's snapshot stats (this-FY-only) and the Forecasts tab (forward-looking
+ * projection). Reuses computeAnnualBaseline for today's run-rate figures (yields, cash-on-cash)
+ * but its "recorded net cashflow"/IRR are built from real transaction history, not projected.
+ */
+export function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
+  const { state } = useStore();
+  const baseline = computeAnnualBaseline(prop, loan, tenants);
+  const now = Date.now();
+
+  const purchasePrice = prop.purchasePrice || 0;
+  const currentValue = prop.currentValue || 0;
+  const stampDuty = prop.stampDuty ?? 0;
+  const buyingCosts = expenses
+    .filter((e) => BUYING_COST_CATEGORIES.includes((e.category ?? "") as ExpenseCategory))
+    .reduce((s, e) => s + e.cost, 0);
+  const upfrontCosts = stampDuty + buyingCosts;
+  // Total cost base for the return/yield ratios below — purchase price plus everything spent to
+  // acquire AND improve it (post-purchase "Capital Improvement" expenses count too; ongoing
+  // repairs/maintenance don't, those are running expenses, not capital). Distinct from Cash
+  // Invested's own breakdown further down, which is about how the purchase was FUNDED, not the
+  // full capital deployed into the asset since.
+  const capitalImprovements = expenses.filter((e) => e.category === "Capital Improvement").reduce((s, e) => s + e.cost, 0);
+  const costBase = purchasePrice + upfrontCosts + capitalImprovements;
+  const startingLoanBalance = loan?.originalAmount ?? 0;
+  const cashInvested = Math.max(0, purchasePrice + upfrontCosts - startingLoanBalance);
+
+  const debt = loan?.totalBalance ?? 0;
+  const equity = currentValue - debt;
+  const usableEquity = Math.max(0, currentValue * 0.8 - debt);
+  const lvr = currentValue > 0 ? (debt / currentValue) * 100 : 0;
+
+  const purchaseDate = prop.purchaseDate;
+  const yearsHeld = purchaseDate ? Math.max((now - new Date(purchaseDate).getTime()) / (365.25 * 24 * 3600 * 1000), 1 / 365) : null;
+  // Annualizing a hold shorter than a year produces a wildly misleading extrapolated rate (a
+  // month of growth compounded to "per year") — both annualized figures below are gated on it.
+  const hasFullYearHeld = yearsHeld !== null && yearsHeld >= 1;
+
+  const capitalGrowthDollar = currentValue - purchasePrice;
+  const capitalGrowthPct =
+    hasFullYearHeld && purchasePrice > 0 ? (Math.pow(currentValue / purchasePrice, 1 / (yearsHeld as number)) - 1) * 100 : null;
+  const capitalGrowthNetOfCosts = currentValue - costBase;
+
+  const grossYield = currentValue > 0 ? (baseline.annualRent / currentValue) * 100 : 0;
+  const netYield = currentValue > 0 ? ((baseline.annualRent - baseline.opEx) / currentValue) * 100 : 0;
+  const yieldOnPurchase = purchasePrice > 0 ? (baseline.annualRent / purchasePrice) * 100 : 0;
+  const yieldOnCost = costBase > 0 ? (baseline.annualRent / costBase) * 100 : 0;
+  // Pre-tax, using today's rent/costs/loan — not the "recorded" historical figures below.
+  const cashOnCash = cashInvested > 0 ? (baseline.netCashflow / cashInvested) * 100 : null;
+
+  // Recorded net cashflow — actual logged rent/expenses since the earliest date this property has
+  // real transaction history for, which may be well after purchaseDate if the property joined the
+  // app partway through ownership. Nothing is estimated here (no transactions on file means this
+  // is exactly $0, not a guess) — this is deliberately a plainer, more conservative figure than
+  // computeAnnualBaseline's projected netCashflow above.
+  const tenantIds = tenants.map((t) => t.id);
+  const rentEntries = state.ledger.filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment");
+  const recordDates = [...rentEntries.map((e) => e.date), ...expenses.map((e) => e.date)].filter(Boolean).sort();
+  const cashflowStart = recordDates[0] ?? purchaseDate ?? todayISO();
+  const recordedRent = rentEntries.filter((e) => e.date >= cashflowStart).reduce((s, e) => s + e.credit, 0);
+  const recordedExpensesOut = expenses.filter((e) => e.date >= cashflowStart && e.direction !== "Income").reduce((s, e) => s + e.cost, 0);
+  const recordedExtraIncome = expenses.filter((e) => e.date >= cashflowStart && e.direction === "Income").reduce((s, e) => s + e.cost, 0);
+  const recordedNetCashflow = recordedRent + recordedExtraIncome - recordedExpensesOut;
+
+  const totalReturnDollar = capitalGrowthNetOfCosts + recordedNetCashflow;
+  const totalReturnPctPa =
+    hasFullYearHeld && costBase > 0 ? (Math.pow(1 + totalReturnDollar / costBase, 1 / (yearsHeld as number)) - 1) * 100 : null;
+  const irr = yearsHeld && cashInvested > 0 ? solveIrr(cashInvested, recordedNetCashflow / Math.max(yearsHeld, 1), yearsHeld, equity) : null;
+
+  // Value journey — see interpolateValueJourney's doc for why the line between real points is an
+  // interpolation, not a claim about value on any specific day.
+  const snapshots = state.valuationSnapshots.filter((v) => v.assetId === prop.assetId).map((v) => ({ date: v.date, value: v.value }));
+  const journeyPoints: ValuePoint[] = [];
+  if (purchaseDate && purchasePrice > 0) journeyPoints.push({ date: purchaseDate, value: purchasePrice });
+  journeyPoints.push(...snapshots);
+  if (currentValue > 0) journeyPoints.push({ date: todayISO(), value: currentValue });
+  journeyPoints.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const dedupedActual = journeyPoints.filter((p, i, arr) => i === arr.length - 1 || p.date !== arr[i + 1].date);
+  const journeyEstimatedPoints = interpolateValueJourney(dedupedActual);
+
+  // Cashflow break-even — a lightweight year-by-year projection at a flat 3%/3% rent/expense
+  // growth (the same default the Forecasts tab starts from), just to answer "when", not a full
+  // model of its own.
+  let breakEvenYear: number | null = null;
+  if (baseline.annualRent > 0) {
+    if (baseline.netCashflow >= 0) {
+      breakEvenYear = 0;
+    } else {
+      let rent = baseline.annualRent;
+      let opEx = baseline.opEx;
+      for (let y = 1; y <= 40; y++) {
+        rent *= 1.03;
+        opEx *= 1.03;
+        if (rent - opEx - baseline.totalLoanRepayments >= 0) {
+          breakEvenYear = y;
+          break;
+        }
+      }
+    }
+  }
+
+  const fundedByLoanPct = purchasePrice > 0 ? Math.min(100, (startingLoanBalance / purchasePrice) * 100) : 0;
+  const cashPct = purchasePrice + upfrontCosts > 0 ? (cashInvested / (purchasePrice + upfrontCosts)) * 100 : 0;
+  const returnMagnitude = Math.abs(capitalGrowthNetOfCosts) + Math.abs(recordedNetCashflow) || 1;
+
+  return (
+    <div className="space-y-4 text-sm">
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <PerfTile
+              label="Total return"
+              value={totalReturnPctPa !== null ? `${totalReturnPctPa.toFixed(1)}% p.a.` : "—"}
+              caption={
+                !purchaseDate
+                  ? "Add a purchase date"
+                  : !hasFullYearHeld
+                    ? "Needs at least 1 year of ownership"
+                    : `${totalReturnDollar >= 0 ? "+" : ""}${fmtCurrency(totalReturnDollar)} over the hold`
+              }
+            />
+            <PerfTile
+              label="Capital growth"
+              value={capitalGrowthPct !== null ? `${capitalGrowthPct.toFixed(1)}% p.a.` : "—"}
+              caption={
+                !purchaseDate
+                  ? "Add a purchase date"
+                  : !hasFullYearHeld
+                    ? "Needs at least 1 year of ownership"
+                    : `${capitalGrowthDollar >= 0 ? "+" : ""}${fmtCurrency(capitalGrowthDollar)} since purchase`
+              }
+            />
+            <PerfTile label="Yield on cost" value={`${yieldOnCost.toFixed(1)}%`} caption={`rent ${fmtCurrency(baseline.annualRent)}/yr`} />
+            <PerfTile
+              label="Cash-on-cash"
+              value={cashOnCash !== null ? `${cashOnCash.toFixed(1)}%` : "—"}
+              caption={`${baseline.netCashflow >= 0 ? "+" : ""}${fmtCurrency(baseline.netCashflow)}/yr · ${baseline.netCashflow < 0 ? "negative" : "positive"} gearing`}
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-2 bg-primary"
+                style={{ width: `${currentValue > 0 ? Math.max(0, Math.min(100, (equity / currentValue) * 100)) : 0}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-1 text-xs text-muted-foreground">
+              <span>
+                Debt {fmtCurrency(debt)} · Equity {fmtCurrency(equity)} <span className="opacity-70">(usable {fmtCurrency(usableEquity)})</span>
+              </span>
+              <span>LVR {lvr.toFixed(1)}%</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Value journey</CardTitle>
+          <div className="text-xs text-muted-foreground">Purchase to today</div>
+        </CardHeader>
+        <CardContent>
+          {journeyEstimatedPoints.length >= 2 ? (
+            <ValueJourneyChart actualPoints={dedupedActual} estimatedPoints={journeyEstimatedPoints} />
+          ) : (
+            <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+              Add a purchase price/date and a current value to chart this property's value over time.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Yields</CardTitle>
+          <div className="text-xs text-muted-foreground">
+            Rent {fmtCurrency(baseline.annualRent)}/yr (current lease) · opex {fmtCurrency(baseline.opEx)}/yr
+          </div>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <PerfTile label="Gross yield" value={`${grossYield.toFixed(1)}%`} />
+          <PerfTile label="Net yield" value={`${netYield.toFixed(1)}%`} caption="After operating expenses" />
+          <PerfTile label="Yield on purchase" value={`${yieldOnPurchase.toFixed(1)}%`} caption="On your purchase price" />
+          <PerfTile label="Yield on cost" value={`${yieldOnCost.toFixed(1)}%`} caption={`Cost base ${fmtCurrency(costBase)}`} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Cashflow break-even</CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground">
+          {baseline.annualRent <= 0 ? (
+            <>
+              <div className="font-medium text-foreground">Not enough data yet</div>
+              <div>Add a rent figure and the break-even projection fills in.</div>
+            </>
+          ) : breakEvenYear === 0 ? (
+            <div className="text-sm font-medium text-emerald-600">Already cashflow positive at current rent and costs.</div>
+          ) : breakEvenYear !== null ? (
+            <div className="text-sm text-foreground">
+              Projected to reach cashflow break-even in <span className="font-medium">Year {breakEvenYear}</span>, assuming rent and costs
+              both grow ~3% p.a.
+            </div>
+          ) : (
+            <div>Costs are projected to keep outpacing rent — no break-even within 40 years at these settings.</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Where the return came from</CardTitle>
+            <div className="text-xs text-muted-foreground">Cashflow recorded from {cashflowStart}</div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Capital growth (net of buying costs)</span>
+                <span className={capitalGrowthNetOfCosts < 0 ? "text-destructive" : "text-emerald-600"}>
+                  {capitalGrowthNetOfCosts >= 0 ? "+" : ""}
+                  {fmtCurrency(capitalGrowthNetOfCosts)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-1.5 ${capitalGrowthNetOfCosts < 0 ? "bg-destructive" : "bg-emerald-600"}`}
+                  style={{ width: `${Math.min(100, (Math.abs(capitalGrowthNetOfCosts) / returnMagnitude) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Recorded net cashflow</span>
+                <span className={recordedNetCashflow < 0 ? "text-destructive" : "text-emerald-600"}>
+                  {recordedNetCashflow >= 0 ? "+" : ""}
+                  {fmtCurrency(recordedNetCashflow)}
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-1.5 ${recordedNetCashflow < 0 ? "bg-destructive" : "bg-emerald-600"}`}
+                  style={{ width: `${Math.min(100, (Math.abs(recordedNetCashflow) / returnMagnitude) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 border-t pt-3 text-center">
+              <div>
+                <div className="text-xs text-muted-foreground">Total</div>
+                <div className={`text-sm font-semibold ${totalReturnDollar < 0 ? "text-destructive" : "text-emerald-600"}`}>
+                  {totalReturnDollar >= 0 ? "+" : ""}
+                  {fmtCurrency(totalReturnDollar)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Annualised</div>
+                <div className="text-sm font-semibold">{totalReturnPctPa !== null ? `${totalReturnPctPa.toFixed(1)}% p.a.` : "—"}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">IRR</div>
+                <div className="text-sm font-semibold">{irr !== null ? `${(irr * 100).toFixed(1)}% p.a.` : "—"}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Cash invested</CardTitle>
+            <div className="text-xs text-muted-foreground">Derived from purchase price, buying costs and starting loan balance</div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-muted-foreground">How the purchase was funded</div>
+              <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+                {fundedByLoanPct > 0 && <div className="h-2 bg-destructive" style={{ width: `${fundedByLoanPct}%` }} />}
+                <div className="h-2 bg-primary" style={{ width: `${Math.max(0, 100 - fundedByLoanPct)}%` }} />
+              </div>
+              <div className="flex flex-wrap justify-between gap-1 text-xs text-muted-foreground">
+                <span>
+                  Borrowed {fmtCurrency(startingLoanBalance)} ({fundedByLoanPct.toFixed(0)}%)
+                </span>
+                <span>
+                  Your cash {fmtCurrency(cashInvested)} ({cashPct.toFixed(0)}%)
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1 border-t pt-3 text-xs">
+              <div className="flex justify-between">
+                <span>Purchase price</span>
+                <span>{fmtCurrency(purchasePrice)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>+ Stamp duty &amp; buying costs</span>
+                <span>{fmtCurrency(upfrontCosts)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>− Starting loan balance</span>
+                <span>{fmtCurrency(startingLoanBalance)}</span>
+              </div>
+              <div className="flex justify-between border-t pt-1 font-medium">
+                <span>= Cash invested</span>
+                <span>{fmtCurrency(cashInvested)}</span>
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Cash invested drives cash-on-cash return and IRR — it's the deposit plus buying costs you actually paid, not the
+              property price.
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function purchaseAcquisitionFormOf(prop: Property) {
   return {
     purchasePrice: prop.purchasePrice?.toString() ?? "",
