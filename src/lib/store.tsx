@@ -31,6 +31,7 @@ import type {
   LoanBalanceSnapshot,
   LoanStatement,
   CashBuffer,
+  BankAccount,
   InsurancePolicy,
   MaintenanceItem,
   ComplianceCertificate,
@@ -127,6 +128,7 @@ const empty: AppState = {
   loanBalanceSnapshots: [],
   loanStatements: [],
   buffers: [],
+  bankAccounts: [],
   ledger: [],
   invoices: [],
   loans: [],
@@ -197,6 +199,10 @@ interface StoreCtx {
   updateLoan: (id: string, l: Partial<Loan>) => void;
   deleteLoan: (id: string) => void;
   addLoanStatement: (s: Omit<LoanStatement, "id">) => void;
+
+  addBankAccount: (a: Omit<BankAccount, "id">) => void;
+  updateBankAccount: (id: string, a: Partial<BankAccount>) => void;
+  deleteBankAccount: (id: string) => void;
 
   /** Returns the generated id synchronously (same pattern as findOrCreateEntity), so callers that
    * need to link a related row (e.g. a PropertyBill's linkedExpenseId) can use it immediately. */
@@ -385,6 +391,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         loanBalanceSnapshots,
         loanStatements,
         buffers,
+        bankAccounts,
         ledger,
         invoices,
         loans,
@@ -417,6 +424,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         selectAll<LoanBalanceSnapshot>(TABLES.loanBalanceSnapshots),
         selectAll<LoanStatement>(TABLES.loanStatements),
         selectAll<CashBuffer>(TABLES.buffers),
+        selectAll<BankAccount>(TABLES.bankAccounts),
         selectAll<LedgerEntry>(TABLES.ledger),
         selectAll<TenantInvoice>(TABLES.invoices),
         selectAll<Loan>(TABLES.loans),
@@ -467,6 +475,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         loanBalanceSnapshots,
         loanStatements,
         buffers,
+        bankAccounts,
         ledger,
         invoices,
         loans,
@@ -1102,10 +1111,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const linkedPropertyIds = state.properties.filter((p) => p.entityId === id).map((p) => p.id);
       void deleteRow(TABLES.entities, id);
       linkedPropertyIds.forEach((pid) => void updateRow(TABLES.properties, pid, { entityId: null }));
+      void deleteWhere(TABLES.bankAccounts, "entityId", id);
       set((s) => ({
         ...s,
         entities: s.entities.filter((e) => e.id !== id),
         properties: s.properties.map((p) => (p.entityId === id ? { ...p, entityId: undefined } : p)),
+        bankAccounts: s.bankAccounts.filter((a) => a.entityId !== id),
       }));
     },
     findOrCreateEntity: (name, type) => {
@@ -1235,6 +1246,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteBuffer: (id) => {
       void deleteRow(TABLES.buffers, id);
       set((s) => ({ ...s, buffers: s.buffers.filter((b) => b.id !== id) }));
+    },
+
+    addBankAccount: (a) => {
+      const row: BankAccount = { ...a, id: uid("bank") };
+      void upsertRow(TABLES.bankAccounts, row as unknown as Record<string, unknown>);
+      set((s) => ({ ...s, bankAccounts: [...s.bankAccounts, row] }));
+    },
+    updateBankAccount: (id, patch) => {
+      const stamped = { ...patch, updatedAt: new Date().toISOString() };
+      void updateRow(TABLES.bankAccounts, id, stamped as Record<string, unknown>);
+      set((s) => ({ ...s, bankAccounts: s.bankAccounts.map((a) => (a.id === id ? { ...a, ...stamped } : a)) }));
+    },
+    deleteBankAccount: (id) => {
+      void deleteRow(TABLES.bankAccounts, id);
+      set((s) => ({ ...s, bankAccounts: s.bankAccounts.filter((a) => a.id !== id) }));
     },
 
     addInsurancePolicy: (p) => {

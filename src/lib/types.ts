@@ -271,6 +271,26 @@ export interface CashBuffer {
   currentBalance: number;
 }
 
+export type BankAccountType = "Transaction" | "Savings" | "Offset";
+
+/** A cash bank account held under an Entity — Institution/BSB/account number/balance, entered
+ * manually now (no live bank feed yet). Deliberately separate from Loan, which already has its
+ * own dedicated add/edit workflow (AI document extraction, statement history, offset tracking)
+ * — a cash account here never risks being confused with, or overwriting, a loan account. */
+export interface BankAccount {
+  id: string;
+  created_at?: string;
+  updatedAt?: string;
+  entityId: string;
+  institution?: string;
+  accountName: string;
+  accountType?: BankAccountType;
+  bsb?: string;
+  accountNumber?: string;
+  currentBalance: number;
+  notes?: string;
+}
+
 export interface Tenant {
   id: string;
   /** Server-set on insert — when this tenant record was created, used by Documents to show
@@ -1262,6 +1282,7 @@ export interface AppState {
   loanBalanceSnapshots: LoanBalanceSnapshot[];
   loanStatements: LoanStatement[];
   buffers: CashBuffer[];
+  bankAccounts: BankAccount[];
   ledger: LedgerEntry[];
   invoices: TenantInvoice[];
   loans: Loan[];

@@ -19,12 +19,18 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
+  Wallet,
+  FileUp,
 } from "lucide-react";
 import { usePersistedToggle } from "@/lib/hooks";
 import { LedgerTab } from "@/routes/transactions";
 import { BillsBoard } from "@/components/BillsBoard";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { EntityDialog } from "@/components/EntityDialog";
+import { AddBankAccountDialog } from "@/components/AddBankAccountDialog";
+import { AddLoanDialog } from "@/components/AddLoanDialog";
+import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
+import { LoanStatementHistory } from "@/components/LoanStatementHistory";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/entities_/$entityId")({
@@ -34,7 +40,7 @@ export const Route = createFileRoute("/entities_/$entityId")({
   component: EntityDetailPage,
 });
 
-type Section = "overview" | "transactions" | "bills" | "details";
+type Section = "overview" | "transactions" | "bills" | "bankAccounts" | "details";
 
 const NAV: {
   section: Section;
@@ -45,6 +51,7 @@ const NAV: {
   { section: "overview", label: "Overview", icon: LayoutDashboard },
   { section: "transactions", label: "Transactions", icon: Receipt, group: "Finance" },
   { section: "bills", label: "Bills", icon: FileText, group: "Finance" },
+  { section: "bankAccounts", label: "Bank Accounts", icon: Wallet, group: "Finance" },
   { section: "details", label: "Entity Details", icon: Building2 },
 ];
 
@@ -234,6 +241,7 @@ function EntityDetailPage() {
             <BillsBoard propertyIds={propertyIds} />
           </div>
         )}
+        {section === "bankAccounts" && <EntityBankAccountsTab entity={entity} propertyIds={propertyIds} />}
         {section === "details" && <EntityDetailsTab entity={entity} />}
       </div>
     </div>
@@ -414,6 +422,115 @@ function EntityOverviewTab({
               </div>
             </CardContent>
           </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EntityBankAccountsTab({
+  entity,
+  propertyIds,
+}: {
+  entity: import("@/lib/types").Entity;
+  propertyIds: string[];
+}) {
+  const { state } = useStore();
+  const accounts = state.bankAccounts.filter((a) => a.entityId === entity.id);
+  const propertyIdSet = new Set(propertyIds);
+  const loans = state.loans.filter((l) => propertyIdSet.has(l.propertyId));
+  const propertyName = (propertyId: string) => {
+    const p = state.properties.find((pr) => pr.id === propertyId);
+    return p ? p.alias || p.address : "Unknown property";
+  };
+
+  return (
+    <div className="space-y-6 text-sm">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-medium text-muted-foreground">Cash accounts</div>
+          <AddBankAccountDialog entityId={entity.id} />
+        </div>
+        <div className="space-y-2">
+          {accounts.length === 0 && (
+            <div className="text-xs text-muted-foreground">No cash accounts on file for {entity.name}.</div>
+          )}
+          {accounts.map((a) => (
+            <div key={a.id} className="rounded border p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium">{a.accountName}</div>
+                  <div className="text-muted-foreground">
+                    {a.institution || "—"} · {a.accountType ?? "Transaction"}
+                  </div>
+                </div>
+                <AddBankAccountDialog
+                  account={a}
+                  entityId={entity.id}
+                  trigger={
+                    <Button size="icon" variant="ghost" className="h-6 w-6">
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  }
+                />
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
+                <span>Balance: {fmtCurrency(a.currentBalance)}</span>
+                <span>BSB: {a.bsb || "—"}</span>
+                <span>Account: {a.accountNumber || "—"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3 border-t pt-4">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-medium text-muted-foreground">Loan accounts</div>
+          <AddLoanDialog />
+        </div>
+        <div className="space-y-2">
+          {loans.length === 0 && (
+            <div className="text-xs text-muted-foreground">No loans on file for properties under {entity.name}.</div>
+          )}
+          {loans.map((l) => (
+            <div key={l.id} className="rounded border p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium">{l.bankName}</div>
+                  <div className="text-muted-foreground">{propertyName(l.propertyId)}</div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <UploadDocumentDialog
+                    loanId={l.id}
+                    trigger={
+                      <Button size="icon" variant="ghost" className="h-6 w-6" title="Upload statement">
+                        <FileUp className="h-3 w-3" />
+                      </Button>
+                    }
+                  />
+                  <AddLoanDialog
+                    loan={l}
+                    propertyId={l.propertyId}
+                    trigger={
+                      <Button size="icon" variant="ghost" className="h-6 w-6">
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    }
+                  />
+                </div>
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
+                <span>Balance: {fmtCurrency(l.totalBalance)}</span>
+                <span>Rate: {l.interestRate}%</span>
+                <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
+                <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
+              </div>
+              <div className="mt-2">
+                <LoanStatementHistory loanId={l.id} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
