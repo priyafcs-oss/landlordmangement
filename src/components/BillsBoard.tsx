@@ -43,10 +43,20 @@ interface RowHelpers {
  * property/asset-type filters or column since it's already implied) via the same lockedPropertyId
  * pattern as LedgerTab/DocumentsContent — pass `propertyId` to lock, omit it for portfolio-wide.
  */
-export function BillsBoard({ propertyId: lockedPropertyId }: { propertyId?: string } = {}) {
+export function BillsBoard({
+  propertyId: lockedPropertyId,
+  propertyIds: scopedPropertyIds,
+}: { propertyId?: string; propertyIds?: string[] } = {}) {
   const { state, markBillPaid, deleteBill } = useStore();
   const showPropertyFilter = !lockedPropertyId;
-  const scopedBills = lockedPropertyId ? state.bills.filter((b) => b.propertyId === lockedPropertyId) : state.bills;
+  const scopedBills = lockedPropertyId
+    ? state.bills.filter((b) => b.propertyId === lockedPropertyId)
+    : scopedPropertyIds
+      ? state.bills.filter((b) => !!b.propertyId && scopedPropertyIds.includes(b.propertyId))
+      : state.bills;
+  const scopedProperties = scopedPropertyIds
+    ? state.properties.filter((p) => scopedPropertyIds.includes(p.id))
+    : state.properties;
   const [propertyId, setPropertyId] = useState(lockedPropertyId ?? "__all__");
   const [assetType, setAssetType] = useState<"__all__" | AssetType>("__all__");
   const [status, setStatus] = useState<(typeof STATUS_OPTIONS)[number]>("__all__");
@@ -178,24 +188,26 @@ export function BillsBoard({ propertyId: lockedPropertyId }: { propertyId?: stri
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__all__">All properties</SelectItem>
-                  {state.properties.map((p) => (
+                  {scopedProperties.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.alias || p.address}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
-                <SelectTrigger className="w-[130px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">All asset types</SelectItem>
-                  <SelectItem value="Property">Property</SelectItem>
-                  <SelectItem value="Gold">Gold</SelectItem>
-                  <SelectItem value="ETF">ETF</SelectItem>
-                </SelectContent>
-              </Select>
+              {!scopedPropertyIds && (
+                <Select value={assetType} onValueChange={(v) => setAssetType(v as typeof assetType)}>
+                  <SelectTrigger className="w-[130px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All asset types</SelectItem>
+                    <SelectItem value="Property">Property</SelectItem>
+                    <SelectItem value="Gold">Gold</SelectItem>
+                    <SelectItem value="ETF">ETF</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </>
           )}
           <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>

@@ -27,6 +27,7 @@ import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as ApiCopilotRouteImport } from './routes/api/copilot'
 import { Route as ApiVisionRouteImport } from './routes/api/vision'
 import { Route as AssetsAssetIdRouteImport } from './routes/assets_.$assetId'
+import { Route as EntitiesEntityIdRouteImport } from './routes/entities_.$entityId'
 import { Route as ProvidersProviderIdRouteImport } from './routes/providers_.$providerId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -119,6 +120,11 @@ const AssetsAssetIdRoute = AssetsAssetIdRouteImport.update({
   path: '/assets/$assetId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EntitiesEntityIdRoute = EntitiesEntityIdRouteImport.update({
+  id: '/entities_/$entityId',
+  path: '/entities/$entityId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProvidersProviderIdRoute = ProvidersProviderIdRouteImport.update({
   id: '/providers_/$providerId',
   path: '/providers/$providerId',
@@ -144,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets/$assetId': typeof AssetsAssetIdRoute
+  '/entities/$entityId': typeof EntitiesEntityIdRoute
   '/providers/$providerId': typeof ProvidersProviderIdRoute
 }
 export interface FileRoutesByTo {
@@ -165,6 +172,7 @@ export interface FileRoutesByTo {
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets/$assetId': typeof AssetsAssetIdRoute
+  '/entities/$entityId': typeof EntitiesEntityIdRoute
   '/providers/$providerId': typeof ProvidersProviderIdRoute
 }
 export interface FileRoutesById {
@@ -187,6 +195,7 @@ export interface FileRoutesById {
   '/api/copilot': typeof ApiCopilotRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets_/$assetId': typeof AssetsAssetIdRoute
+  '/entities_/$entityId': typeof EntitiesEntityIdRoute
   '/providers_/$providerId': typeof ProvidersProviderIdRoute
 }
 export interface FileRouteTypes {
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | '/api/copilot'
     | '/api/vision'
     | '/assets/$assetId'
+    | '/entities/$entityId'
     | '/providers/$providerId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/api/copilot'
     | '/api/vision'
     | '/assets/$assetId'
+    | '/entities/$entityId'
     | '/providers/$providerId'
   id:
     | '__root__'
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/api/copilot'
     | '/api/vision'
     | '/assets_/$assetId'
+    | '/entities_/$entityId'
     | '/providers_/$providerId'
   fileRoutesById: FileRoutesById
 }
@@ -274,6 +286,7 @@ export interface RootRouteChildren {
   ApiCopilotRoute: typeof ApiCopilotRoute
   ApiVisionRoute: typeof ApiVisionRoute
   AssetsAssetIdRoute: typeof AssetsAssetIdRoute
+  EntitiesEntityIdRoute: typeof EntitiesEntityIdRoute
   ProvidersProviderIdRoute: typeof ProvidersProviderIdRoute
 }
 
@@ -405,6 +418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AssetsAssetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/entities_/$entityId': {
+      id: '/entities_/$entityId'
+      path: '/entities/$entityId'
+      fullPath: '/entities/$entityId'
+      preLoaderRoute: typeof EntitiesEntityIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/providers_/$providerId': {
       id: '/providers_/$providerId'
       path: '/providers/$providerId'
@@ -434,6 +454,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCopilotRoute: ApiCopilotRoute,
   ApiVisionRoute: ApiVisionRoute,
   AssetsAssetIdRoute: AssetsAssetIdRoute,
+  EntitiesEntityIdRoute: EntitiesEntityIdRoute,
   ProvidersProviderIdRoute: ProvidersProviderIdRoute,
 }
 export const routeTree = rootRouteImport
