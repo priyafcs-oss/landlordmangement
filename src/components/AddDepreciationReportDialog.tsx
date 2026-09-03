@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,11 @@ type Method = NonNullable<DepreciationItem["method"]>;
 
 interface AssetRow {
   key: string;
+  /** Set when this row was hydrated from an already-saved DepreciationItem (editing an existing
+   * report) — save() updates that row by id instead of inserting a new one, and any previously
+   * saved row whose id no longer appears among the current rows gets deleted. Absent for a
+   * brand-new row, whether typed in by hand or extracted from a fresh upload. */
+  existingId?: string;
   description: string;
   division: Division;
   method: Method;
@@ -89,10 +94,29 @@ function mapDivision(raw?: string): Division {
  * shape. Always scoped to a single already-known assetId (called from a property's own
  * Depreciation tab), so unlike AddBillDialog there's no property picker — the property section
  * below is read-only context plus an address-mismatch check, not a switcher.
+ *
+ * Also doubles as the editor for an already-saved report: pass every DepreciationItem sharing one
+ * reportId as `report` (with `open`/`onOpenChange` controlled by the caller, same shape as
+ * AddBillDialog's `initialProposal`) and the dialog hydrates from their saved fields — including
+ * annualClaims/reportAnnualSummary as this session's starting overrides, not a fresh recompute —
+ * instead of starting blank with a new reportId.
  */
-export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
-  const { state, addDepreciationItem } = useStore();
-  const [open, setOpen] = useState(false);
+export function AddDepreciationReportDialog({
+  assetId,
+  report,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
+}: {
+  assetId?: string;
+  report?: DepreciationItem[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const { state, addDepreciationItem, updateDepreciationItem, deleteDepreciationItem } = useStore();
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp ?? internalOpen;
+  const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
+  const isEdit = !!report?.length;
   const [busy, setBusy] = useState(false);
   const [extractOk, setExtractOk] = useState(false);
   const [extractEmpty, setExtractEmpty] = useState(false);
@@ -135,6 +159,65 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
     setExpandedKeys(new Set());
     setReportOverrides({});
   };
+
+  // Hydrates from an already-saved report's items instead of starting blank. Every saved figure —
+  // annualClaims per item, reportAnnualSummary for the aggregate table — becomes this session's
+  // starting override, not a value re-derived from cost/life/method, so reopening a report and
+  // saving again without touching a given cell can never silently drift it from what was actually
+  // reviewed and locked in before (see the annualClaims/reportAnnualSummary field docs on
+  // DepreciationItem).
+  const hydrateFromReport = (reportItems: DepreciationItem[]) => {
+    generationRef.current++;
+    const first = reportItems[0];
+    setForm({
+      quantitySurveyor: first.quantitySurveyor ?? "",
+      reportReference: first.reportReference ?? "",
+      reportDate: first.reportDate ?? todayISO(),
+      effectiveFrom: first.effectiveFrom ?? "",
+      sourceFileName: first.sourceFileName,
+      sourceFileData: first.sourceFileData,
+    });
+    setItems(
+      reportItems.map((it) => {
+        const division = it.division ?? "Div 40";
+        const overrides: Record<number, string> = {};
+        (it.annualClaims ?? []).forEach((v, i) => (overrides[i] = String(v)));
+        return {
+          key: it.id,
+          existingId: it.id,
+          description: it.description,
+          division,
+          method: it.method ?? defaultMethodForDivision(division),
+          cost: String(it.purchaseCost),
+          lifeYears: String(it.effectiveLifeYears),
+          overrides,
+        };
+      }),
+    );
+    const summaryOverrides: Record<number, { div40?: string; div43?: string }> = {};
+    (first.reportAnnualSummary ?? []).forEach((y, i) => (summaryOverrides[i] = { div40: String(y.div40), div43: String(y.div43) }));
+    setReportOverrides(summaryOverrides);
+    setExtractOk(false);
+    setExtractEmpty(false);
+    setExtractedAddress(undefined);
+    // A previously-saved report was already reviewed once — no need to re-surface the
+    // incomplete-details banner just for reopening it.
+    setBannerDismissed(true);
+    setExpandedKeys(new Set());
+  };
+
+  // Radix's onOpenChange only fires for a transition the dialog itself initiates (a click on its
+  // own trigger, Escape, an overlay click) — never for `open` simply being handed in as `true` by
+  // a controlling parent (DepreciationTab's "Edit report" button doesn't go through the dialog's
+  // own trigger at all). So hydrating an edit session has to react to the prop directly, the same
+  // way AddBillDialog's initialProposal effect does, not from inside onOpenChange. Layout effect
+  // (not the regular kind) so the hydrated fields are what actually paints — this dialog mounts
+  // already-open, and a regular effect would let the first frame flash the blank/default form.
+  useLayoutEffect(() => {
+    if (!report?.length) return;
+    hydrateFromReport(report);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report?.[0]?.reportId]);
 
   const extract = async (file: File) => {
     if (!isSupportedDocumentFile(file)) {
@@ -314,19 +397,36 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
 
   const save = () => {
     if (!assetId) return toast.error("No property/asset selected");
-    const reportId = uid("dr");
+    const validIndexes = items.reduce<number[]>((acc, it, idx) => {
+      if (it.description.trim() && parseFloat(it.cost) > 0) acc.push(idx);
+      return acc;
+    }, []);
+    if (validIndexes.length === 0) return toast.error("Add at least one asset with a description and cost");
+
+    // Editing an existing report keeps its original reportId (and every other item still in it);
+    // a brand-new report gets a fresh one shared by every row saved below.
+    const reportId = report?.[0]?.reportId ?? uid("dr");
     // Materialized once, at save time, from the (possibly hand-corrected) Annual Deductions
     // table — denormalized onto every item below, same as quantitySurveyor/reportDate/etc.
     const reportAnnualSummary = annualRows.map((r) => ({
       div40: Math.round(r.div40 * 100) / 100,
       div43: Math.round(r.div43 * 100) / 100,
     }));
-    let savedCount = 0;
-    items.forEach((it, idx) => {
-      if (!it.description.trim() || !(parseFloat(it.cost) > 0)) return;
-      savedCount++;
+
+    // A row removed from the list during this edit session (its existingId no longer present)
+    // means the underlying item should be deleted, not just left out of the update loop below.
+    // Only runs once the save above is known to leave at least one valid row behind.
+    if (report) {
+      const keptIds = new Set(items.filter((it) => it.existingId).map((it) => it.existingId));
+      for (const original of report) {
+        if (!keptIds.has(original.id)) deleteDepreciationItem(original.id);
+      }
+    }
+
+    for (const idx of validIndexes) {
+      const it = items[idx];
       const preview = itemPreviews[idx];
-      addDepreciationItem({
+      const payload = {
         assetId,
         description: it.description.trim(),
         purchaseCost: parseFloat(it.cost) || 0,
@@ -345,14 +445,16 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         effectiveFrom: form.effectiveFrom || undefined,
         sourceFileName: form.sourceFileName,
         sourceFileData: form.sourceFileData,
-      });
-    });
-
-    if (savedCount === 0) return toast.error("Add at least one asset with a description and cost");
+      };
+      if (it.existingId) updateDepreciationItem(it.existingId, payload);
+      else addDepreciationItem(payload);
+    }
 
     setOpen(false);
     reset();
-    toast.success(`Added ${savedCount} depreciation item(s) from report`);
+    toast.success(
+      isEdit ? `Saved changes to ${validIndexes.length} depreciation item(s)` : `Added ${validIndexes.length} depreciation item(s) from report`,
+    );
   };
 
   const keepDocumentFiledOnly = () => {
@@ -375,16 +477,22 @@ export function AddDepreciationReportDialog({ assetId }: { assetId?: string }) {
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="gap-1">
-          <Plus className="h-3 w-3" /> Add depreciation report
-        </Button>
-      </DialogTrigger>
+      {!report && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" className="gap-1">
+            <Plus className="h-3 w-3" /> Add depreciation report
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-hidden">
         <DialogHeader className="flex-row items-start justify-between space-y-0 pr-10">
           <div>
-            <DialogTitle>New depreciation report</DialogTitle>
-            <div className="text-xs text-muted-foreground">Upload a quantity surveyor's report for AI extraction, or enter assets manually.</div>
+            <DialogTitle>{isEdit ? "Edit depreciation report" : "New depreciation report"}</DialogTitle>
+            <div className="text-xs text-muted-foreground">
+              {isEdit
+                ? "Editing a previously saved report — every figure below is what's on file, not a fresh recalculation."
+                : "Upload a quantity surveyor's report for AI extraction, or enter assets manually."}
+            </div>
           </div>
           <Button onClick={save} disabled={busy} className="shrink-0">
             Save report

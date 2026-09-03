@@ -2863,15 +2863,16 @@ export function PropertyCostBaseTab({ prop, expenses }: { prop: Property; expens
   );
 }
 
-function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
-  const { addDepreciationItem } = useStore();
+function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: string; item?: DepreciationItem; trigger?: React.ReactNode }) {
+  const { addDepreciationItem, updateDepreciationItem } = useStore();
   const [open, setOpen] = useState(false);
-  const [description, setDescription] = useState("");
-  const [purchaseCost, setPurchaseCost] = useState("");
-  const [effectiveLifeYears, setEffectiveLifeYears] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState(todayISO());
-  const [method, setMethod] = useState<NonNullable<DepreciationItem["method"]>>("Diminishing Value");
-  const [division, setDivision] = useState<NonNullable<DepreciationItem["division"]>>("Div 40");
+  const isEdit = !!item;
+  const [description, setDescription] = useState(item?.description ?? "");
+  const [purchaseCost, setPurchaseCost] = useState(item ? String(item.purchaseCost) : "");
+  const [effectiveLifeYears, setEffectiveLifeYears] = useState(item ? String(item.effectiveLifeYears) : "");
+  const [purchaseDate, setPurchaseDate] = useState(item?.purchaseDate ?? todayISO());
+  const [method, setMethod] = useState<NonNullable<DepreciationItem["method"]>>(item?.method ?? "Diminishing Value");
+  const [division, setDivision] = useState<NonNullable<DepreciationItem["division"]>>(item?.division ?? "Div 40");
 
   const onDescriptionBlur = () => {
     if (effectiveLifeYears) return;
@@ -2884,7 +2885,7 @@ function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
     if (!description.trim()) return toast.error("Description required");
     const cost = parseFloat(purchaseCost);
     if (!cost || cost <= 0) return toast.error("Cost must be greater than 0");
-    addDepreciationItem({
+    const payload = {
       assetId,
       description: description.trim(),
       purchaseCost: cost,
@@ -2892,8 +2893,10 @@ function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
       purchaseDate: purchaseDate || undefined,
       method,
       division,
-    });
-    toast.success("Depreciation item added");
+    };
+    if (isEdit) updateDepreciationItem(item.id, payload);
+    else addDepreciationItem(payload);
+    toast.success(isEdit ? "Depreciation item updated" : "Depreciation item added");
     setOpen(false);
   };
 
@@ -2903,23 +2906,25 @@ function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
       onOpenChange={(o) => {
         setOpen(o);
         if (o) {
-          setDescription("");
-          setPurchaseCost("");
-          setEffectiveLifeYears("");
-          setPurchaseDate(todayISO());
-          setMethod("Diminishing Value");
-          setDivision("Div 40");
+          setDescription(item?.description ?? "");
+          setPurchaseCost(item ? String(item.purchaseCost) : "");
+          setEffectiveLifeYears(item ? String(item.effectiveLifeYears) : "");
+          setPurchaseDate(item?.purchaseDate ?? todayISO());
+          setMethod(item?.method ?? "Diminishing Value");
+          setDivision(item?.division ?? "Div 40");
         }
       }}
     >
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="gap-1">
-          <Plus className="h-3 w-3" /> Add one-off item
-        </Button>
+        {trigger ?? (
+          <Button size="sm" variant="outline" className="gap-1">
+            <Plus className="h-3 w-3" /> Add one-off item
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New depreciation item</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit depreciation item" : "New depreciation item"}</DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
@@ -2961,7 +2966,7 @@ function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
         </div>
         <p className="text-xs text-muted-foreground">Removable items like appliances, carpets, blinds are usually Div 40; structural work is usually Div 43.</p>
         <DialogFooter>
-          <Button onClick={save}>Add item</Button>
+          <Button onClick={save}>{isEdit ? "Save changes" : "Add item"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -2970,6 +2975,7 @@ function NewDepreciationItemDialog({ assetId }: { assetId?: string }) {
 
 export function DepreciationTab({ assetId }: { assetId?: string }) {
   const { state, deleteDepreciationItem } = useStore();
+  const [editingReportId, setEditingReportId] = useState<string | null>(null);
 
   const items = assetId ? state.depreciationItems.filter((d) => d.assetId === assetId) : [];
   const schedule = buildDepreciationSchedule(items);
@@ -2977,6 +2983,51 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
   const documents = linkedPropertyId
     ? buildDocumentEntries(state).filter((e) => e.propertyId === linkedPropertyId && e.kind === "Depreciation Report")
     : [];
+
+  // Items saved together via one "Add depreciation report" upload share one reportId — grouped
+  // here so the whole report can be reopened and edited as the bundle it actually is (its saved
+  // annualClaims/reportAnnualSummary only make sense read back together), rather than one item at
+  // a time. A one-off item (no reportId) has no such bundle to preserve, so it keeps its own
+  // direct edit/delete instead.
+  const reportGroups = new Map<string, DepreciationItem[]>();
+  const oneOffItems: DepreciationItem[] = [];
+  for (const d of items) {
+    if (d.reportId) reportGroups.set(d.reportId, [...(reportGroups.get(d.reportId) ?? []), d]);
+    else oneOffItems.push(d);
+  }
+  const editingReportItems = editingReportId ? items.filter((d) => d.reportId === editingReportId) : undefined;
+
+  // editTrigger is a whole rendered element (a NewDepreciationItemDialog with its own Pencil-icon
+  // trigger), not a plain callback — editing a one-off item opens its own dialog, unlike deleting.
+  const itemRow = (d: DepreciationItem, editTrigger?: React.ReactNode, showQsBadge = true) => (
+    <div key={d.id} className="flex items-center justify-between rounded border p-2 text-xs">
+      <div>
+        <div className="flex items-center gap-1.5 font-medium">
+          {d.description}
+          {d.division && <Badge variant="outline" className="text-[10px]">{d.division}</Badge>}
+          {showQsBadge && d.quantitySurveyor && <Badge variant="secondary" className="text-[10px]">{d.quantitySurveyor}</Badge>}
+        </div>
+        <div className="text-muted-foreground">
+          {fmtCurrency(d.purchaseCost)} over {d.effectiveLifeYears}y · {d.method ?? "Diminishing Value"}
+        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        {editTrigger}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6"
+          title="Delete"
+          onClick={() => {
+            deleteDepreciationItem(d.id);
+            toast.success("Removed");
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-4 text-sm">
@@ -2997,36 +3048,63 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
               No depreciation yet — add a quantity surveyor report, or smaller items manually, to start tracking deductions.
             </div>
           ) : (
-            <div className="space-y-2">
-              {items.map((d) => (
-                <div key={d.id} className="flex items-center justify-between rounded border p-2 text-xs">
-                  <div>
-                    <div className="flex items-center gap-1.5 font-medium">
-                      {d.description}
-                      {d.division && <Badge variant="outline" className="text-[10px]">{d.division}</Badge>}
-                      {d.quantitySurveyor && <Badge variant="secondary" className="text-[10px]">{d.quantitySurveyor}</Badge>}
+            <div className="space-y-3">
+              {Array.from(reportGroups.entries()).map(([reportId, group]) => {
+                const first = group[0];
+                return (
+                  <div key={reportId} className="space-y-1.5 rounded-md border p-2">
+                    <div className="flex items-center justify-between gap-2 border-b pb-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-medium">
+                        {first.quantitySurveyor || first.reportReference || "Depreciation report"}
+                        {first.reportDate && <span className="font-normal text-muted-foreground">· {first.reportDate}</span>}
+                        <Badge variant="outline" className="text-[10px]">
+                          {group.length} item{group.length === 1 ? "" : "s"}
+                        </Badge>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 text-xs"
+                        title="Edit report"
+                        onClick={() => setEditingReportId(reportId)}
+                      >
+                        <Pencil className="h-3 w-3" /> Edit report
+                      </Button>
                     </div>
-                    <div className="text-muted-foreground">
-                      {fmtCurrency(d.purchaseCost)} over {d.effectiveLifeYears}y · {d.method ?? "Diminishing Value"}
-                    </div>
+                    <div className="space-y-1">{group.map((d) => itemRow(d, undefined, false))}</div>
                   </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6"
-                    onClick={() => {
-                      deleteDepreciationItem(d.id);
-                      toast.success("Removed");
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
+              {oneOffItems.map((d) =>
+                itemRow(
+                  d,
+                  <NewDepreciationItemDialog
+                    key={`edit-${d.id}`}
+                    assetId={assetId}
+                    item={d}
+                    trigger={
+                      <Button size="icon" variant="ghost" className="h-6 w-6" title="Edit">
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    }
+                  />,
+                ),
+              )}
             </div>
           )}
         </CardContent>
       </Card>
+
+      {editingReportItems && editingReportItems.length > 0 && (
+        <AddDepreciationReportDialog
+          assetId={assetId}
+          report={editingReportItems}
+          open={!!editingReportId}
+          onOpenChange={(o) => {
+            if (!o) setEditingReportId(null);
+          }}
+        />
+      )}
 
       <Card>
         <CardContent className="space-y-2 p-4">
