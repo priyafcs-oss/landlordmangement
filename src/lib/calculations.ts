@@ -28,6 +28,7 @@ export const ANNUAL_COST_FIELD: Partial<Record<BillType, keyof Property>> = {
   Water: "waterRatesAnnual",
   Strata: "strataFeesAnnual",
   Insurance: "insuranceAnnual",
+  "Land Tax": "landTaxAnnual",
 };
 
 /** Categories offered on a transaction's line items — broader than BillType since a one-off
@@ -81,6 +82,8 @@ export function billTypeToDefaultCategory(billType: BillType): ExpenseCategory {
       return "Water Charges";
     case "Council Rates":
       return "Council Rates";
+    case "Land Tax":
+      return "Land Tax";
     case "Strata":
       return "Strata Levies";
     case "Insurance":

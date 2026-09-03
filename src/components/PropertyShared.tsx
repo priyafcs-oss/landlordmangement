@@ -3208,18 +3208,22 @@ function currentFiguresFormOf(prop: Property) {
 }
 
 /**
- * The known-fixed-cost inputs that feed both the Annual Forecast card on the P&L tab and the
- * Cost Base tab — one dedicated, always-editable place to review/correct them, rather than only
- * reachable through the smaller "Edit property details" dialog. Confirming an AI-read bill
- * (Council Rates, Water, Strata, or a no-instalment Insurance invoice) through Add Bill already
- * writes its matching field here automatically (see ANNUAL_COST_FIELD in AddBillDialog) — this
- * page is where that auto-filled figure shows up, and where it can be corrected or filled in by
- * hand for anything that hasn't come through a bill yet (Land Tax, Repairs & Maintenance have no
- * bill type of their own to auto-fill from).
+ * The known-fixed-cost inputs that feed the Annual Forecast card on the P&L tab — one dedicated,
+ * always-editable place to review/correct them, rather than only reachable through the smaller
+ * "Edit property details" dialog. Confirming an AI-read bill (Council Rates, Water, Strata, Land
+ * Tax, or a no-instalment Insurance invoice) through Add Bill already writes its matching field
+ * here automatically (see ANNUAL_COST_FIELD in AddBillDialog) — this page is where that
+ * auto-filled figure shows up, and where it can be corrected or filled in by hand. Repairs &
+ * Maintenance has no bill type of its own to auto-fill from (repairs are one-off, not a recurring
+ * annual bill), so its field always needs a manual figure — the "Logged this FY" hint below every
+ * field (sourced from actual Expense rows, not just bills) is the closest thing it gets to an
+ * auto-fill, and doubles as a sanity check for the other fields too.
  */
 export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; tenants: Tenant[] }) {
-  const { updateProperty } = useStore();
+  const { state, updateProperty } = useStore();
   const [form, setForm] = useState(() => currentFiguresFormOf(prop));
+  const currentFY = ausFinancialYear(todayISO());
+  const { start: fyStart, end: fyEnd } = fyRange(currentFY);
 
   const activeTenant = tenants.find((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
   const weeklyRent =
@@ -3234,15 +3238,25 @@ export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; t
   const pmFeePercent = parseFloat(form.pmFeePercent) || 0;
   const annualPmCost = (annualRent * pmFeePercent) / 100;
 
-  const expenseFields: { key: keyof typeof form; label: string }[] = [
-    { key: "councilRatesAnnual", label: "Council Rates ($)" },
-    { key: "waterRatesAnnual", label: "Water Rates ($)" },
-    { key: "insuranceAnnual", label: "Insurance ($)" },
-    { key: "strataFeesAnnual", label: "Strata / Body Corp ($)" },
-    { key: "landTaxAnnual", label: "Land Tax ($)" },
-    { key: "repairsMaintenanceAnnual", label: "Repairs & Maintenance ($)" },
+  const expenseFields: { key: keyof typeof form; label: string; expenseCategory: ExpenseCategory }[] = [
+    { key: "councilRatesAnnual", label: "Council Rates ($)", expenseCategory: "Council Rates" },
+    { key: "waterRatesAnnual", label: "Water Rates ($)", expenseCategory: "Water Charges" },
+    { key: "insuranceAnnual", label: "Insurance ($)", expenseCategory: "Insurance" },
+    { key: "strataFeesAnnual", label: "Strata / Body Corp ($)", expenseCategory: "Strata Levies" },
+    { key: "landTaxAnnual", label: "Land Tax ($)", expenseCategory: "Land Tax" },
+    { key: "repairsMaintenanceAnnual", label: "Repairs & Maintenance ($)", expenseCategory: "Repairs & Maintenance" },
   ];
   const totalAnnualExpenses = expenseFields.reduce((s, f) => s + (parseFloat(form[f.key]) || 0), 0);
+
+  // What's actually been logged this FY under the matching category — Council Rates/Water/
+  // Strata/Insurance/Land Tax also auto-fill their field above the moment a matching AI-read bill
+  // is confirmed (ANNUAL_COST_FIELD in AddBillDialog), but Repairs & Maintenance never gets a
+  // single "annual" figure that way since repairs are one-off, not a recurring bill — this total
+  // is the only way to see what's actually been spent under it, for every field alike.
+  const loggedThisFy = (category: ExpenseCategory) =>
+    state.expenses
+      .filter((e) => e.propertyId === prop.id && e.category === category && e.direction !== "Income" && e.date >= fyStart && e.date <= fyEnd)
+      .reduce((s, e) => s + e.cost, 0);
 
   const save = () => {
     updateProperty(prop.id, {
@@ -3263,8 +3277,9 @@ export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; t
         <CardHeader>
           <CardTitle className="text-base">Current Figures</CardTitle>
           <div className="text-xs text-muted-foreground">
-            Annual costs used for the P&L Annual Forecast and Cost Base — confirming a matching AI-read bill (Council Rates,
-            Water, Strata, Insurance) fills these in automatically, and they're always editable here too.
+            Annual costs used for the P&L Annual Forecast — confirming a matching AI-read bill (Council Rates, Water,
+            Strata, Insurance, Land Tax) fills these in automatically, and they're always editable here too. Every field
+            also shows what's actually been logged this FY under its category — click it to use that figure.
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -3301,11 +3316,24 @@ export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; t
           <div className="space-y-2 border-t pt-4">
             <div className="text-xs font-medium">Annual Expenses</div>
             <div className="grid gap-3 sm:grid-cols-2">
-              {expenseFields.map((f) => (
-                <Field key={f.key} label={f.label}>
-                  <Input type="number" value={form[f.key]} onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))} />
-                </Field>
-              ))}
+              {expenseFields.map((f) => {
+                const logged = loggedThisFy(f.expenseCategory);
+                return (
+                  <Field key={f.key} label={f.label}>
+                    <Input type="number" value={form[f.key]} onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))} />
+                    {logged > 0 && (
+                      <button
+                        type="button"
+                        className="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                        title={`Set to what's logged this FY under "${f.expenseCategory}"`}
+                        onClick={() => setForm((prev) => ({ ...prev, [f.key]: String(logged) }))}
+                      >
+                        Logged this FY: {fmtCurrency(logged)}
+                      </button>
+                    )}
+                  </Field>
+                );
+              })}
             </div>
           </div>
 

@@ -5,10 +5,13 @@ const BILL_PROMPT = `You are extracting structured invoice data from an Australi
 Extract the fields defined in the response schema as strict JSON.
 - due_date must be formatted YYYY-MM-DD, and is the instalment that is CURRENTLY due / due soonest.
 - bpay_biller_code and bpay_reference must be null if the bill has no BPAY details.
-- bill_category must be one of: Water, Council Rates, Strata, Insurance, Electricity, Gas, Other.
+- bill_category must be one of: Water, Council Rates, Land Tax, Strata, Insurance, Electricity, Gas, Other.
+  A land tax assessment notice (from a state/territory revenue office, e.g. Revenue NSW, State
+  Revenue Office Vic) is "Land Tax", not "Council Rates" — the two are separate taxing authorities
+  even though both are annual government notices.
 - expense_category is a SEPARATE, more specific field — pick the single best match to what this
   bill/receipt is actually FOR, from: Advertising for Tenants, Body Corporate Fees, Cleaning,
-  Council Rates, Gardening / Lawn Mowing, Insurance, Legal Fees, Pest Control, Repairs &
+  Council Rates, Gardening / Lawn Mowing, Insurance, Land Tax, Legal Fees, Pest Control, Repairs &
   Maintenance, Strata Levies, Water Charges, Electricity, Gas, Telephone / Internet, Tax Agent /
   Accounting Fees, Sundry Rental Expenses. Use the vendor name and line items to judge this, not
   just bill_category — e.g. a plumber's invoice is "Repairs & Maintenance", a pest inspection is
@@ -157,7 +160,7 @@ export function mapAtoCategory(category: string): "Immediate Deduction" | "Capit
   return "Immediate Deduction";
 }
 
-export const BILL_TYPES = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"] as const;
+export const BILL_TYPES = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"] as const;
 export type BillType = (typeof BILL_TYPES)[number];
 
 /** Maps Gemini's free-text bill_category (or the vendor name, as a fallback) onto the app's BillType union. */
@@ -166,8 +169,11 @@ export function mapBillType(billCategory: string, vendor: string): BillType {
   if (exact) return exact;
   const haystack = `${billCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
   // Checked first — "water_rates"/"water rates" contains "rates" too, which would otherwise hit
-  // the council/rates fallback below and misfile a water bill as Council Rates.
+  // the council/rates fallback below and misfile a water bill as Council Rates. Same reasoning for
+  // land tax: it's a distinct taxing authority from council rates, so it's checked before the
+  // generic "rates" substring would otherwise catch it too.
   if (haystack.includes("water")) return "Water";
+  if (haystack.includes("land tax") || haystack.includes("revenue nsw") || haystack.includes("state revenue office")) return "Land Tax";
   if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
   if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata";
   if (haystack.includes("insur")) return "Insurance";
@@ -186,6 +192,7 @@ const EXPENSE_CATEGORIES = [
   "Council Rates",
   "Gardening / Lawn Mowing",
   "Insurance",
+  "Land Tax",
   "Legal Fees",
   "Pest Control",
   "Repairs & Maintenance",
@@ -211,6 +218,7 @@ export function mapExpenseCategory(expenseCategory: string, vendor: string): Bil
   const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
   // Checked first — same "water_rates" vs. council/rates ordering issue as mapBillType above.
   if (haystack.includes("water")) return "Water Charges";
+  if (haystack.includes("land tax") || haystack.includes("revenue nsw") || haystack.includes("state revenue office")) return "Land Tax";
   if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
   if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata Levies";
   if (haystack.includes("body corp")) return "Body Corporate Fees";

@@ -56,7 +56,7 @@ import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
 import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
 
-const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
+const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const LOW_CONFIDENCE_THRESHOLD = 0.85;
 /** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
  * an empty string, and shared/whole-property genuinely needs its own selectable option. */
@@ -85,6 +85,7 @@ function mapBillType(category?: string): BillType {
   const exact = BILL_TYPES.find((t) => t.toLowerCase() === (category ?? "").trim().toLowerCase());
   if (exact) return exact;
   const c = (category ?? "").toLowerCase();
+  if (c.includes("land tax")) return "Land Tax";
   if (c.includes("council") || c.includes("rates")) return "Council Rates";
   if (c.includes("water")) return "Water";
   if (c.includes("strata")) return "Strata";

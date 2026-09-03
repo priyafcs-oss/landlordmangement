@@ -838,6 +838,7 @@ export interface LeaseTemplateConfig {
 export type BillType =
   | "Water"
   | "Council Rates"
+  | "Land Tax"
   | "Strata"
   | "Insurance"
   | "Electricity"

@@ -26,7 +26,7 @@ import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { base64ToBlob, mimeForFileName } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 
-const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Strata", "Insurance", "Electricity", "Gas", "Other"];
+const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 /** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
  * an empty string, and shared/whole-property genuinely needs its own selectable option. */
