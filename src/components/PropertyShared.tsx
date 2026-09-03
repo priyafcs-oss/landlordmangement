@@ -47,8 +47,8 @@ import {
   Eye,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
-import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
+import { lookupAtoEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord } from "@/lib/billMatch";
 import {
   verifyAgentFees,
@@ -2874,11 +2874,26 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
   const [method, setMethod] = useState<NonNullable<DepreciationItem["method"]>>(item?.method ?? "Diminishing Value");
   const [division, setDivision] = useState<NonNullable<DepreciationItem["division"]>>(item?.division ?? "Div 40");
 
+  // Looked up live off the name field, not just on blur — the "matched" feedback below should
+  // track what's actually typed, even before the field loses focus.
+  const atoMatch = lookupAtoEffectiveLife(description);
   const onDescriptionBlur = () => {
     if (effectiveLifeYears) return;
-    const suggested = suggestEffectiveLife(description);
-    if (suggested) setEffectiveLifeYears(String(suggested));
+    if (atoMatch) setEffectiveLifeYears(String(atoMatch.years));
   };
+
+  const onDivisionChange = (v: NonNullable<DepreciationItem["division"]>) => {
+    setDivision(v);
+    // Div 43 (capital works) is only ever claimable straight-line under ATO rules — unlike Div 40,
+    // it has no diminishing-value option, same lock AddDepreciationReportDialog applies per row.
+    if (v === "Div 43") setMethod("Prime Cost");
+  };
+
+  // Live preview of what this item will actually claim — same math as everywhere else
+  // (itemAnnualClaims), not a separate estimate that could quietly disagree with it.
+  const previewCost = parseFloat(purchaseCost) || 0;
+  const previewLife = parseFloat(effectiveLifeYears) || 1;
+  const previewClaims = previewCost > 0 ? itemAnnualClaims(previewCost, previewLife, method, purchaseDate || todayISO()) : [];
 
   const save = () => {
     if (!assetId) return;
@@ -2931,6 +2946,12 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
             <Field label="Item name">
               <Input value={description} onChange={(e) => setDescription(e.target.value)} onBlur={onDescriptionBlur} placeholder="e.g. hot water system, carpet, air conditioner" />
             </Field>
+            {atoMatch && (
+              <div className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
+                <CheckCircle2 className="h-3 w-3 shrink-0" />
+                Matched ATO reference: {atoMatch.label} — {atoMatch.years} years
+              </div>
+            )}
           </div>
           <Field label="Cost">
             <Input type="number" value={purchaseCost} onChange={(e) => setPurchaseCost(e.target.value)} />
@@ -2939,7 +2960,7 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
             <Input type="number" value={effectiveLifeYears} onChange={(e) => setEffectiveLifeYears(e.target.value)} placeholder="Auto-fills from item name" />
           </Field>
           <Field label="Method">
-            <Select value={method} onValueChange={(v) => setMethod(v as typeof method)}>
+            <Select value={method} onValueChange={(v) => setMethod(v as typeof method)} disabled={division === "Div 43"}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -2950,7 +2971,7 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
             </Select>
           </Field>
           <Field label="Division">
-            <Select value={division} onValueChange={(v) => setDivision(v as typeof division)}>
+            <Select value={division} onValueChange={(v) => onDivisionChange(v as typeof division)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -2965,6 +2986,12 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
           </Field>
         </div>
         <p className="text-xs text-muted-foreground">Removable items like appliances, carpets, blinds are usually Div 40; structural work is usually Div 43.</p>
+        {previewClaims.length > 0 && (
+          <div className="rounded-md border bg-muted/30 p-2 text-xs">
+            <span className="font-medium">Estimated deduction — Year 1: {fmtCurrency(previewClaims[0])}</span>
+            {previewClaims[1] !== undefined && <span className="text-muted-foreground"> · Year 2 onward: ~{fmtCurrency(previewClaims[1])}/yr</span>}
+          </div>
+        )}
         <DialogFooter>
           <Button onClick={save}>{isEdit ? "Save changes" : "Add item"}</Button>
         </DialogFooter>
