@@ -1564,6 +1564,9 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
       startDate: payload.startDate,
       maturityDate: payload.maturityDate,
       nextRepaymentDate: payload.nextRepaymentDate,
+      // Drives the month-on-month "EMI due soon" Dashboard forecast, which only reads
+      // dueDayOfMonth — derive it from the extracted next repayment date.
+      dueDayOfMonth: payload.nextRepaymentDate ? new Date(payload.nextRepaymentDate).getDate() : undefined,
       productType: payload.productType,
       bsb: payload.bsb,
       accountNumber: payload.accountNumber,

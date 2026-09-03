@@ -3,6 +3,15 @@ import { FileX, Maximize2, Minimize2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { base64ToBlobUrl, isImageFileName, mimeForFileName } from "@/lib/files";
 
+/** Chrome/Edge's built-in PDF viewer opens with its own toolbar and page-thumbnail sidebar by
+ * default, which — inside an already-small iframe — eats width that should go to the page
+ * itself. These are standard PDF "open parameters" the built-in viewer honors as a URL fragment;
+ * appending them (harmless on blob: URLs, and a no-op for images) hides both so the document
+ * fills the pane instead of sharing it with browser chrome. */
+function pdfViewerSrc(url: string): string {
+  return `${url}#toolbar=0&navpanes=0`;
+}
+
 /** Shared left-pane document preview for every bill/transaction review surface — renders the
  * actual attached PDF/image via a blob URL (not a raw data: URI, which browsers block from
  * opening in a new tab) so what you see here is exactly what "Download" and "View" open too. */
@@ -56,7 +65,7 @@ export function BillDocumentViewer({
   const body = isImageFileName(fileName) ? (
     <img src={blobUrl} alt={fileName} className="max-h-full w-full flex-1 overflow-auto object-contain" />
   ) : (
-    <iframe title={fileName || "Bill document"} src={blobUrl} className="min-h-[400px] flex-1" />
+    <iframe title={fileName || "Bill document"} src={pdfViewerSrc(blobUrl)} className="min-h-[400px] flex-1" />
   );
 
   const viewer = (
@@ -105,7 +114,7 @@ export function BillDocumentViewer({
             {isImageFileName(fileName) ? (
               <img src={blobUrl} alt={fileName} className="m-auto max-h-full max-w-full object-contain" />
             ) : (
-              <iframe title={fileName || "Bill document"} src={blobUrl} className="h-full flex-1" />
+              <iframe title={fileName || "Bill document"} src={pdfViewerSrc(blobUrl)} className="h-full flex-1" />
             )}
           </div>
         </DialogContent>

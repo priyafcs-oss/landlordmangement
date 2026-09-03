@@ -163,6 +163,10 @@ export function AddLoanDialog({
         startDate: data.start_date || f.startDate,
         maturityDate: data.maturity_date || f.maturityDate,
         nextRepaymentDate: data.next_repayment_date || f.nextRepaymentDate,
+        // Drives the month-on-month "EMI due soon" forecast (HousekeepingWidget on the
+        // Dashboard), which only ever reads dueDayOfMonth — a next_repayment_date with no day-of-
+        // month derived from it would leave that forecast silently empty.
+        dueDayOfMonth: data.next_repayment_date ? String(new Date(data.next_repayment_date).getDate()) : f.dueDayOfMonth,
         productType: data.product_type || f.productType,
         bsb: data.bsb || f.bsb,
         accountNumber: data.account_number || f.accountNumber,
