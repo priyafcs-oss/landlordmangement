@@ -23,6 +23,7 @@ export function SortableTh<T extends string>({
   sort,
   onSort,
   className,
+  ...thProps
 }: {
   field: T;
   label: string;
@@ -30,10 +31,10 @@ export function SortableTh<T extends string>({
   sort: SortState<T> | null;
   onSort: (field: T) => void;
   className?: string;
-}) {
+} & React.ThHTMLAttributes<HTMLTableCellElement>) {
   const active = sort?.field === field;
   return (
-    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : "text-left"} ${className ?? ""}`}>
+    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : "text-left"} ${className ?? ""}`} {...thProps}>
       <button
         type="button"
         onClick={() => onSort(field)}

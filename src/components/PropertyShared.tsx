@@ -829,7 +829,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       // agent merely paid on the owner's behalf gets its own real category instead.
       const lineCategory = categorizeAgentStatementLine(e, agent?.name);
       addExpense({
-        itemName: e.vendor,
+        itemName: e.description.trim() || e.vendor,
         cost: e.amount,
         date: e.date,
         propertyId: propertyId || undefined,
@@ -837,9 +837,9 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         category: lineCategory,
         providerName: e.vendor,
         providerId: lineProviderId,
-        // The AI's raw free-text classification (e.g. "management_fees") — itemName alone is
-        // usually just the agency's name, so this is the only signal fee verification has to work
-        // with once this line becomes a plain Expense row (see classifyFeeLine in feeVerification.ts).
+        // The AI's raw free-text classification (e.g. "management_fees") — kept even though
+        // itemName now carries the line's own description too, since classifyFeeLine's keyword
+        // match runs on this once the line becomes a plain Expense row (see feeVerification.ts).
         notes: e.category || undefined,
         hasWarranty: false,
         rechargeToTenant: recharge,
@@ -5110,6 +5110,7 @@ export function ProviderRow({
   provider,
   propertyId,
   agreement,
+  linkToProfile,
 }: {
   provider: Provider;
   /** The property context this row is being shown in, if any — passed through to ProviderDialog
@@ -5118,6 +5119,11 @@ export function ProviderRow({
   /** This provider's resolved agreement for `propertyId`, if any — fee terms/contract file render
    * from here instead of directly off the provider (identity no longer carries agreement fields). */
   agreement?: ProviderAgreement;
+  /** Makes the name/details block a link to this provider's own profile page (payment history,
+   * every linked property, agreements) — the same click-through the portfolio-wide /providers list
+   * already has. Left off on the provider's own profile page itself (providers_.$providerId.tsx),
+   * where this row IS that page and linking to itself would be a no-op. */
+  linkToProfile?: boolean;
 }) {
   const { deleteProvider } = useStore();
   const details = [provider.email, provider.phone, provider.website].filter(Boolean).join(" · ");
@@ -5125,7 +5131,13 @@ export function ProviderRow({
     <div className="flex items-start justify-between gap-2 rounded border p-2 text-xs">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-medium">{provider.name}</span>
+          {linkToProfile ? (
+            <Link to="/providers/$providerId" params={{ providerId: provider.id }} className="font-medium hover:underline">
+              {provider.name}
+            </Link>
+          ) : (
+            <span className="font-medium">{provider.name}</span>
+          )}
           <Badge variant="secondary" className="text-[10px]">
             {provider.role}
           </Badge>
@@ -5752,6 +5764,7 @@ export function PropertyProvidersTab({ propertyId }: { propertyId: string }) {
             provider={p}
             propertyId={propertyId}
             agreement={latestAgreementFor(state.providerAgreements, p.id, propertyId)}
+            linkToProfile
           />
         ))}
       </div>

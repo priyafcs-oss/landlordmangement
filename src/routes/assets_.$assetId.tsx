@@ -24,7 +24,10 @@ import {
   StickyNote,
   ChevronDown,
   ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
+import { usePersistedToggle } from "@/lib/hooks";
 import {
   PropertySummaryTab,
   PropertyDetailsTab,
@@ -124,6 +127,7 @@ function PropertyAssetPage() {
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>("summary");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [sidebarCollapsed, toggleSidebar] = usePersistedToggle("assetSidebarCollapsed");
   const toggleGroup = (group: string) =>
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -185,40 +189,55 @@ function PropertyAssetPage() {
 
   return (
     <div className="flex min-h-[calc(100vh-1px)] flex-col sm:flex-row">
-      <div className="w-full shrink-0 border-b p-3 sm:w-56 sm:border-b-0 sm:border-r sm:p-4">
-        <Link to="/assets" className="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3 w-3" /> All assets
-        </Link>
-        <div className="mb-3 flex items-start justify-between gap-1">
-          <div>
-            <div className="font-semibold leading-tight">{prop.alias || prop.address}</div>
-            {prop.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <PropertyDialog
-              property={prop}
-              onDone={() => {}}
-              trigger={
-                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0">
-                  <Pencil className="h-3 w-3" />
-                </Button>
-              }
-            />
-            <DeletePropertyDialog
-              property={prop}
-              onDeleted={(keptProperty) => {
-                if (keptProperty) setSection("summary");
-                else void navigate({ to: "/assets" });
-              }}
-            />
-          </div>
+      <div className={`shrink-0 border-b p-3 sm:border-b-0 sm:border-r sm:p-4 ${sidebarCollapsed ? "sm:w-14" : "w-full sm:w-56"}`}>
+        <div className="mb-3 flex items-center justify-between gap-1">
+          {!sidebarCollapsed && (
+            <Link to="/assets" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-3 w-3" /> All assets
+            </Link>
+          )}
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 shrink-0"
+            onClick={toggleSidebar}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+          </Button>
         </div>
+        {!sidebarCollapsed && (
+          <div className="mb-3 flex items-start justify-between gap-1">
+            <div>
+              <div className="font-semibold leading-tight">{prop.alias || prop.address}</div>
+              {prop.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <PropertyDialog
+                property={prop}
+                onDone={() => {}}
+                trigger={
+                  <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0">
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                }
+              />
+              <DeletePropertyDialog
+                property={prop}
+                onDeleted={(keptProperty) => {
+                  if (keptProperty) setSection("summary");
+                  else void navigate({ to: "/assets" });
+                }}
+              />
+            </div>
+          </div>
+        )}
         <nav className="space-y-3">
           {groups.map((g, i) => {
             const collapsed = g.group ? collapsedGroups.has(g.group) : false;
             return (
               <div key={i}>
-                {g.group ? (
+                {g.group && !sidebarCollapsed ? (
                   <button
                     type="button"
                     onClick={() => toggleGroup(g.group!)}
@@ -228,19 +247,20 @@ function PropertyAssetPage() {
                     {g.group}
                   </button>
                 ) : null}
-                {!collapsed && (
+                {(sidebarCollapsed || !collapsed) && (
                   <div className="space-y-0.5">
                     {g.items.map((item) => (
                       <button
                         key={item.section}
                         type="button"
                         onClick={() => setSection(item.section)}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
+                        title={sidebarCollapsed ? item.label : undefined}
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${sidebarCollapsed ? "justify-center" : ""} ${
                           section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
                         }`}
                       >
                         <item.icon className="h-3.5 w-3.5 shrink-0" />
-                        {item.label}
+                        {!sidebarCollapsed && item.label}
                       </button>
                     ))}
                   </div>
@@ -249,20 +269,22 @@ function PropertyAssetPage() {
             );
           })}
         </nav>
-        <div className="mt-4 border-t pt-3 text-xs text-muted-foreground">
-          Portfolio-wide:{" "}
-          <Link to="/transactions" className="underline">
-            Reports
-          </Link>
-          {" · "}
-          <Link to="/forecasts" className="underline">
-            Forecasts
-          </Link>
-          {" · "}
-          <Link to="/buffers" className="underline">
-            Buffers
-          </Link>
-        </div>
+        {!sidebarCollapsed && (
+          <div className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+            Portfolio-wide:{" "}
+            <Link to="/transactions" className="underline">
+              Reports
+            </Link>
+            {" · "}
+            <Link to="/forecasts" className="underline">
+              Forecasts
+            </Link>
+            {" · "}
+            <Link to="/buffers" className="underline">
+              Buffers
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="min-w-0 flex-1 p-4 sm:p-6">

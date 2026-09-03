@@ -22,7 +22,7 @@ import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleA
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { bucketBy } from "@/lib/group";
-import { usePersistedToggle } from "@/lib/hooks";
+import { usePersistedToggle, usePersistedState } from "@/lib/hooks";
 import { toast } from "sonner";
 import type { AssetType, CategoryGroup, RentLedgerProposalPayload } from "@/lib/types";
 import { latestAgreementFor } from "@/lib/providerAgreements";
@@ -132,6 +132,31 @@ function formatMonthLabel(key: string): string {
 }
 
 type TxSortField = "date" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount";
+
+type TxColumnKey = "date" | "provider" | "property" | "category" | "description" | "amount" | "source" | "invoice" | "tenant" | "taxTreatment";
+
+const TX_COLUMN_ORDER_KEY = "txColumnOrder";
+const DEFAULT_TX_COLUMN_ORDER: TxColumnKey[] = [
+  "date",
+  "provider",
+  "property",
+  "category",
+  "description",
+  "amount",
+  "source",
+  "invoice",
+  "tenant",
+  "taxTreatment",
+];
+
+/** Drops any key from a stored order that this app version no longer has, and appends (in default
+ * position) any current key the stored order predates — so an older saved preference never hides a
+ * newly-added column or crashes on one that's since been removed. */
+function reconcileColumnOrder(stored: TxColumnKey[]): TxColumnKey[] {
+  const known = stored.filter((k) => DEFAULT_TX_COLUMN_ORDER.includes(k));
+  const missing = DEFAULT_TX_COLUMN_ORDER.filter((k) => !known.includes(k));
+  return [...known, ...missing];
+}
 
 function txSortValue(r: TxRow, field: TxSortField, propertyLabel: string): string | number {
   switch (field) {
@@ -255,7 +280,12 @@ export function LedgerTab({ propertyId: lockedPropertyId }: { propertyId?: strin
               : e.source === "upload"
                 ? ("Upload" as const)
                 : ("Manual" as const),
-        providerName: e.providerName,
+        // The Provider directory's own name wins over this row's own raw extracted providerName
+        // when it's linked to one — two bills for the same real vendor can extract slightly
+        // different text ("Sydney Water" vs "Sydney Water Corporation"), and once providerId ties
+        // them to the one directory record, Transactions should read as one consistent name
+        // rather than whatever this particular document happened to print.
+        providerName: (e.providerId && state.providers.find((p) => p.id === e.providerId)?.name) || e.providerName,
         needsAttention: e.status === "needs_review",
         expenseId: e.id,
         tenantId: tenant?.id,
@@ -716,6 +746,84 @@ function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string
   );
 }
 
+/** Renders one column's cell content for a TxRow — kept as a single switch (rather than a column
+ * registry with per-column components) since most cells need several row-derived locals
+ * (propertyLabel, asset, ...) computed once per row above it. */
+function txCell(key: TxColumnKey, r: TxRow, propertyLabel: string | undefined): React.ReactNode {
+  switch (key) {
+    case "date":
+      return r.date;
+    case "provider":
+      return r.providerName ?? "—";
+    case "property":
+      return propertyLabel ?? "—";
+    case "category":
+      return r.category;
+    case "description":
+      return (
+        <div className="flex items-center gap-1.5 font-medium">
+          {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
+          {r.description}
+        </div>
+      );
+    case "amount":
+      return (
+        <span className={`font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
+          {r.amount < 0 ? "−" : "+"}
+          {fmtCurrency(Math.abs(r.amount))}
+        </span>
+      );
+    case "source":
+      return r.sourceFileData ? (
+        <DocumentLink fileName={r.sourceFileName} fileData={r.sourceFileData} className="inline-flex items-center gap-1 text-primary underline">
+          <FileText className="h-3 w-3 shrink-0" />
+          <span className="max-w-[140px] truncate">{r.sourceFileName || "Document"}</span>
+        </DocumentLink>
+      ) : (
+        <span className="text-muted-foreground">{r.source ?? "—"}</span>
+      );
+    case "invoice":
+      return r.invoiceFileData ? (
+        <DocumentLink fileName={r.invoiceFileName} fileData={r.invoiceFileData} className="inline-flex items-center gap-1 text-primary underline">
+          <FileText className="h-3 w-3 shrink-0" />
+          <span className="max-w-[140px] truncate">{r.invoiceFileName || "Document"}</span>
+        </DocumentLink>
+      ) : (
+        <span className="text-muted-foreground">— ({r.ledgerEntryId ? "No file needed" : "No invoice"})</span>
+      );
+    case "tenant":
+      return r.tenantName ?? "—";
+    case "taxTreatment":
+      return taxTreatmentLabel(r.category);
+  }
+}
+
+const TX_COLUMN_LABELS: Record<TxColumnKey, string> = {
+  date: "Date",
+  provider: "Provider",
+  property: "Property",
+  category: "Category",
+  description: "Description",
+  amount: "Amount",
+  source: "Source",
+  invoice: "Invoice / Attachment",
+  tenant: "Tenant",
+  taxTreatment: "Tax Treatment",
+};
+/** "invoice" has no sortable value of its own (a file link isn't a sort key) — every other column
+ * maps 1:1 onto a TxSortField. */
+const TX_COLUMN_SORT_FIELD: Partial<Record<TxColumnKey, TxSortField>> = {
+  date: "date",
+  provider: "provider",
+  property: "property",
+  category: "category",
+  description: "description",
+  amount: "amount",
+  source: "source",
+  tenant: "tenant",
+  taxTreatment: "taxTreatment",
+};
+
 function TxTable({
   rows,
   lockedPropertyId,
@@ -728,6 +836,24 @@ function TxTable({
   onSort?: (field: TxSortField) => void;
 }) {
   const { state, deleteExpense, deleteLedger } = useStore();
+  const [storedOrder, setStoredOrder] = usePersistedState<TxColumnKey[]>(TX_COLUMN_ORDER_KEY, DEFAULT_TX_COLUMN_ORDER);
+  const columnOrder = reconcileColumnOrder(storedOrder);
+  const [draggedKey, setDraggedKey] = useState<TxColumnKey | null>(null);
+  const visibleColumns = columnOrder.filter((k) => k !== "property" || !lockedPropertyId);
+
+  const reorder = (target: TxColumnKey) => {
+    if (!draggedKey || draggedKey === target) return;
+    setStoredOrder((order) => {
+      const next = reconcileColumnOrder(order);
+      const from = next.indexOf(draggedKey);
+      const to = next.indexOf(target);
+      next.splice(from, 1);
+      next.splice(to, 0, draggedKey);
+      return next;
+    });
+    setDraggedKey(null);
+  };
+
   if (rows.length === 0) {
     return (
       <div className="p-6 text-center text-sm text-muted-foreground">
@@ -742,16 +868,36 @@ function TxTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left text-xs text-muted-foreground">
-            <SortableTh field="date" label="Date" sort={sort ?? null} onSort={onSort ?? noSort} />
-            <SortableTh field="description" label="Description" sort={sort ?? null} onSort={onSort ?? noSort} />
-            <SortableTh field="provider" label="Provider" sort={sort ?? null} onSort={onSort ?? noSort} />
-            {!lockedPropertyId && <SortableTh field="property" label="Property" sort={sort ?? null} onSort={onSort ?? noSort} />}
-            <SortableTh field="tenant" label="Tenant" sort={sort ?? null} onSort={onSort ?? noSort} />
-            <SortableTh field="category" label="Category" sort={sort ?? null} onSort={onSort ?? noSort} />
-            <SortableTh field="taxTreatment" label="Tax Treatment" sort={sort ?? null} onSort={onSort ?? noSort} />
-            <SortableTh field="source" label="Source" sort={sort ?? null} onSort={onSort ?? noSort} />
-            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Invoice / Attachment</th>
-            <SortableTh field="amount" label="Amount" align="right" sort={sort ?? null} onSort={onSort ?? noSort} />
+            {visibleColumns.map((key) => {
+              const sortField = TX_COLUMN_SORT_FIELD[key];
+              const dragProps = {
+                draggable: true,
+                onDragStart: () => setDraggedKey(key),
+                onDragOver: (e: React.DragEvent) => e.preventDefault(),
+                onDrop: () => reorder(key),
+                onDragEnd: () => setDraggedKey(null),
+              };
+              return sortField ? (
+                <SortableTh
+                  key={key}
+                  field={sortField}
+                  label={TX_COLUMN_LABELS[key]}
+                  align={key === "amount" ? "right" : "left"}
+                  sort={sort ?? null}
+                  onSort={onSort ?? noSort}
+                  className={`cursor-grab active:cursor-grabbing ${draggedKey === key ? "opacity-40" : ""}`}
+                  {...dragProps}
+                />
+              ) : (
+                <th
+                  key={key}
+                  className={`cursor-grab px-3 py-2 text-left text-xs font-medium text-muted-foreground active:cursor-grabbing ${draggedKey === key ? "opacity-40" : ""}`}
+                  {...dragProps}
+                >
+                  {TX_COLUMN_LABELS[key]}
+                </th>
+              );
+            })}
             <th className="w-16 px-2 py-2" />
           </tr>
         </thead>
@@ -763,44 +909,16 @@ function TxTable({
             const expense = r.expenseId ? state.expenses.find((e) => e.id === r.expenseId) : undefined;
             return (
               <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                <td className="whitespace-nowrap px-3 py-2 text-xs">{r.date}</td>
-                <td className="px-3 py-2">
-                  <div className="flex items-center gap-1.5 font-medium">
-                    {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
-                    {r.description}
-                  </div>
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{r.providerName ?? "—"}</td>
-                {!lockedPropertyId && <td className="px-3 py-2 text-xs text-muted-foreground">{propertyLabel ?? "—"}</td>}
-                <td className="px-3 py-2 text-xs text-muted-foreground">{r.tenantName ?? "—"}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{r.category}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">{taxTreatmentLabel(r.category)}</td>
-                <td className="px-3 py-2 text-xs">
-                  {r.sourceFileData ? (
-                    <DocumentLink fileName={r.sourceFileName} fileData={r.sourceFileData} className="inline-flex items-center gap-1 text-primary underline">
-                      <FileText className="h-3 w-3 shrink-0" />
-                      <span className="max-w-[140px] truncate">{r.sourceFileName || "Document"}</span>
-                    </DocumentLink>
-                  ) : (
-                    <span className="text-muted-foreground">{r.source ?? "—"}</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {r.invoiceFileData ? (
-                    <DocumentLink fileName={r.invoiceFileName} fileData={r.invoiceFileData} className="inline-flex items-center gap-1 text-primary underline">
-                      <FileText className="h-3 w-3 shrink-0" />
-                      <span className="max-w-[140px] truncate">{r.invoiceFileName || "Document"}</span>
-                    </DocumentLink>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      — ({r.ledgerEntryId ? "No file needed" : "No invoice"})
-                    </span>
-                  )}
-                </td>
-                <td className={`px-3 py-2 text-right font-medium ${r.amount < 0 ? "text-destructive" : "text-emerald-600"}`}>
-                  {r.amount < 0 ? "−" : "+"}
-                  {fmtCurrency(Math.abs(r.amount))}
-                </td>
+                {visibleColumns.map((key) => (
+                  <td
+                    key={key}
+                    className={`px-3 py-2 text-xs ${key === "amount" ? "text-right" : ""} ${
+                      key === "date" ? "whitespace-nowrap" : ""
+                    } ${["provider", "property", "tenant", "category", "taxTreatment"].includes(key) ? "text-muted-foreground" : ""}`}
+                  >
+                    {txCell(key, r, propertyLabel)}
+                  </td>
+                ))}
                 <td className="px-2 py-2">
                   {expense && (
                     <div className="flex items-center justify-end gap-0.5">

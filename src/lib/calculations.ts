@@ -122,8 +122,12 @@ export function mapExpenseCategory(expenseCategory: string | undefined, vendor: 
   const exact = known.find((c) => c.toLowerCase() === (expenseCategory ?? "").trim().toLowerCase());
   if (exact) return exact;
   const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
-  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
+  // Checked before the council/rates fallback below — "water_rates"/"water rates" is a common
+  // AI-extracted category label for a water bill and contains "rates", which would otherwise be
+  // caught by the generic council-rates check first and misfile a Sydney Water-type bill as
+  // Council Rates.
   if (haystack.includes("water")) return "Water Charges";
+  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
   if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata Levies";
   if (haystack.includes("body corp")) return "Body Corporate Fees";
   if (haystack.includes("insur")) return "Insurance";

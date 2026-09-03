@@ -165,8 +165,10 @@ export function mapBillType(billCategory: string, vendor: string): BillType {
   const exact = BILL_TYPES.find((t) => t.toLowerCase() === (billCategory ?? "").trim().toLowerCase());
   if (exact) return exact;
   const haystack = `${billCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
-  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
+  // Checked first — "water_rates"/"water rates" contains "rates" too, which would otherwise hit
+  // the council/rates fallback below and misfile a water bill as Council Rates.
   if (haystack.includes("water")) return "Water";
+  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
   if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata";
   if (haystack.includes("insur")) return "Insurance";
   if (haystack.includes("electric") || haystack.includes("power")) return "Electricity";
@@ -207,8 +209,9 @@ export function mapExpenseCategory(expenseCategory: string, vendor: string): Bil
   const exact = EXPENSE_CATEGORIES.find((c) => c.toLowerCase() === (expenseCategory ?? "").trim().toLowerCase());
   if (exact) return exact;
   const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
-  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
+  // Checked first — same "water_rates" vs. council/rates ordering issue as mapBillType above.
   if (haystack.includes("water")) return "Water Charges";
+  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
   if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata Levies";
   if (haystack.includes("body corp")) return "Body Corporate Fees";
   if (haystack.includes("insur")) return "Insurance";

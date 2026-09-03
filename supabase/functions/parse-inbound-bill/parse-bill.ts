@@ -41,19 +41,20 @@ async function findAttachableExpense(
   supabase: SupabaseClient,
   parsed: ParsedBillFields,
   matchedPropertyId: string | null,
+  matchedProviderId: string | undefined,
 ): Promise<{ id: string } | null> {
   if (!matchedPropertyId) return null;
   const dueDate = new Date(parsed.due_date);
   const from = new Date(dueDate.getTime() - DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
   const to = new Date(dueDate.getTime() + DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
 
-  const { data } = await supabase
-    .from("expenses")
-    .select("id, cost, invoiceFileData, source")
-    .eq("propertyId", matchedPropertyId)
-    .ilike("itemName", escapeIlike(parsed.vendor))
-    .gte("date", from)
-    .lte("date", to);
+  // Matching by the resolved directory provider, when there is one, instead of an exact vendor
+  // string is what lets this survive extraction wording drift (e.g. "Sydney Water" one time,
+  // "Sydney Water (ABN 49 776 225 038)" the next) that would otherwise silently defeat an
+  // itemName-equals-vendor comparison and post the same real bill twice.
+  let query = supabase.from("expenses").select("id, cost, invoiceFileData, source").eq("propertyId", matchedPropertyId).gte("date", from).lte("date", to);
+  query = matchedProviderId ? query.eq("providerId", matchedProviderId) : query.ilike("itemName", escapeIlike(parsed.vendor));
+  const { data } = await query;
   if (!data || data.length === 0) return null;
 
   const tolerance = Math.max(2, parsed.amount * 0.02);
@@ -75,6 +76,7 @@ async function runGuardrails(
   supabase: SupabaseClient,
   parsed: ParsedBillFields,
   matchedPropertyId: string | null,
+  matchedProviderId: string | undefined,
 ): Promise<{ clean: boolean; reviewReason: string | null }> {
   const reasons: string[] = [];
 
@@ -84,8 +86,11 @@ async function runGuardrails(
 
   // Scoped to the matched property when known — otherwise two properties sharing the same agent
   // or utility provider (a very common case) can each false-positive off the other's genuine,
-  // unrelated charge just for landing in the same vendor+date window.
-  let dupeQuery = supabase.from("expenses").select("id").ilike("itemName", escapeIlike(parsed.vendor)).gte("date", from).lte("date", to);
+  // unrelated charge just for landing in the same vendor+date window. Matched by providerId when
+  // there is one rather than an exact vendor string, for the same wording-drift reason as
+  // findAttachableExpense above.
+  let dupeQuery = supabase.from("expenses").select("id").gte("date", from).lte("date", to);
+  dupeQuery = matchedProviderId ? dupeQuery.eq("providerId", matchedProviderId) : dupeQuery.ilike("itemName", escapeIlike(parsed.vendor));
   if (matchedPropertyId) dupeQuery = dupeQuery.eq("propertyId", matchedPropertyId);
   const { data: dupeByVendor } = await dupeQuery.limit(1);
 
@@ -113,13 +118,10 @@ async function runGuardrails(
   // already-scheduled Unpaid bill for the same vendor/window has to be checked here too, or a
   // second forward of the same notice would silently stop being caught as a duplicate.
   if (!isDuplicate) {
-    let billQuery = supabase
-      .from("property_bills")
-      .select("id")
-      .eq("status", "Unpaid")
-      .ilike("providerName", escapeIlike(parsed.vendor))
-      .gte("dueDate", from)
-      .lte("dueDate", to);
+    let billQuery = supabase.from("property_bills").select("id").eq("status", "Unpaid").gte("dueDate", from).lte("dueDate", to);
+    billQuery = matchedProviderId
+      ? billQuery.eq("providerId", matchedProviderId)
+      : billQuery.ilike("providerName", escapeIlike(parsed.vendor));
     if (matchedPropertyId) billQuery = billQuery.eq("propertyId", matchedPropertyId);
     const { data: dupeByVendorBill } = await billQuery.limit(1);
     isDuplicate = (dupeByVendorBill?.length ?? 0) > 0;
@@ -145,7 +147,10 @@ async function runGuardrails(
   // Also property-scoped for the same reason as the duplicate checks above — otherwise a bigger
   // property's larger historical bills from the same vendor dilute/skew the average used here,
   // hiding a real spike on a smaller property and false-flagging a legitimately larger one.
-  let historyQuery = supabase.from("expenses").select("cost").ilike("itemName", escapeIlike(parsed.vendor));
+  let historyQuery = supabase.from("expenses").select("cost");
+  historyQuery = matchedProviderId
+    ? historyQuery.eq("providerId", matchedProviderId)
+    : historyQuery.ilike("itemName", escapeIlike(parsed.vendor));
   if (matchedPropertyId) historyQuery = historyQuery.eq("propertyId", matchedPropertyId);
   const { data: history } = await historyQuery;
 
@@ -185,6 +190,7 @@ async function scheduleFutureInstalments(
   billGroupId: string,
   providerName: string,
   source: { fileName?: string; fileData?: string },
+  billSource: "Email" | "Upload",
 ): Promise<number> {
   if (instalments.length === 0) return 0;
 
@@ -212,7 +218,7 @@ async function scheduleFutureInstalments(
       billGroupId,
       label: `Instalment ${idx + 2}`,
       providerName,
-      source: "Email",
+      source: billSource,
       sourceFileName: source.fileName,
       sourceFileData: source.fileData,
     }));
@@ -333,6 +339,7 @@ async function writeApprovedBill(
   const billType = mapBillType(parsed.bill_category, parsed.vendor);
   const billGroupId = `bg_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const source = { fileName: input.pdfFileName, fileData: input.pdfBase64 };
+  const billSource: "Email" | "Upload" = emailMessageId ? "Email" : "Upload";
 
   const { error } = await supabase.from("property_bills").insert({
     id: billId,
@@ -350,7 +357,11 @@ async function writeApprovedBill(
     category: defaultCategory ?? mapExpenseCategory(parsed.expense_category, parsed.vendor),
     bpayBillerCode: parsed.bpay_biller_code ?? undefined,
     bpayReference: parsed.bpay_reference ?? undefined,
-    source: "Email",
+    // upload-document always calls this with emailMessageId null (see its own comment) — a real
+    // inbound email always has one, so its absence reliably means this came from a direct upload,
+    // not an email. Previously hardcoded "Email" regardless, so a manually-uploaded bill showed as
+    // email-sourced everywhere downstream (Transactions' Source column, EXPENSE_SOURCE_LABELS).
+    source: billSource,
     billGroupId,
     label: parsed.future_instalments?.length ? "Instalment 1" : undefined,
     lineItems: parsed.line_items?.length ? parsed.line_items : [{ description: parsed.vendor, amount: parsed.amount }],
@@ -381,6 +392,7 @@ async function writeApprovedBill(
         billGroupId,
         parsed.vendor,
         source,
+        billSource,
       );
     }
     // Only create a new provider row when this vendor didn't already resolve to one via
@@ -504,7 +516,7 @@ export async function parseInboundBill(
   const matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "", parsed.bpay_reference);
   const matchedProviderId = await matchProvider(supabase, parsed.vendor, parsed.vendor_abn);
 
-  const attachable = await findAttachableExpense(supabase, parsed, matchedPropertyId);
+  const attachable = await findAttachableExpense(supabase, parsed, matchedPropertyId, matchedProviderId);
   if (attachable) {
     const { error } = await supabase
       .from("expenses")
@@ -532,7 +544,7 @@ export async function parseInboundBill(
     defaultCategory = providerRow?.defaultCategory ?? undefined;
   }
 
-  const { clean, reviewReason } = await runGuardrails(supabase, parsed, matchedPropertyId);
+  const { clean, reviewReason } = await runGuardrails(supabase, parsed, matchedPropertyId, matchedProviderId);
 
   return clean
     ? writeApprovedBill(supabase, parsed, matchedPropertyId, input, emailMessageId, matchedProviderId, defaultCategory)
