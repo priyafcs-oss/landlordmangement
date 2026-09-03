@@ -466,6 +466,14 @@ export function buildFyOptions(spanBack = 3): string[] {
   return years;
 }
 
+/** Inclusive day count between two ISO dates — used to pro-rate an annual estimate (loan
+ * interest, etc.) to whatever period is actually selected. A full closed FY is ~365 days so this
+ * is a no-op for those; a year-to-date period is shorter, so the full-year estimate would
+ * otherwise overstate the figure for a year still in progress. */
+export function daysInclusive(startISO: string, endISO: string): number {
+  return Math.round((new Date(endISO).getTime() - new Date(startISO).getTime()) / 86_400_000) + 1;
+}
+
 export interface DepreciationScheduleYear {
   fy: string;
   div40: number;

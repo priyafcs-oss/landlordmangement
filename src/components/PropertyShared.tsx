@@ -47,7 +47,7 @@ import {
   Eye,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord } from "@/lib/billMatch";
 import {
@@ -3066,14 +3066,6 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
       <DocumentsSection title="Documents" entries={documents} />
     </div>
   );
-}
-
-/** Inclusive day count between two ISO dates — used to pro-rate the annual loan-interest
- * estimate to whatever period is actually selected (a full closed FY is ~365 days so this is a
- * no-op for those; a YTD period is shorter, so the full-year estimate would otherwise overstate
- * interest for a year still in progress). */
-function daysInclusive(startISO: string, endISO: string): number {
-  return Math.round((new Date(endISO).getTime() - new Date(startISO).getTime()) / 86_400_000) + 1;
 }
 
 export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
