@@ -3068,28 +3068,185 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
   );
 }
 
+/** Inclusive day count between two ISO dates — used to pro-rate the annual loan-interest
+ * estimate to whatever period is actually selected (a full closed FY is ~365 days so this is a
+ * no-op for those; a YTD period is shorter, so the full-year estimate would otherwise overstate
+ * interest for a year still in progress). */
+function daysInclusive(startISO: string, endISO: string): number {
+  return Math.round((new Date(endISO).getTime() - new Date(startISO).getTime()) / 86_400_000) + 1;
+}
+
 export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Property; loan?: Loan; tenants: Tenant[]; expenses: Expense[] }) {
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
-  const { start, end } = fyRange(currentFY);
+  const [fy, setFy] = useState(currentFY);
+  // Most recent first, capped to years up to the current one — a future FY tab has nothing to show.
+  const fyOptions = useMemo(() => buildFyOptions(7).filter((y) => y <= currentFY).reverse(), [currentFY]);
+  const isCurrentFY = fy === currentFY;
+  const { start, end: fyEnd } = fyRange(fy);
+  // The current FY isn't over yet — showing it as year-to-date (rather than projecting a full
+  // year that hasn't happened) matches how a landlord actually reads "where do I stand right now".
+  const end = isCurrentFY ? todayISO() : fyEnd;
+
   const tenantIds = tenants.map((t) => t.id);
-  const grossRent = state.ledger
-    .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
-    .reduce((s, e) => s + e.credit, 0);
-  const fyExpenses = expenses.filter((e) => e.date >= start && e.date <= end);
-  const totalExpenses = fyExpenses.reduce((s, e) => s + e.cost, 0);
-  const loanInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
-  const net = grossRent - totalExpenses - loanInterest;
+  const rentEntries = state.ledger.filter(
+    (e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end,
+  );
+  const grossRent = rentEntries.reduce((s, e) => s + e.credit, 0);
+
+  const periodExpenses = expenses.filter((e) => e.date >= start && e.date <= end);
+  const outgoing = periodExpenses.filter((e) => e.direction !== "Income");
+  const extraIncome = periodExpenses.filter((e) => e.direction === "Income");
+
+  const incomeByCategory: Record<string, number> = { Rent: grossRent };
+  for (const e of extraIncome) {
+    const cat = e.category ?? "Other Income";
+    incomeByCategory[cat] = (incomeByCategory[cat] ?? 0) + e.cost;
+  }
+  const incomeLines = Object.entries(incomeByCategory)
+    .filter(([, amount]) => amount !== 0)
+    .sort((a, b) => b[1] - a[1]);
+  const totalIncome = incomeLines.reduce((s, [, amount]) => s + amount, 0);
+
+  const expenseByCategory: Record<string, number> = {};
+  for (const e of outgoing) {
+    const cat = e.category ?? "Other";
+    expenseByCategory[cat] = (expenseByCategory[cat] ?? 0) + e.cost;
+  }
+  const loanInterest = loan ? (((loan.totalBalance * loan.interestRate) / 100) * daysInclusive(start, end)) / 365 : 0;
+  if (loanInterest > 0) expenseByCategory["Loan Interest (est.)"] = loanInterest;
+  const expenseLines = Object.entries(expenseByCategory).sort((a, b) => b[1] - a[1]);
+  const totalExpenses = expenseLines.reduce((s, [, amount]) => s + amount, 0);
+  const maxExpense = Math.max(0, ...expenseLines.map(([, amount]) => amount));
+
+  const netCashflow = totalIncome - totalExpenses;
+  const transactionCount = rentEntries.length + outgoing.length + extraIncome.length;
 
   return (
     <div className="space-y-3 text-sm">
-      <div className="text-xs text-muted-foreground">FY {currentFY}</div>
-      <div className="grid grid-cols-2 gap-3">
-        <Stat label="Gross rent collected" value={fmtCurrency(grossRent)} />
-        <Stat label="Total expenses" value={fmtCurrency(totalExpenses)} />
-        <Stat label="Loan interest (est.)" value={fmtCurrency(loanInterest)} />
-        <Stat label="Net taxable profit / loss" value={fmtCurrency(net)} />
+      <div className="flex flex-wrap gap-1.5">
+        {fyOptions.map((y) => (
+          <Button key={y} size="sm" variant={fy === y ? "default" : "outline"} className="h-7 px-2.5 text-xs" onClick={() => setFy(y)}>
+            FY {y}
+            {y === currentFY ? " · YTD" : ""}
+          </Button>
+        ))}
       </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Profit &amp; Loss — FY {fy}
+              {isCurrentFY ? " YTD" : ""}
+            </CardTitle>
+            <div className="text-xs text-muted-foreground">
+              {start} to {end} · {transactionCount} transaction{transactionCount === 1 ? "" : "s"}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-emerald-600">Income</div>
+              {incomeLines.length === 0 && <div className="text-xs text-muted-foreground">No income in this period.</div>}
+              {incomeLines.map(([label, amount]) => (
+                <div key={label} className="flex justify-between">
+                  <span>{label}</span>
+                  <span>{fmtCurrency(amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t pt-1 font-medium">
+                <span>Total Income</span>
+                <span>{fmtCurrency(totalIncome)}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-destructive">Expenses</div>
+              {expenseLines.length === 0 && <div className="text-xs text-muted-foreground">No expenses in this period.</div>}
+              {expenseLines.map(([label, amount]) => (
+                <div key={label} className="flex justify-between">
+                  <span>{label}</span>
+                  <span>{fmtCurrency(amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between border-t pt-1 font-medium">
+                <span>Total Expenses</span>
+                <span>{fmtCurrency(totalExpenses)}</span>
+              </div>
+            </div>
+
+            <div className="space-y-0.5 border-t pt-2">
+              <div className="flex items-center justify-between text-base font-semibold">
+                <span>Net Cashflow</span>
+                <span className={netCashflow < 0 ? "text-destructive" : "text-emerald-600"}>
+                  {netCashflow < 0 ? "−" : ""}
+                  {fmtCurrency(Math.abs(netCashflow))}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">Income − cash expenses; depreciation excluded</div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Profit &amp; loss</CardTitle>
+              <div className="text-xs text-muted-foreground">
+                FY {fy}
+                {isCurrentFY ? " YTD" : ""}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div>
+                <div className={"text-lg font-semibold " + (netCashflow < 0 ? "text-destructive" : "text-emerald-600")}>
+                  {fmtCurrency(netCashflow)}
+                </div>
+                <div className="text-xs text-muted-foreground">net cashflow</div>
+              </div>
+              <div className="space-y-1 border-t pt-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Income</span>
+                  <span className="font-medium text-emerald-600">{fmtCurrency(totalIncome)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Expenses</span>
+                  <span className="font-medium text-destructive">{fmtCurrency(totalExpenses)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-1">
+                  <span className="text-muted-foreground">Taxable position</span>
+                  <span className="font-medium">{fmtCurrency(netCashflow)}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Where it goes</CardTitle>
+              <div className="text-xs text-muted-foreground">Expenses by category</div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {expenseLines.length === 0 && <div className="text-xs text-muted-foreground">No expenses in this period.</div>}
+              {expenseLines.map(([label, amount]) => (
+                <div key={label} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="font-medium">{fmtCurrency(amount)}</span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-muted">
+                    <div
+                      className="h-1.5 rounded-full bg-destructive"
+                      style={{ width: `${maxExpense > 0 ? (amount / maxExpense) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
       <Button asChild size="sm" variant="outline" className="gap-1">
         <Link to="/transactions">
           Full EOFY report <ArrowRight className="h-3 w-3" />
