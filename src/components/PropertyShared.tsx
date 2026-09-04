@@ -470,6 +470,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
         cost: adj.amount,
         date: payload.purchaseDate || todayISO(),
         propertyId,
+        category: "Purchase Cost",
         taxCategory: "Capital Works",
         hasWarranty: false,
         rechargeToTenant: false,

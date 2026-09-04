@@ -692,6 +692,7 @@ function MaintenanceRequestsWidget() {
       cost: 0,
       date: todayISO(),
       propertyId,
+      category: "Repairs & Maintenance",
       taxCategory: "Immediate Deduction",
       hasWarranty: false,
       rechargeToTenant: false,

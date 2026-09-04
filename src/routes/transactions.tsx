@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions, fmtModified } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions, fmtModified, ledgerTypeToIncomeCategory } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { bucketBy } from "@/lib/group";
 import { usePersistedToggle, usePersistedState } from "@/lib/hooks";
@@ -258,7 +258,7 @@ export function LedgerTab({
           ledgerEntryId: e.id,
           date: e.date,
           description: e.description || e.type,
-          category: e.type,
+          category: ledgerTypeToIncomeCategory(e.type),
           propertyId: tenant?.propertyId,
           amount: e.credit,
           source:
@@ -283,7 +283,12 @@ export function LedgerTab({
         id: `exp_${e.id}`,
         date: e.date,
         description: e.itemName,
-        category: e.category ?? e.taxCategory,
+        // Never fall back to e.taxCategory here — "Immediate Deduction"/"Capital Works" aren't
+        // real categories, and showing one as if it were just relabels the same bug this sentinel
+        // replaced (see ledgerTypeToIncomeCategory above for the ledger-side equivalent fix).
+        // "Uncategorized" stays visibly distinct from every real category so a gap is obvious
+        // instead of silently plausible.
+        category: e.category ?? "Uncategorized",
         propertyId: e.propertyId,
         assetId: e.assetId,
         amount: e.direction === "Income" ? e.cost : -e.cost,

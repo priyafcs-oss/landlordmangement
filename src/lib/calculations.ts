@@ -2,6 +2,7 @@ import type {
   RentFrequency,
   Tenant,
   LedgerEntry,
+  LedgerType,
   TenantInvoice,
   Inspection,
   Property,
@@ -11,6 +12,7 @@ import type {
   BillType,
   DepreciationItem,
   ExpenseCategory,
+  IncomeCategory,
 } from "./types";
 import { categoryGroupOf } from "./types";
 
@@ -70,6 +72,36 @@ export function taxTreatmentLabel(category?: string | null): string {
  * silently overclaims a deduction. */
 export function expenseCategoryToTaxCategory(category: string): Expense["taxCategory"] {
   return categoryGroupOf(category) === "Running Expenses" ? "Immediate Deduction" : "Capital Works";
+}
+
+/** Maps a ledger entry's own bookkeeping type (LedgerType — what a rent-ledger row is FOR, used
+ * to compute a tenant's paid-up-to date) onto the app's standard income taxonomy (IncomeCategory —
+ * what Transactions/the P&L display as "Category"). These are deliberately two separate enums:
+ * LedgerType exists purely to drive paid-up-to bookkeeping (see recomputePaidUp), and was never
+ * meant to double as a display category. A switch (not a lookup object) so adding a new LedgerType
+ * without extending this mapping is a compile error, not a silent "whatever string it was" leak
+ * onto the Transactions Category column — the exact bug this fixes (a "Water Invoice" ledger type
+ * showing verbatim as the category instead of "Other Rental Income"). */
+export function ledgerTypeToIncomeCategory(type: LedgerType): IncomeCategory {
+  switch (type) {
+    case "Rent Payment":
+      return "Gross Rent";
+    case "Water Invoice":
+    case "Maintenance Charge":
+    case "Manual Credit":
+    case "Adjustment Credit":
+    case "Adjustment Debit":
+    case "Rent Due":
+      return "Other Rental Income";
+    default: {
+      // Exhaustiveness guard: if LedgerType ever gains a new member without a case added above,
+      // `type` stops being assignable to `never` here and this file fails to compile — the
+      // opposite of the old behaviour, where an unmapped value would have silently displayed
+      // whatever raw string it was.
+      const exhaustive: never = type;
+      return exhaustive;
+    }
+  }
 }
 
 /** Sensible starting category for a bill based on its recurring billType, used to default the
