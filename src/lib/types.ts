@@ -610,7 +610,48 @@ export interface MaintenanceRequest {
   source?: "public" | "landlord";
 }
 
-export type ProviderRole = "Council" | "Agent" | "Insurer" | "Trade" | "Other";
+export type ProviderRole =
+  | "Council"
+  | "Agent"
+  | "Insurer"
+  | "Trade"
+  | "Water"
+  | "Electricity"
+  | "Gas"
+  | "Strata"
+  | "Accountant"
+  | "Mortgage Broker"
+  | "Conveyancer"
+  | "Quantity Surveyor"
+  | "Pest Control"
+  | "Cleaning"
+  | "Gardening"
+  | "Real Estate Agent"
+  | "Other";
+
+/** Display label for each ProviderRole — the stored value stays stable (existing rows, and every
+ * `role === "Agent"` check across the app, must never change), but a few labels read better than
+ * their literal value in the UI (e.g. "Agent" shows as "Property Manager", distinct from the newer
+ * "Real Estate Agent" role for a sales/buying agent). Every other role's label equals its value. */
+export const PROVIDER_ROLE_LABELS: Record<ProviderRole, string> = {
+  Agent: "Property Manager",
+  Council: "Council Rates",
+  Insurer: "Insurance",
+  Trade: "Tradie",
+  Water: "Water",
+  Electricity: "Electricity",
+  Gas: "Gas",
+  Strata: "Strata",
+  Accountant: "Accountant",
+  "Mortgage Broker": "Mortgage Broker",
+  Conveyancer: "Conveyancer",
+  "Quantity Surveyor": "Quantity Surveyor",
+  "Pest Control": "Pest Control",
+  Cleaning: "Cleaning",
+  Gardening: "Gardening",
+  "Real Estate Agent": "Real Estate Agent",
+  Other: "Other",
+};
 
 export type FeeFrequency = "Per Statement" | "Monthly" | "Quarterly" | "Annually";
 

@@ -30,6 +30,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory, fmtModified } from "@/lib/calculations";
 import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
+import { matchProviderByName } from "@/lib/providerMatch";
 import {
   openBillDocument,
   MAX_AI_UPLOAD_BYTES,
@@ -163,6 +164,9 @@ export function AddTransactionDialog({
   // Whether the document pane(s) — and this whole dialog — are enlarged. Shared by both the
   // source-statement and invoice viewers so either one's "Enlarge" button grows the same dialog.
   const [docExpanded, setDocExpanded] = useState(false);
+  // Shown right after the Payee field prefills a line's category from a matched existing
+  // provider's defaultCategory — so the auto-fill is visible/undoable rather than a silent trap.
+  const [categoryPrefillNote, setCategoryPrefillNote] = useState<string | null>(null);
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? state.properties[0]?.id ?? "",
@@ -380,6 +384,22 @@ export function AddTransactionDialog({
     }
   };
 
+  /** Suggests (never forces) a category once the payee matches a known Provider — mirrors the
+   * "prefill, not force" behaviour the AI bill pipeline already applies server-side from the same
+   * `defaultCategory` field. Only acts when there's a single line item still at its untouched
+   * default category, so it can never clobber a choice the landlord already made. */
+  const handlePayeeBlur = () => {
+    const name = form.payee.trim();
+    if (!name) return;
+    const matched = matchProviderByName(state.providers, name);
+    if (!matched?.defaultCategory) return;
+    if (lineItems.length !== 1) return;
+    const li = lineItems[0];
+    if (li.direction !== "Expense" || li.category !== defaultCategoryFor("Expense")) return;
+    setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: matched.defaultCategory! } : r)));
+    setCategoryPrefillNote(`Prefilled from ${matched.name}'s usual category`);
+  };
+
   const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragOver(false);
@@ -420,7 +440,9 @@ export function AddTransactionDialog({
     if (!expense) return;
     const li = lineItems[0];
     const amount = parseFloat(li.amount) || 0;
-    const providerId = form.payee.trim() ? findOrCreateProvider(form.payee.trim(), form.propertyId) : undefined;
+    const providerId = form.payee.trim()
+      ? findOrCreateProvider(form.payee.trim(), form.propertyId, li.direction === "Expense" ? (li.category as ExpenseCategory) : undefined)
+      : undefined;
     if (li.rechargeToTenant && li.tenantId && !expense.recharged) {
       addInvoice(
         buildRechargeInvoice({
@@ -470,9 +492,14 @@ export function AddTransactionDialog({
     const validItems = lineItems.filter((li) => parseFloat(li.amount) > 0);
     const perPropertyDivisor = properties.length;
     let flaggedCount = 0;
+    // Only pass a default category through to the provider when there's exactly one line item —
+    // with several lines (possibly different categories each), a single provider-level default
+    // would be a guess, not a fact, so it's left unset rather than picking one arbitrarily.
+    const unambiguousCategory =
+      validItems.length === 1 && validItems[0].direction === "Expense" ? (validItems[0].category as ExpenseCategory) : undefined;
 
     for (const propertyId of properties) {
-      const providerId = form.payee.trim() ? findOrCreateProvider(form.payee.trim(), propertyId) : undefined;
+      const providerId = form.payee.trim() ? findOrCreateProvider(form.payee.trim(), propertyId, unambiguousCategory) : undefined;
       for (const li of validItems) {
         const fullAmount = parseFloat(li.amount) || 0;
         const amount = fullAmount / perPropertyDivisor;
@@ -806,7 +833,14 @@ export function AddTransactionDialog({
                 ) : null}
                 <div className="sm:col-span-2">
                   <Field label="Payee / vendor">
-                    <Input value={form.payee} onChange={(e) => setForm((f) => ({ ...f, payee: e.target.value }))} />
+                    <Input
+                      value={form.payee}
+                      onChange={(e) => {
+                        setForm((f) => ({ ...f, payee: e.target.value }));
+                        setCategoryPrefillNote(null);
+                      }}
+                      onBlur={handlePayeeBlur}
+                    />
                   </Field>
                 </div>
                 <Field label="Reference #">
@@ -849,7 +883,10 @@ export function AddTransactionDialog({
                     <Field label="Category">
                       <Select
                         value={li.category}
-                        onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as LineItemRow["category"] } : r)))}
+                        onValueChange={(v) => {
+                          setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as LineItemRow["category"] } : r)));
+                          setCategoryPrefillNote(null);
+                        }}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -902,6 +939,9 @@ export function AddTransactionDialog({
                       </Button>
                     )}
                   </div>
+                  {categoryPrefillNote && lineItems.length === 1 && (
+                    <div className="text-[11px] text-muted-foreground">{categoryPrefillNote}</div>
+                  )}
                   {li.direction === "Expense" && !splitting && (
                     <div className="flex flex-wrap items-center gap-2">
                       <Checkbox

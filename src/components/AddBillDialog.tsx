@@ -492,7 +492,11 @@ export function AddBillDialog({
         if (!existingProvider.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
         if (!existingProvider.address && payload.vendorAddress) patch.address = payload.vendorAddress;
       }
+      // Same gap-filling idea for the category this vendor is usually filed under — never
+      // overwrites a default the landlord (or an earlier bill) already set.
+      if (!existingProvider.defaultCategory) patch.defaultCategory = form.category;
       if (Object.keys(patch).length > 0) updateProvider(existingProvider.id, patch);
+      if (patch.defaultCategory) toast.success(`${existingProvider.name} — default category set to "${patch.defaultCategory}"`);
     } else {
       resolvedProviderId = addProvider({
         name: form.providerName.trim(),
@@ -505,8 +509,10 @@ export function AddBillDialog({
         website: payload?.vendorWebsite,
         abn: payload?.vendorAbn,
         address: payload?.vendorAddress,
+        defaultCategory: form.category,
       });
       ensureProviderProperty(resolvedProviderId, propertyId);
+      toast.success(`New provider "${form.providerName.trim()}" — default category set to "${form.category}"`);
     }
 
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;

@@ -37,6 +37,7 @@ import type {
   ComplianceCertificate,
   PropertyNote,
   ProviderDocument,
+  ExpenseCategory,
 } from "./types";
 import {
   TABLES,
@@ -255,7 +256,7 @@ interface StoreCtx {
   /** Case-insensitive match-or-create against the Provider directory, scoped to one property —
    * used wherever a payee/provider name is typed on a Transaction or Expense so it lands in the
    * Providers list the same way a Bill's provider always has. */
-  findOrCreateProvider: (name: string, propertyId?: string) => string;
+  findOrCreateProvider: (name: string, propertyId?: string, defaultCategory?: ExpenseCategory) => string;
 
   /** Generic asset CRUD — used for Gold/ETF (and anything added later). Property manages its own
    * mirrored asset row automatically via addProperty/updateProperty/deleteProperty. */
@@ -1151,14 +1152,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
      * properties reuses one Provider row instead of creating a duplicate identity. When called
      * with a propertyId, also ensures a `provider_properties` tag exists for that pair, so the
      * provider shows up on that property's Providers tab. */
-    findOrCreateProvider: (name, propertyId) => {
+    findOrCreateProvider: (name, propertyId, defaultCategory) => {
       const trimmed = name.trim();
       const existing = matchProviderByName(state.providers, trimmed);
       const id = existing ? existing.id : uid("prov");
       if (!existing) {
-        const row: Provider = { id, name: trimmed, role: "Other" };
+        const row: Provider = { id, name: trimmed, role: "Other", defaultCategory };
         void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
         set((s) => ({ ...s, providers: [...s.providers, row] }));
+        if (defaultCategory) toast.success(`New provider "${trimmed}" — default category set to "${defaultCategory}"`);
+      } else if (!existing.defaultCategory && defaultCategory) {
+        // Fills a gap on an existing provider record the same way AddBillDialog already backfills
+        // a missing email/phone/website/ABN from a newly-confirmed bill — never overwrites a
+        // category the landlord (or a prior transaction) already set deliberately.
+        value.updateProvider(existing.id, { defaultCategory });
+        toast.success(`New provider "${trimmed}" — default category set to "${defaultCategory}"`);
       }
       if (propertyId) value.ensureProviderProperty(id, propertyId);
       return id;

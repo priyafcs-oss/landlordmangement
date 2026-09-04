@@ -23,6 +23,7 @@ import { hasFeeTerms } from "@/lib/feeVerification";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { toast } from "sonner";
 import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
+import { PROVIDER_ROLE_LABELS } from "@/lib/types";
 
 export const Route = createFileRoute("/providers_/$providerId")({
   head: () => ({
@@ -303,7 +304,7 @@ function ProviderProfilePage() {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">{provider.name}</h1>
-            <Badge variant="secondary">{provider.role}</Badge>
+            <Badge variant="secondary">{PROVIDER_ROLE_LABELS[provider.role] ?? provider.role}</Badge>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-muted-foreground">
             {provider.phone && <span>{provider.phone}</span>}

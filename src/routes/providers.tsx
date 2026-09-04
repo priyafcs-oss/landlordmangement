@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Users2, Plus, ChevronRight, GitMerge } from "lucide-react";
 import { ProviderDialog } from "@/components/PropertyShared";
 import type { AppState, Provider } from "@/lib/types";
+import { PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/providers")({
@@ -67,7 +68,7 @@ function ProviderListRow({ provider }: { provider: Provider }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{provider.name}</span>
           <Badge variant="secondary" className="text-[10px]">
-            {provider.role}
+            {PROVIDER_ROLE_LABELS[provider.role] ?? provider.role}
           </Badge>
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
@@ -143,7 +144,7 @@ function MergeProvidersDialog() {
               <SelectContent>
                 {sorted.map((p) => (
                   <SelectItem key={p.id} value={p.id} disabled={p.id === bId}>
-                    {p.name} ({p.role})
+                    {p.name} ({PROVIDER_ROLE_LABELS[p.role] ?? p.role})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -158,7 +159,7 @@ function MergeProvidersDialog() {
               <SelectContent>
                 {sorted.map((p) => (
                   <SelectItem key={p.id} value={p.id} disabled={p.id === aId}>
-                    {p.name} ({p.role})
+                    {p.name} ({PROVIDER_ROLE_LABELS[p.role] ?? p.role})
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -203,7 +204,11 @@ export function ProvidersContent() {
     const sorted = [...state.providers].sort((a, b) => a.name.localeCompare(b.name));
     if (!q) return sorted;
     return sorted.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.role.toLowerCase().includes(q) || (p.abn ?? "").toLowerCase().includes(q),
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.role.toLowerCase().includes(q) ||
+        (PROVIDER_ROLE_LABELS[p.role] ?? "").toLowerCase().includes(q) ||
+        (p.abn ?? "").toLowerCase().includes(q),
     );
   }, [state.providers, search]);
 

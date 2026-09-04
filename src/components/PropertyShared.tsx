@@ -99,7 +99,7 @@ import type {
   Entity,
   ExpenseCategory,
 } from "@/lib/types";
-import { EXPENSE_CATEGORIES } from "@/lib/types";
+import { EXPENSE_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
@@ -825,14 +825,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         markBillPaid(match.id, { paidDate: e.date });
         return;
       }
-      const lineProviderId = e.vendor.trim() ? findOrCreateProvider(e.vendor.trim(), propertyId || undefined) : undefined;
-      const lineTenantId = expTenantIds[i];
-      const realTenantId = lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined;
-      const recharge = rechargeIncluded[i] && !!realTenantId;
       // A statement deduction is only the agent's own fee when it's actually paid to the agent or
       // reads as one (management/admin/letting/etc.) — a water bill or tradesperson invoice the
       // agent merely paid on the owner's behalf gets its own real category instead.
       const lineCategory = categorizeAgentStatementLine(e, agent?.name);
+      const lineProviderId = e.vendor.trim() ? findOrCreateProvider(e.vendor.trim(), propertyId || undefined, lineCategory) : undefined;
+      const lineTenantId = expTenantIds[i];
+      const realTenantId = lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined;
+      const recharge = rechargeIncluded[i] && !!realTenantId;
       addExpense({
         itemName: e.description.trim() || e.vendor,
         cost: e.amount,
@@ -1754,7 +1754,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
     // The lender is a real payee — file it in the Provider directory (matching an existing bank
     // by name rather than creating a duplicate) the same way a bill's vendor always is, so the
     // interest expense below carries a proper providerName/providerId instead of going blank.
-    const lenderProviderId = payload.lenderName ? findOrCreateProvider(payload.lenderName, propertyId || undefined) : undefined;
+    const lenderProviderId = payload.lenderName ? findOrCreateProvider(payload.lenderName, propertyId || undefined, "Interest on Loan") : undefined;
 
     selected.forEach((li) => {
       // Only the interest portion is a deductible expense / cashflow-affecting transaction.
@@ -5951,7 +5951,25 @@ export function LeaseHistoryRow({ entry }: { entry: LeaseHistory }) {
   );
 }
 
-const PROVIDER_ROLES: ProviderRole[] = ["Council", "Agent", "Insurer", "Trade", "Other"];
+const PROVIDER_ROLES: ProviderRole[] = [
+  "Agent",
+  "Council",
+  "Water",
+  "Electricity",
+  "Gas",
+  "Insurer",
+  "Strata",
+  "Trade",
+  "Accountant",
+  "Mortgage Broker",
+  "Conveyancer",
+  "Quantity Surveyor",
+  "Pest Control",
+  "Cleaning",
+  "Gardening",
+  "Real Estate Agent",
+  "Other",
+];
 
 interface AgencyAgreementExtractResult {
   ok?: boolean;
@@ -6585,7 +6603,7 @@ export function ProviderDialog({
               <SelectContent>
                 {PROVIDER_ROLES.map((r) => (
                   <SelectItem key={r} value={r}>
-                    {r}
+                    {PROVIDER_ROLE_LABELS[r]}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -6807,7 +6825,7 @@ export function ProviderRow({
             <span className="font-medium">{provider.name}</span>
           )}
           <Badge variant="secondary" className="text-[10px]">
-            {provider.role}
+            {PROVIDER_ROLE_LABELS[provider.role] ?? provider.role}
           </Badge>
         </div>
         {details && <div className="mt-0.5 text-muted-foreground">{details}</div>}

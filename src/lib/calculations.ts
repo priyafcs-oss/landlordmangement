@@ -157,10 +157,25 @@ export function mapExpenseCategory(expenseCategory: string | undefined, vendor: 
   const exact = known.find((c) => c.toLowerCase() === (expenseCategory ?? "").trim().toLowerCase());
   if (exact) return exact;
   const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
-  // Checked before the council/rates fallback below — "water_rates"/"water rates" is a common
-  // AI-extracted category label for a water bill and contains "rates", which would otherwise be
-  // caught by the generic council-rates check first and misfile a Sydney Water-type bill as
-  // Council Rates.
+  // A trade/repair vendor's own name is a stronger, more specific signal than the generic utility
+  // substrings below — checked first so it can't be caught by "electric"/"gas" (a vendor like "BGS
+  // Airconditioning and Electricals" contains "electric" as a substring). Mirrors the identical fix
+  // in supabase/functions/parse-inbound-bill/core-parser.ts's own mapExpenseCategory — keep both in
+  // sync by hand, same as the EXPENSE_CATEGORIES duplicate there already is.
+  if (
+    haystack.includes("plumb") ||
+    haystack.includes("electrician") ||
+    haystack.includes("electrical") ||
+    haystack.includes("repair") ||
+    haystack.includes("maintenance") ||
+    haystack.includes("handyman") ||
+    haystack.includes("aircon") ||
+    haystack.includes("locksmith")
+  )
+    return "Repairs & Maintenance";
+  // Checked first — "water_rates"/"water rates" is a common AI-extracted category label for a
+  // water bill and contains "rates", which would otherwise be caught by the generic council-rates
+  // check first and misfile a Sydney Water-type bill as Council Rates.
   if (haystack.includes("water")) return "Water Charges";
   if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
   if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata Levies";
@@ -176,16 +191,6 @@ export function mapExpenseCategory(expenseCategory: string | undefined, vendor: 
   if (haystack.includes("telco") || haystack.includes("internet") || haystack.includes("phone") || haystack.includes("telstra") || haystack.includes("optus"))
     return "Telephone / Internet";
   if (haystack.includes("advertis") || haystack.includes("marketing") || haystack.includes("listing")) return "Advertising for Tenants";
-  if (
-    haystack.includes("plumb") ||
-    haystack.includes("electrician") ||
-    haystack.includes("repair") ||
-    haystack.includes("maintenance") ||
-    haystack.includes("handyman") ||
-    haystack.includes("aircon") ||
-    haystack.includes("locksmith")
-  )
-    return "Repairs & Maintenance";
   return "Sundry Rental Expenses";
 }
 
