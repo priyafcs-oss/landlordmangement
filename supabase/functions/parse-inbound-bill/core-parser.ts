@@ -163,11 +163,24 @@ export function mapAtoCategory(category: string): "Immediate Deduction" | "Capit
 export const BILL_TYPES = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"] as const;
 export type BillType = (typeof BILL_TYPES)[number];
 
+/** Vendor-name signals for a one-off trade/repair job (a plumber, electrician, aircon tech, ...).
+ * Checked before the narrower utility keywords in both mapBillType/mapExpenseCategory below,
+ * since a trade business's own name very often contains a utility word as a substring — e.g.
+ * "BGS Airconditioning and Electricals" contains "electric", which would otherwise misfile a
+ * one-off repair invoice as a recurring Electricity bill instead of Repairs & Maintenance. */
+const TRADE_KEYWORDS = ["plumb", "electrician", "electrical", "repair", "maintenance", "handyman", "aircon", "locksmith"];
+function looksLikeTrade(haystack: string): boolean {
+  return TRADE_KEYWORDS.some((k) => haystack.includes(k));
+}
+
 /** Maps Gemini's free-text bill_category (or the vendor name, as a fallback) onto the app's BillType union. */
 export function mapBillType(billCategory: string, vendor: string): BillType {
   const exact = BILL_TYPES.find((t) => t.toLowerCase() === (billCategory ?? "").trim().toLowerCase());
   if (exact) return exact;
   const haystack = `${billCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
+  // A trade/repair vendor is never one of the fixed recurring-bill types above — checked first so
+  // it can't be caught by the "electric"/"gas" substrings below (see TRADE_KEYWORDS comment).
+  if (looksLikeTrade(haystack)) return "Other";
   // Checked first — "water_rates"/"water rates" contains "rates" too, which would otherwise hit
   // the council/rates fallback below and misfile a water bill as Council Rates. Same reasoning for
   // land tax: it's a distinct taxing authority from council rates, so it's checked before the
@@ -216,6 +229,10 @@ export function mapExpenseCategory(expenseCategory: string, vendor: string): Bil
   const exact = EXPENSE_CATEGORIES.find((c) => c.toLowerCase() === (expenseCategory ?? "").trim().toLowerCase());
   if (exact) return exact;
   const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
+  // A trade/repair vendor's own name is a stronger, more specific signal than the generic utility
+  // substrings below — checked first so it can't be caught by "electric"/"gas" (see TRADE_KEYWORDS
+  // comment above mapBillType).
+  if (looksLikeTrade(haystack)) return "Repairs & Maintenance";
   // Checked first — same "water_rates" vs. council/rates ordering issue as mapBillType above.
   if (haystack.includes("water")) return "Water Charges";
   if (haystack.includes("land tax") || haystack.includes("revenue nsw") || haystack.includes("state revenue office")) return "Land Tax";
@@ -234,15 +251,5 @@ export function mapExpenseCategory(expenseCategory: string, vendor: string): Bil
     return "Telephone / Internet";
   if (haystack.includes("advertis") || haystack.includes("marketing") || haystack.includes("listing"))
     return "Advertising for Tenants";
-  if (
-    haystack.includes("plumb") ||
-    haystack.includes("electrician") ||
-    haystack.includes("repair") ||
-    haystack.includes("maintenance") ||
-    haystack.includes("handyman") ||
-    haystack.includes("aircon") ||
-    haystack.includes("locksmith")
-  )
-    return "Repairs & Maintenance";
   return "Sundry Rental Expenses";
 }
