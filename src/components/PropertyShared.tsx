@@ -3712,6 +3712,84 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
   );
 }
 
+/** Per-item breakdown of `itemAnnualClaims`/`item.annualClaims` — the aggregate "Annual
+ * Deductions" table on DepreciationTab sums every item together by financial year, which doesn't
+ * answer "what does this one item claim, and when." Opened from a per-row action button instead
+ * of being folded into the row itself, since the year-by-year figures only matter when actually
+ * checking one item against its report. */
+function DepreciationItemScheduleDialog({ item, trigger }: { item: DepreciationItem; trigger?: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const start = item.purchaseDate || item.effectiveFrom || todayISO();
+  const startYear = parseInt(ausFinancialYear(start).split("-")[0], 10);
+  const claims = item.annualClaims ?? itemAnnualClaims(item.purchaseCost, item.effectiveLifeYears, item.method ?? "Diminishing Value", start);
+  const totalClaimed = claims.reduce((sum, c) => sum + c, 0);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" className="h-6 w-6" title="View schedule">
+            <Eye className="h-3 w-3" />
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{item.description}</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-2 rounded border p-3 text-xs">
+          <div>
+            <div className="text-muted-foreground">Cost</div>
+            <div className="font-medium">{fmtCurrency(item.purchaseCost)}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Method</div>
+            <div className="font-medium">{item.method ?? "Diminishing Value"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Division</div>
+            <div className="font-medium">{item.division ?? "Div 40"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Effective life</div>
+            <div className="font-medium">{item.effectiveLifeYears} years</div>
+          </div>
+        </div>
+        {claims.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">No schedule available for this item.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="py-1.5 pr-3 font-medium">Year</th>
+                  <th className="py-1.5 pl-3 text-right font-medium">Claim</th>
+                </tr>
+              </thead>
+              <tbody>
+                {claims.map((c, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-1.5 pr-3">
+                      FY {startYear + i}-{startYear + i + 1}
+                    </td>
+                    <td className="py-1.5 pl-3 text-right">{fmtCurrency(c)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="pt-1.5 pr-3 font-medium">Total</td>
+                  <td className="pt-1.5 pl-3 text-right font-medium">{fmtCurrency(totalClaimed)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function DepreciationTab({ assetId }: { assetId?: string }) {
   const { state, deleteDepreciationItem } = useStore();
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
@@ -3751,6 +3829,7 @@ export function DepreciationTab({ assetId }: { assetId?: string }) {
         </div>
       </div>
       <div className="flex items-center gap-1">
+        <DepreciationItemScheduleDialog item={d} />
         {editTrigger}
         <Button
           size="icon"

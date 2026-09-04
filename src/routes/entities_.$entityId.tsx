@@ -4,7 +4,7 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Stat } from "@/components/Field";
+import { OverviewSection } from "@/components/OverviewSection";
 import { fmtCurrency } from "@/lib/calculations";
 import {
   ArrowLeft,
@@ -241,7 +241,9 @@ function EntityDetailPage() {
             <BillsBoard propertyIds={propertyIds} />
           </div>
         )}
-        {section === "bankAccounts" && <EntityBankAccountsTab entity={entity} propertyIds={propertyIds} />}
+        {section === "bankAccounts" && (
+          <EntityBankAccountsTab entity={entity} propertyIds={propertyIds} />
+        )}
         {section === "details" && <EntityDetailsTab entity={entity} />}
       </div>
     </div>
@@ -258,172 +260,85 @@ function EntityOverviewTab({
   const { state } = useStore();
   const propertyIds = properties.map((p) => p.id);
   const propertyIdSet = new Set(propertyIds);
-  const tenantIds = new Set(
-    state.tenants.filter((t) => propertyIdSet.has(t.propertyId)).map((t) => t.id),
-  );
+  const tenants = state.tenants.filter((t) => propertyIdSet.has(t.propertyId));
+  const tenantIds = new Set(tenants.map((t) => t.id));
   const loans = state.loans.filter((l) => propertyIdSet.has(l.propertyId));
   const expenses = state.expenses.filter((e) => e.propertyId && propertyIdSet.has(e.propertyId));
   const ledger = state.ledger.filter((e) => tenantIds.has(e.tenantId));
-
-  const value = properties.reduce((sum, p) => sum + (p.currentValue || 0), 0);
-  const debt = loans.reduce((sum, l) => sum + (l.totalBalance || 0), 0);
-  const equity = value - debt;
-
-  const rentReceived = ledger.reduce((s, e) => s + (e.type === "Rent Payment" ? e.credit : 0), 0);
-  const otherIncome = expenses
-    .filter((e) => e.direction === "Income")
-    .reduce((s, e) => s + e.cost, 0);
-  const income = rentReceived + otherIncome;
-  const runningExpenses = expenses
-    .filter((e) => e.direction !== "Income")
-    .filter((e) => e.taxCategory !== "Capital Works")
-    .reduce((s, e) => s + e.cost, 0);
-  const capitalExpenses = expenses
-    .filter((e) => e.direction !== "Income")
-    .filter((e) => e.taxCategory === "Capital Works")
-    .reduce((s, e) => s + e.cost, 0);
-  const totalEmis = loans.reduce((s, l) => s + l.monthlyEmi, 0);
-  const netCashFlow = income - runningExpenses - capitalExpenses;
-  const maxExpense = Math.max(1, runningExpenses, capitalExpenses);
+  const bills = state.bills.filter((b) => b.propertyId && propertyIdSet.has(b.propertyId));
+  const insurancePolicies = state.insurancePolicies.filter((ip) =>
+    propertyIdSet.has(ip.propertyId),
+  );
+  const buffers = state.buffers.filter(
+    (b) =>
+      b.scopeType === "Portfolio" ||
+      (b.scopeType === "Entity" && b.scopeId === entity.id) ||
+      (b.scopeType === "Asset" && properties.some((p) => p.assetId === b.scopeId)),
+  );
+  const aiProposals = state.aiProposals.filter(
+    (p) => p.propertyId && propertyIdSet.has(p.propertyId),
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{entity.name}</h1>
-        <Badge variant="secondary">{entity.type}</Badge>
-      </div>
+      <OverviewSection
+        scopeLabel={entity.name}
+        properties={properties}
+        loans={loans}
+        expenses={expenses}
+        ledger={ledger}
+        bills={bills}
+        insurancePolicies={insurancePolicies}
+        buffers={buffers}
+        valuationSnapshots={state.valuationSnapshots}
+        loanBalanceSnapshots={state.loanBalanceSnapshots}
+        aiProposals={aiProposals}
+        tenants={tenants}
+        headerRight={<Badge variant="secondary">{entity.type}</Badge>}
+      />
       {entity.owners.length > 0 && (
-        <div className="-mt-4 flex items-center gap-1 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Users className="h-3 w-3" />
           {entity.owners.map((o) => `${o.name} ${o.percent}%`).join(" · ")}
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Stat label="Portfolio value" value={fmtCurrency(value)} strong />
-            <Stat label="Total debt" value={fmtCurrency(debt)} strong />
-            <Stat label="Equity" value={fmtCurrency(equity)} strong negative={equity < 0} />
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Properties</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {properties.length === 0 && (
-                <div className="p-4 text-center text-sm text-muted-foreground">
-                  <Building2 className="mx-auto mb-2 h-6 w-6" />
-                  No properties assigned to this entity yet — assign one from Assets.
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Properties</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {properties.length === 0 && (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              <Building2 className="mx-auto mb-2 h-6 w-6" />
+              No properties assigned to this entity yet — assign one from Assets.
+            </div>
+          )}
+          {properties.map((p) => {
+            const propLoans = state.loans.filter((l) => l.propertyId === p.id);
+            const propDebt = propLoans.reduce((s, l) => s + l.totalBalance, 0);
+            return (
+              <Link
+                key={p.id}
+                to="/assets/$assetId"
+                params={{ assetId: p.assetId ?? p.id }}
+                className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm hover:bg-muted/50"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{p.alias || p.address}</div>
+                  {p.alias && (
+                    <div className="truncate text-xs text-muted-foreground">{p.address}</div>
+                  )}
                 </div>
-              )}
-              {properties.map((p) => {
-                const propLoans = state.loans.filter((l) => l.propertyId === p.id);
-                const propDebt = propLoans.reduce((s, l) => s + l.totalBalance, 0);
-                return (
-                  <Link
-                    key={p.id}
-                    to="/assets/$assetId"
-                    params={{ assetId: p.assetId ?? p.id }}
-                    className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm hover:bg-muted/50"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-medium">{p.alias || p.address}</div>
-                      {p.alias && (
-                        <div className="truncate text-xs text-muted-foreground">{p.address}</div>
-                      )}
-                    </div>
-                    <div className="shrink-0 text-right text-xs text-muted-foreground">
-                      <div>{fmtCurrency(p.currentValue || 0)}</div>
-                      <div>Debt {fmtCurrency(propDebt)}</div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Cash flow</CardTitle>
-              <div className="text-xs text-muted-foreground">All recorded transactions</div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <div
-                  className={`text-2xl font-semibold tracking-tight ${netCashFlow < 0 ? "text-destructive" : "text-emerald-600"}`}
-                >
-                  {netCashFlow < 0 ? "−" : ""}
-                  {fmtCurrency(Math.abs(netCashFlow))}
+                <div className="shrink-0 text-right text-xs text-muted-foreground">
+                  <div>{fmtCurrency(p.currentValue || 0)}</div>
+                  <div>Debt {fmtCurrency(propDebt)}</div>
                 </div>
-                <div className="text-xs text-muted-foreground">net cash flow</div>
-              </div>
-              <div className="space-y-1 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Income
-                  </span>
-                  <span className="font-medium text-emerald-600">{fmtCurrency(income)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-destructive" /> Running expenses
-                  </span>
-                  <span className="font-medium">{fmtCurrency(runningExpenses)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-amber-500" /> Capital expenses
-                  </span>
-                  <span className="font-medium">{fmtCurrency(capitalExpenses)}</span>
-                </div>
-                {totalEmis > 0 && (
-                  <div className="flex items-center justify-between border-t pt-1 text-muted-foreground">
-                    <span>Loan repayments / mo</span>
-                    <span>{fmtCurrency(totalEmis)}</span>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Expenses</CardTitle>
-              <div className="text-xs text-muted-foreground">Running vs capital</div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Running</span>
-                  <span className="font-medium">{fmtCurrency(runningExpenses)}</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
-                  <div
-                    className="h-1.5 rounded-full bg-destructive"
-                    style={{ width: `${(runningExpenses / maxExpense) * 100}%` }}
-                  />
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Capital</span>
-                  <span className="font-medium">{fmtCurrency(capitalExpenses)}</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
-                  <div
-                    className="h-1.5 rounded-full bg-amber-500"
-                    style={{ width: `${(capitalExpenses / maxExpense) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+              </Link>
+            );
+          })}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -453,7 +368,9 @@ function EntityBankAccountsTab({
         </div>
         <div className="space-y-2">
           {accounts.length === 0 && (
-            <div className="text-xs text-muted-foreground">No cash accounts on file for {entity.name}.</div>
+            <div className="text-xs text-muted-foreground">
+              No cash accounts on file for {entity.name}.
+            </div>
           )}
           {accounts.map((a) => (
             <div key={a.id} className="rounded border p-3 text-xs">
@@ -491,7 +408,9 @@ function EntityBankAccountsTab({
         </div>
         <div className="space-y-2">
           {loans.length === 0 && (
-            <div className="text-xs text-muted-foreground">No loans on file for properties under {entity.name}.</div>
+            <div className="text-xs text-muted-foreground">
+              No loans on file for properties under {entity.name}.
+            </div>
           )}
           {loans.map((l) => (
             <div key={l.id} className="rounded border p-3 text-xs">
@@ -504,7 +423,12 @@ function EntityBankAccountsTab({
                   <UploadDocumentDialog
                     loanId={l.id}
                     trigger={
-                      <Button size="icon" variant="ghost" className="h-6 w-6" title="Upload statement">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        title="Upload statement"
+                      >
                         <FileUp className="h-3 w-3" />
                       </Button>
                     }

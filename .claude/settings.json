@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npx supabase *)",
+      "Bash(npx vercel *)",
+      "Bash(curl -s \"https://landlordmangement.vercel.app/rental\" -o /tmp/rental2.html)",
+      "Read(//tmp/**)",
+      "Bash(curl -s \"https://landlordmangement.vercel.app/assets/rental-BbPbQOaM.js\" -o /tmp/rental2.js)",
+      "WebFetch(domain:www.rentbetter.com.au)",
+      "WebFetch(domain:help.rentbetter.com.au)",
+      "Bash(npm install *)",
+      "Bash(supabase migration *)",
+      "Bash(python3 -c ' *)",
+      "Bash(node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"portfolio: %{http_code}\\\\n\" http://localhost:5184/portfolio)",
+      "Bash(kill %1)",
+      "Bash(curl -s -o /dev/null -w \"assets: %{http_code}\\\\n\" http://localhost:5190/assets)",
+      "Bash(curl -s -o /dev/null -w \"assets/nonexistent: %{http_code}\\\\n\" http://localhost:5190/assets/nonexistent-id)",
+      "Bash(curl -s -o /dev/null -w \"portfolio: %{http_code}\\\\n\" http://localhost:5190/portfolio)"
+    ]
+  }
+}

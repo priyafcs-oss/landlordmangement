@@ -49,7 +49,12 @@ import {
   PropertyDialog,
   DeletePropertyDialog,
 } from "@/components/PropertyShared";
-import { PropertyInsuranceTab, PropertyMaintenanceTab, PropertyCertificatesTab, PropertyNotesTab } from "@/components/PropertyExtraTabs";
+import {
+  PropertyInsuranceTab,
+  PropertyMaintenanceTab,
+  PropertyCertificatesTab,
+  PropertyNotesTab,
+} from "@/components/PropertyExtraTabs";
 import { LedgerTab } from "@/routes/transactions";
 import { DocumentsContent } from "@/routes/documents";
 import { buildDocumentEntries } from "@/lib/documents";
@@ -57,6 +62,7 @@ import { DocumentsSection } from "@/components/DocumentEntryRow";
 import { AddLoanDialog } from "@/components/AddLoanDialog";
 import { LoanStatementHistory } from "@/components/LoanStatementHistory";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
+import { OverviewSection } from "@/components/OverviewSection";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -66,6 +72,7 @@ export const Route = createFileRoute("/assets_/$assetId")({
 });
 
 type Section =
+  | "overview"
   | "summary"
   | "performance"
   | "purchase"
@@ -87,7 +94,13 @@ type Section =
   | "photos"
   | "notes";
 
-const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
+const NAV: {
+  section: Section;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  group?: string;
+}[] = [
+  { section: "overview", label: "Overview", icon: LayoutDashboard },
   { section: "summary", label: "Performance & Summary", icon: LayoutDashboard },
   { section: "performance", label: "Performance", icon: Activity },
   { section: "purchase", label: "Purchase & Acquisition", icon: ShoppingCart },
@@ -97,7 +110,12 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
   { section: "loans", label: "Loans", icon: Landmark, group: "Finance" },
   { section: "costbase", label: "Cost Base", icon: Calculator, group: "Finance" },
   { section: "depreciation", label: "Depreciation", icon: LineChart, group: "Finance" },
-  { section: "currentFigures", label: "Current Figures", icon: SlidersHorizontal, group: "Finance" },
+  {
+    section: "currentFigures",
+    label: "Current Figures",
+    icon: SlidersHorizontal,
+    group: "Finance",
+  },
   { section: "pnl", label: "P&L", icon: FileText, group: "Finance" },
   { section: "forecasts", label: "Forecasts", icon: TrendingUp, group: "Finance" },
   { section: "tenancy", label: "Tenancy", icon: BadgeCheck, group: "Property" },
@@ -112,13 +130,16 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
 
 /** Every distinct group name in NAV (currently "Finance" and "Property") — used to default the
  * sidebar to fully collapsed on first load and to drive the accordion behaviour below. */
-const ALL_NAV_GROUPS = Array.from(new Set(NAV.map((item) => item.group).filter((g): g is string => !!g)));
+const ALL_NAV_GROUPS = Array.from(
+  new Set(NAV.map((item) => item.group).filter((g): g is string => !!g)),
+);
 
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
   const loans = state.loans.filter((l) => l.propertyId === propertyId);
   const documents = buildDocumentEntries(state).filter(
-    (e) => e.propertyId === propertyId && (e.kind === "Loan Document" || e.kind === "Loan Statement"),
+    (e) =>
+      e.propertyId === propertyId && (e.kind === "Loan Document" || e.kind === "Loan Statement"),
   );
   return (
     <div className="space-y-4 text-sm">
@@ -127,7 +148,9 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
         <AddLoanDialog propertyId={propertyId} />
       </div>
       <div className="space-y-2">
-        {loans.length === 0 && <div className="text-xs text-muted-foreground">No loans on file for this property.</div>}
+        {loans.length === 0 && (
+          <div className="text-xs text-muted-foreground">No loans on file for this property.</div>
+        )}
         {loans.map((l) => (
           <div key={l.id} className="rounded border p-3 text-xs">
             <div className="flex items-center justify-between gap-2">
@@ -136,7 +159,12 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
                 <UploadDocumentDialog
                   loanId={l.id}
                   trigger={
-                    <Button size="icon" variant="ghost" className="h-6 w-6" title="Upload statement">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6"
+                      title="Upload statement"
+                    >
                       <FileUp className="h-3 w-3" />
                     </Button>
                   }
@@ -173,20 +201,26 @@ function PropertyAssetPage() {
   const { assetId } = Route.useParams();
   const { state, loading } = useStore();
   const navigate = useNavigate();
-  const [section, setSection] = useState<Section>("summary");
+  const [section, setSection] = useState<Section>("overview");
   // All groups start collapsed on first landing; toggling one open auto-collapses every other
   // group (accordion behaviour) rather than letting several stack open at once.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(ALL_NAV_GROUPS));
   const [sidebarCollapsed, toggleSidebar] = usePersistedToggle("assetSidebarCollapsed");
   const toggleGroup = (group: string) =>
-    setCollapsedGroups((prev) => (prev.has(group) ? new Set(ALL_NAV_GROUPS.filter((g) => g !== group)) : new Set(ALL_NAV_GROUPS)));
+    setCollapsedGroups((prev) =>
+      prev.has(group)
+        ? new Set(ALL_NAV_GROUPS.filter((g) => g !== group))
+        : new Set(ALL_NAV_GROUPS),
+    );
 
   const asset = state.assets.find((a) => a.id === assetId);
   // Looked up both directions (Asset.linkedPropertyId -> Property.id, and Property.assetId ->
   // Asset.id) rather than only the forward direction — the two are meant to be kept in sync by
   // the store's addProperty/updateProperty, but a property saved before that mirror existed, or
   // one whose mirror update silently no-op'd, can leave them pointing at each other only one way.
-  const prop = asset ? state.properties.find((p) => p.id === asset.linkedPropertyId || p.assetId === asset.id) : undefined;
+  const prop = asset
+    ? state.properties.find((p) => p.id === asset.linkedPropertyId || p.assetId === asset.id)
+    : undefined;
 
   // On first paint (SSR, or the moment before the client's initial Supabase fetch resolves),
   // state.assets/state.properties are still empty — without this check every property page
@@ -194,11 +228,16 @@ function PropertyAssetPage() {
   if (loading && (!asset || !prop)) {
     return (
       <div className="space-y-4 p-4 sm:p-6">
-        <Link to="/assets" className="inline-flex items-center gap-1 text-sm text-primary underline">
+        <Link
+          to="/assets"
+          className="inline-flex items-center gap-1 text-sm text-primary underline"
+        >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Assets
         </Link>
         <Card>
-          <CardContent className="p-8 text-center text-sm text-muted-foreground">Loading…</CardContent>
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            Loading…
+          </CardContent>
         </Card>
       </div>
     );
@@ -207,7 +246,10 @@ function PropertyAssetPage() {
   if (!asset || asset.assetType !== "Property" || !prop) {
     return (
       <div className="space-y-4 p-4 sm:p-6">
-        <Link to="/assets" className="inline-flex items-center gap-1 text-sm text-primary underline">
+        <Link
+          to="/assets"
+          className="inline-flex items-center gap-1 text-sm text-primary underline"
+        >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to Assets
         </Link>
         <Card>
@@ -220,9 +262,20 @@ function PropertyAssetPage() {
   }
 
   const loan = state.loans.find((l) => l.propertyId === prop.id);
+  const propertyLoans = state.loans.filter((l) => l.propertyId === prop.id);
   const tenants = state.tenants.filter((t) => t.propertyId === prop.id);
+  const tenantIds = new Set(tenants.map((t) => t.id));
   const expenses = state.expenses.filter((e) => e.propertyId === prop.id);
   const depreciationItems = state.depreciationItems.filter((d) => d.assetId === asset.id);
+  const propertyLedger = state.ledger.filter((e) => tenantIds.has(e.tenantId));
+  const propertyBills = state.bills.filter((b) => b.propertyId === prop.id);
+  const propertyInsurancePolicies = state.insurancePolicies.filter(
+    (ip) => ip.propertyId === prop.id,
+  );
+  const propertyBuffers = state.buffers.filter(
+    (b) => b.scopeType === "Portfolio" || (b.scopeType === "Asset" && b.scopeId === prop.assetId),
+  );
+  const propertyAiProposals = state.aiProposals.filter((p) => p.propertyId === prop.id);
 
   const groups: { group: string | null; items: typeof NAV }[] = [];
   for (const item of NAV) {
@@ -234,10 +287,15 @@ function PropertyAssetPage() {
 
   return (
     <div className="flex min-h-[calc(100vh-1px)] flex-col sm:flex-row">
-      <div className={`shrink-0 border-b p-3 sm:border-b-0 sm:border-r sm:p-4 ${sidebarCollapsed ? "sm:w-14" : "w-full sm:w-56"}`}>
+      <div
+        className={`shrink-0 border-b p-3 sm:border-b-0 sm:border-r sm:p-4 ${sidebarCollapsed ? "sm:w-14" : "w-full sm:w-56"}`}
+      >
         <div className="mb-3 flex items-center justify-between gap-1">
           {!sidebarCollapsed && (
-            <Link to="/assets" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <Link
+              to="/assets"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
               <ArrowLeft className="h-3 w-3" /> All assets
             </Link>
           )}
@@ -248,7 +306,11 @@ function PropertyAssetPage() {
             onClick={toggleSidebar}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {sidebarCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-3.5 w-3.5" />
+            ) : (
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
         {!sidebarCollapsed && (
@@ -270,7 +332,7 @@ function PropertyAssetPage() {
               <DeletePropertyDialog
                 property={prop}
                 onDeleted={(keptProperty) => {
-                  if (keptProperty) setSection("summary");
+                  if (keptProperty) setSection("overview");
                   else void navigate({ to: "/assets" });
                 }}
               />
@@ -288,7 +350,11 @@ function PropertyAssetPage() {
                     onClick={() => toggleGroup(g.group!)}
                     className="mb-1 flex w-full items-center gap-1 rounded px-2 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
                   >
-                    {collapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+                    {collapsed ? (
+                      <ChevronRight className="h-3 w-3 shrink-0" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3 shrink-0" />
+                    )}
                     {g.group}
                   </button>
                 ) : null}
@@ -301,7 +367,9 @@ function PropertyAssetPage() {
                         onClick={() => setSection(item.section)}
                         title={sidebarCollapsed ? item.label : undefined}
                         className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${sidebarCollapsed ? "justify-center" : ""} ${
-                          section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
+                          section === item.section
+                            ? "bg-primary/10 font-medium text-primary"
+                            : "hover:bg-muted"
                         }`}
                       >
                         <item.icon className="h-3.5 w-3.5 shrink-0" />
@@ -333,17 +401,49 @@ function PropertyAssetPage() {
       </div>
 
       <div className="min-w-0 flex-1 p-4 sm:p-6">
-        {section === "summary" && <PropertySummaryTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
-        {section === "performance" && <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
+        {section === "overview" && (
+          <OverviewSection
+            scopeLabel={prop.alias || prop.address}
+            properties={[prop]}
+            loans={propertyLoans}
+            expenses={expenses}
+            ledger={propertyLedger}
+            bills={propertyBills}
+            insurancePolicies={propertyInsurancePolicies}
+            buffers={propertyBuffers}
+            valuationSnapshots={state.valuationSnapshots}
+            loanBalanceSnapshots={state.loanBalanceSnapshots}
+            aiProposals={propertyAiProposals}
+            tenants={tenants}
+          />
+        )}
+        {section === "summary" && (
+          <PropertySummaryTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
+        )}
+        {section === "performance" && (
+          <PropertyPerformanceTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
+        )}
         {section === "purchase" && <PropertyPurchaseTab prop={prop} loan={loan} />}
         {section === "transactions" && <LedgerTab propertyId={prop.id} />}
         {section === "bills" && <PropertyBillsTab propertyId={prop.id} />}
         {section === "loans" && <PropertyLoansTab propertyId={prop.id} />}
-        {section === "costbase" && <PropertyCostBaseTab prop={prop} expenses={expenses} depreciationItems={depreciationItems} />}
+        {section === "costbase" && (
+          <PropertyCostBaseTab
+            prop={prop}
+            expenses={expenses}
+            depreciationItems={depreciationItems}
+          />
+        )}
         {section === "depreciation" && <DepreciationTab assetId={asset.id} />}
-        {section === "currentFigures" && <PropertyCurrentFiguresTab prop={prop} tenants={tenants} />}
-        {section === "pnl" && <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />}
-        {section === "forecasts" && <PropertyForecastsTab prop={prop} loan={loan} tenants={tenants} />}
+        {section === "currentFigures" && (
+          <PropertyCurrentFiguresTab prop={prop} tenants={tenants} />
+        )}
+        {section === "pnl" && (
+          <PropertyPnLTab prop={prop} loan={loan} tenants={tenants} expenses={expenses} />
+        )}
+        {section === "forecasts" && (
+          <PropertyForecastsTab prop={prop} loan={loan} tenants={tenants} />
+        )}
         {section === "providers" && <PropertyProvidersTab propertyId={prop.id} />}
         {section === "tenancy" && <PropertyTenancyTab propertyId={prop.id} />}
         {section === "insurance" && <PropertyInsuranceTab prop={prop} />}
