@@ -3,7 +3,14 @@ import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/Field";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { NotebookPen } from "lucide-react";
 import { toast } from "sonner";
 import { todayISO, expenseCategoryToTaxCategory } from "@/lib/calculations";
@@ -19,7 +26,13 @@ import type { Loan } from "@/lib/types";
  * otherwise it's left out rather than guessed, and the loan's balance still updates from the
  * stated closing balance either way.
  */
-export function AddLoanStatementDialog({ loan, trigger }: { loan: Loan; trigger?: React.ReactNode }) {
+export function AddLoanStatementDialog({
+  loan,
+  trigger,
+}: {
+  loan: Loan;
+  trigger?: React.ReactNode;
+}) {
   const { addExpense, addLoanStatement, updateLoan, findOrCreateProvider } = useStore();
   const [open, setOpen] = useState(false);
   const blank = () => ({
@@ -58,7 +71,11 @@ export function AddLoanStatementDialog({ loan, trigger }: { loan: Loan; trigger?
       if (Math.abs(impliedPrincipal - actualChange) < 1) principalPaid = impliedPrincipal;
     }
 
-    const lenderProviderId = findOrCreateProvider(loan.bankName, loan.propertyId, "Interest on Loan");
+    const lenderProviderId = findOrCreateProvider(
+      loan.bankName,
+      loan.propertyId,
+      "Interest on Loan",
+    );
     const expenseId = interest
       ? addExpense({
           itemName: `${loan.bankName} — loan interest`,
@@ -136,39 +153,87 @@ export function AddLoanStatementDialog({ loan, trigger }: { loan: Loan; trigger?
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <Field label="Payment date">
-            <Input type="date" value={form.paymentDate} onChange={(e) => setForm((f) => ({ ...f, paymentDate: e.target.value }))} />
+            <Input
+              type="date"
+              value={form.paymentDate}
+              onChange={(e) => setForm((f) => ({ ...f, paymentDate: e.target.value }))}
+            />
           </Field>
           <Field label="Whole P&I repayment">
-            <Input type="number" step="0.01" value={form.repaymentsMade} onChange={(e) => setForm((f) => ({ ...f, repaymentsMade: e.target.value }))} placeholder="0.00" />
+            <Input
+              type="number"
+              step="0.01"
+              value={form.repaymentsMade}
+              onChange={(e) => setForm((f) => ({ ...f, repaymentsMade: e.target.value }))}
+              placeholder="0.00"
+            />
           </Field>
           <Field label="Interest charged separately">
-            <Input type="number" step="0.01" value={form.interestCharged} onChange={(e) => setForm((f) => ({ ...f, interestCharged: e.target.value }))} placeholder="0.00" />
+            <Input
+              type="number"
+              step="0.01"
+              value={form.interestCharged}
+              onChange={(e) => setForm((f) => ({ ...f, interestCharged: e.target.value }))}
+              placeholder="0.00"
+            />
           </Field>
           <Field label="Eligible lender fee">
-            <Input type="number" step="0.01" value={form.eligibleLenderFee} onChange={(e) => setForm((f) => ({ ...f, eligibleLenderFee: e.target.value }))} placeholder="0.00" />
+            <Input
+              type="number"
+              step="0.01"
+              value={form.eligibleLenderFee}
+              onChange={(e) => setForm((f) => ({ ...f, eligibleLenderFee: e.target.value }))}
+              placeholder="0.00"
+            />
           </Field>
           <Field label="Opening loan balance">
-            <Input type="number" step="0.01" value={form.openingBalance} onChange={(e) => setForm((f) => ({ ...f, openingBalance: e.target.value }))} placeholder="0.00" />
+            <Input
+              type="number"
+              step="0.01"
+              value={form.openingBalance}
+              onChange={(e) => setForm((f) => ({ ...f, openingBalance: e.target.value }))}
+              placeholder="0.00"
+            />
           </Field>
           <Field label="Closing loan balance">
-            <Input type="number" step="0.01" value={form.closingBalance} onChange={(e) => setForm((f) => ({ ...f, closingBalance: e.target.value }))} placeholder="0.00" />
+            <Input
+              type="number"
+              step="0.01"
+              value={form.closingBalance}
+              onChange={(e) => setForm((f) => ({ ...f, closingBalance: e.target.value }))}
+              placeholder="0.00"
+            />
           </Field>
           <div className="col-span-2">
             <Field label="Description (optional)">
-              <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} placeholder="e.g. August private loan repayment" />
+              <Input
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="e.g. August private loan repayment"
+              />
             </Field>
           </div>
           <Field label="Period start (optional)">
-            <Input type="date" value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />
+            <Input
+              type="date"
+              value={form.periodStart}
+              onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))}
+            />
           </Field>
           <Field label="Period end (optional)">
-            <Input type="date" value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />
+            <Input
+              type="date"
+              value={form.periodEnd}
+              onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))}
+            />
           </Field>
         </div>
         <p className="text-xs text-muted-foreground">
-          Record each whole P&I payment when it occurs. Interest and the lender fee each post as their own deductible expense, dated to
-          the payment date. Principal is only calculated when the repayment less interest and fee agrees with the opening→closing
-          balance change — otherwise no principal is recorded, though the loan's balance still updates from the closing balance above.
+          Record each whole P&I payment when it occurs. Interest and the lender fee each post as
+          their own deductible expense, dated to the payment date. Principal is only calculated when
+          the repayment less interest and fee agrees with the opening→closing balance change —
+          otherwise no principal is recorded, though the loan's balance still updates from the
+          closing balance above.
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>

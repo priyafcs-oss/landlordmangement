@@ -63,6 +63,7 @@ import { AddLoanDialog } from "@/components/AddLoanDialog";
 import { LoanStatementHistory } from "@/components/LoanStatementHistory";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddLoanStatementDialog } from "@/components/AddLoanStatementDialog";
+import { LoanCompiledFeed } from "@/components/LoanCompiledFeed";
 import { OverviewSection } from "@/components/OverviewSection";
 
 export const Route = createFileRoute("/assets_/$assetId")({
@@ -188,8 +189,9 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
               <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
               <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
             </div>
-            <div className="mt-2">
+            <div className="mt-2 space-y-2">
               <LoanStatementHistory loanId={l.id} />
+              <LoanCompiledFeed loan={l} />
             </div>
           </div>
         ))}
