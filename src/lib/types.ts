@@ -250,18 +250,33 @@ export interface LoanStatement {
   propertyId?: string;
   periodStart?: string;
   periodEnd?: string;
+  /** Balance immediately before this entry's repayment — only ever set on a manually-recorded
+   * entry (AddLoanStatementDialog); AI-reviewed statements only ever stated the closing balance. */
+  openingBalance?: number;
   interestCharged?: number;
   principalPaid?: number;
   repaymentsMade?: number;
   closingBalance?: number;
+  /** A one-off lender fee (e.g. redraw, discharge, valuation) charged alongside a repayment —
+   * posted as its own "Borrowing Expenses" line, distinct from interestCharged's "Interest on
+   * Loan" one. Only ever set on a manually-recorded entry. */
+  eligibleLenderFee?: number;
+  /** Free-text note on a manually-recorded entry (e.g. "August private loan repayment") — AI-
+   * reviewed statements have no equivalent field. */
+  description?: string;
   sourceFileName?: string;
   sourceFileData?: string;
-  /** Which ai_intake_proposals row this came from — traceability only, nothing reads it back. */
+  /** Which ai_intake_proposals row this came from — traceability only, nothing reads it back.
+   * Unset for a manually-recorded entry (AddLoanStatementDialog). */
   proposalId?: string;
   /** The deductible Expense this line's interest was posted as, when any — lets deleting this
    * statement row also offer to remove the matching interest expense instead of leaving it
    * orphaned. Undefined for lines with no interest posted. */
   expenseId?: string;
+  /** Same idea as expenseId, but for eligibleLenderFee's own "Borrowing Expenses" line — kept
+   * separate since interest and the fee are different tax categories and can be deleted/matched
+   * independently. */
+  feeExpenseId?: string;
   appliedAt?: string;
 }
 
@@ -447,6 +462,12 @@ export interface Loan {
   notes?: string;
   /** Which Asset this loan is secured against/funds — mirrors propertyId, set for every asset type. */
   assetId?: string;
+  /** The offer/contract/approval letter attached when this loan was first added (AddLoanDialog's
+   * upload pane) — kept on the loan itself since it documents the loan as a whole, not one
+   * statement period. Distinct from LoanStatement.sourceFileName/sourceFileData below, which is
+   * per-period statement evidence. */
+  sourceFileName?: string;
+  sourceFileData?: string;
 }
 
 export interface Expense {

@@ -21,10 +21,11 @@ export function LoanStatementHistory({ loanId }: { loanId: string }) {
 
   if (statements.length === 0) return null;
 
-  const removeStatement = (id: string, expenseId?: string) => {
-    if (!confirm(expenseId ? "Delete this statement entry and its logged interest expense?" : "Delete this statement entry?")) return;
+  const removeStatement = (id: string, expenseId?: string, feeExpenseId?: string) => {
+    if (!confirm(expenseId || feeExpenseId ? "Delete this statement entry and its logged expense(s)?" : "Delete this statement entry?")) return;
     deleteLoanStatement(id);
     if (expenseId) deleteExpense(expenseId);
+    if (feeExpenseId) deleteExpense(feeExpenseId);
     toast.success("Statement entry removed");
   };
 
@@ -60,10 +61,11 @@ export function LoanStatementHistory({ loanId }: { loanId: string }) {
           {statements.map((s) => (
             <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
               <span className="text-muted-foreground">
-                {s.periodStart || "—"} → {s.periodEnd || "—"}
+                {s.description || `${s.periodStart || "—"} → ${s.periodEnd || "—"}`}
               </span>
               <span>Interest {s.interestCharged !== undefined ? fmtCurrency(s.interestCharged) : "—"}</span>
               <span>Principal {s.principalPaid !== undefined ? fmtCurrency(s.principalPaid) : "—"}</span>
+              {s.eligibleLenderFee !== undefined && <span>Fee {fmtCurrency(s.eligibleLenderFee)}</span>}
               <span>Balance {s.closingBalance !== undefined ? fmtCurrency(s.closingBalance) : "—"}</span>
               {s.sourceFileData && (
                 <DocumentLink fileName={s.sourceFileName} fileData={s.sourceFileData} className="inline-flex items-center gap-1 text-primary underline">
@@ -75,7 +77,7 @@ export function LoanStatementHistory({ loanId }: { loanId: string }) {
                 variant="ghost"
                 className="h-6 w-6 text-muted-foreground hover:text-destructive"
                 title="Delete this entry"
-                onClick={() => removeStatement(s.id, s.expenseId)}
+                onClick={() => removeStatement(s.id, s.expenseId, s.feeExpenseId)}
               >
                 <Trash2 className="h-3 w-3" />
               </Button>

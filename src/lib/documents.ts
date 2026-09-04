@@ -289,6 +289,21 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         fileName: c.fileName,
         fileData: c.fileData,
       })),
+    // The offer/contract/approval letter attached when a loan was first added (AddLoanDialog) —
+    // distinct from the AI-reviewed "Loan Document"/"Loan Statement" proposals below, which only
+    // ever cover documents forwarded through the upload-and-review pipeline, not this one.
+    ...state.loans
+      .filter((l) => l.sourceFileData)
+      .map((l) => ({
+        id: `${l.id}-loan-doc`,
+        kind: "Loan Document" as const,
+        date: l.startDate ?? l.created_at?.slice(0, 10) ?? "",
+        dateAdded: l.created_at,
+        propertyId: l.propertyId,
+        label: `${l.bankName} — loan document`,
+        fileName: l.sourceFileName,
+        fileData: l.sourceFileData,
+      })),
     // The signed Property Management Agreement on a (provider, property) agreement — has nowhere
     // else to live as a document, and its fee terms are directly tied to a period (start → next
     // review). One entry per provider_agreements row now (a provider can hold a different signed

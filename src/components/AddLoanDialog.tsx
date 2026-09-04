@@ -235,6 +235,8 @@ export function AddLoanDialog({
       offsetBalance: form.hasOffsetAccount && form.offsetBalance ? parseFloat(form.offsetBalance) || 0 : undefined,
       status: form.status,
       notes: form.notes || undefined,
+      sourceFileName: form.sourceFileName,
+      sourceFileData: form.sourceFileData,
     };
 
     if (isEdit && loan) {

@@ -62,6 +62,7 @@ import { DocumentsSection } from "@/components/DocumentEntryRow";
 import { AddLoanDialog } from "@/components/AddLoanDialog";
 import { LoanStatementHistory } from "@/components/LoanStatementHistory";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
+import { AddLoanStatementDialog } from "@/components/AddLoanStatementDialog";
 import { OverviewSection } from "@/components/OverviewSection";
 
 export const Route = createFileRoute("/assets_/$assetId")({
@@ -169,6 +170,7 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
                     </Button>
                   }
                 />
+                <AddLoanStatementDialog loan={l} />
                 <AddLoanDialog
                   loan={l}
                   propertyId={propertyId}
