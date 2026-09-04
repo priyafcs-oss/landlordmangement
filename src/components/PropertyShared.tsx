@@ -1712,6 +1712,13 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         : [];
 
   const [lines, setLines] = useState<LoanStatementLineItem[]>(initialLines);
+  // Principal/Balance after are only worth showing once something on the statement actually
+  // reported them — an interest-only loan's statement never will, and an empty "—" input on every
+  // line for a field that's never populated is just clutter. Card-level (not per-line) so every
+  // row stays visually consistent; the landlord can still reveal either field manually to type a
+  // value in on one specific line.
+  const [revealedPrincipal, setRevealedPrincipal] = useState(() => initialLines.some((li) => li.principalPaid !== undefined));
+  const [revealedBalance, setRevealedBalance] = useState(() => initialLines.some((li) => li.balanceAfter !== undefined));
   const loansForProperty = propertyId ? state.loans.filter((l) => l.propertyId === propertyId) : [];
   const loan = state.loans.find((l) => l.id === loanId);
 
@@ -1896,24 +1903,50 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                   className="h-7 w-[90px] text-xs"
                   placeholder="—"
                 />
-                <span className="text-muted-foreground">Principal</span>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={li.principalPaid ?? ""}
-                  onChange={(e) => updateLine(i, { principalPaid: e.target.value === "" ? undefined : Number(e.target.value) })}
-                  className="h-7 w-[90px] text-xs"
-                  placeholder="—"
-                />
-                <span className="text-muted-foreground">Balance after</span>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={li.balanceAfter ?? ""}
-                  onChange={(e) => updateLine(i, { balanceAfter: e.target.value === "" ? undefined : Number(e.target.value) })}
-                  className="h-7 w-[100px] text-xs"
-                  placeholder="—"
-                />
+                {revealedPrincipal ? (
+                  <>
+                    <span className="text-muted-foreground">Principal</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={li.principalPaid ?? ""}
+                      onChange={(e) => updateLine(i, { principalPaid: e.target.value === "" ? undefined : Number(e.target.value) })}
+                      className="h-7 w-[90px] text-xs"
+                      placeholder="—"
+                    />
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                    onClick={() => setRevealedPrincipal(true)}
+                  >
+                    <Plus className="h-3 w-3" /> Principal
+                  </Button>
+                )}
+                {revealedBalance ? (
+                  <>
+                    <span className="text-muted-foreground">Balance after</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={li.balanceAfter ?? ""}
+                      onChange={(e) => updateLine(i, { balanceAfter: e.target.value === "" ? undefined : Number(e.target.value) })}
+                      className="h-7 w-[100px] text-xs"
+                      placeholder="—"
+                    />
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                    onClick={() => setRevealedBalance(true)}
+                  >
+                    <Plus className="h-3 w-3" /> Balance after
+                  </Button>
+                )}
                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => removeLine(i)} title="Remove this line">
                   <span aria-hidden>✕</span>
                 </Button>

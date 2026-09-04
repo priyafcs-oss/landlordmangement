@@ -843,7 +843,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     addLedger: (e) =>
       set((s) => {
-        const row: LedgerEntry = { ...e, id: uid("le") };
+        const row: LedgerEntry = { ...e, id: uid("le"), created_at: e.created_at ?? new Date().toISOString() };
         void upsertRow(TABLES.ledger, row as unknown as Record<string, unknown>);
         const ledger = [...s.ledger, row];
         return { ...s, ledger, tenants: recomputePaidUp(row.tenantId, s.tenants, ledger, s.rentChanges) };
@@ -922,7 +922,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
 
     addExpense: (e) => {
-      const row: Expense = { ...e, id: uid("ex") };
+      const row: Expense = { ...e, id: uid("ex"), created_at: e.created_at ?? new Date().toISOString() };
       void upsertRow(TABLES.expenses, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, expenses: [...s.expenses, row] }));
       return row.id;
