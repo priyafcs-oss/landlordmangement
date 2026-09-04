@@ -48,7 +48,7 @@ import {
   Landmark,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory } from "@/lib/calculations";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
 import {
@@ -1689,7 +1689,7 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
 }
 
 function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateLoan, addExpense, addLoanStatement, markProposalApplied } = useStore();
+  const { state, updateLoan, addExpense, addLoanStatement, findOrCreateProvider, markProposalApplied } = useStore();
   const payload = proposal.payload as LoanStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [loanId, setLoanId] = useState(proposal.matchedLoanId ?? "");
@@ -1743,6 +1743,11 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
     const selected = lines.filter((_, i) => included[i]);
     if (selected.length === 0) return toast.error("Select at least one line to apply");
 
+    // The lender is a real payee — file it in the Provider directory (matching an existing bank
+    // by name rather than creating a duplicate) the same way a bill's vendor always is, so the
+    // interest expense below carries a proper providerName/providerId instead of going blank.
+    const lenderProviderId = payload.lenderName ? findOrCreateProvider(payload.lenderName, propertyId || undefined) : undefined;
+
     selected.forEach((li) => {
       // Only the interest portion is a deductible expense / cashflow-affecting transaction.
       // Principal never posts here — it only reduces the loan balance below.
@@ -1753,7 +1758,10 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
             date: li.date,
             propertyId,
             assetId: loan?.assetId,
-            taxCategory: "Immediate Deduction",
+            category: "Interest on Loan",
+            taxCategory: expenseCategoryToTaxCategory("Interest on Loan"),
+            providerName: payload.lenderName,
+            providerId: lenderProviderId,
             hasWarranty: false,
             rechargeToTenant: false,
             status: "approved",
@@ -4034,7 +4042,7 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   const outgoing = periodExpenses.filter((e) => e.direction !== "Income");
   const extraIncome = periodExpenses.filter((e) => e.direction === "Income");
 
-  const incomeByCategory: Record<string, number> = { Rent: grossRent };
+  const incomeByCategory: Record<string, number> = { "Gross Rent": grossRent };
   for (const e of extraIncome) {
     const cat = e.category ?? "Other Income";
     incomeByCategory[cat] = (incomeByCategory[cat] ?? 0) + e.cost;

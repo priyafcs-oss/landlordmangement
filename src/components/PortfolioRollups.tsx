@@ -167,7 +167,7 @@ export function PortfolioPnLTab() {
   const incomeByCategory: Record<string, number> = {};
   const expenseByCategory: Record<string, number> = {};
   for (const r of rows) {
-    if (r.grossRent) incomeByCategory["Rent"] = (incomeByCategory["Rent"] ?? 0) + r.grossRent;
+    if (r.grossRent) incomeByCategory["Gross Rent"] = (incomeByCategory["Gross Rent"] ?? 0) + r.grossRent;
     for (const e of r.extraIncome) {
       const cat = e.category ?? "Other Income";
       incomeByCategory[cat] = (incomeByCategory[cat] ?? 0) + e.cost;
