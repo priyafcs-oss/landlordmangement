@@ -50,7 +50,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions } from "@/lib/calculations";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
-import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord } from "@/lib/billMatch";
+import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
 import {
   verifyAgentFees,
   reconcileFlatFees,
@@ -1322,15 +1322,34 @@ export function FeeCheckRow({ result }: { result: FeeCheckResult }) {
 }
 
 function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addDepreciationItem, markProposalApplied } = useStore();
+  const { state, addDepreciationItem, deleteDepreciationItem, markProposalApplied } = useStore();
   const payload = proposal.payload as DepreciationReportProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [included, setIncluded] = useState<boolean[]>(() => payload.items.map(() => true));
+  const [replaceExisting, setReplaceExisting] = useState(true);
+
+  const assetId = state.properties.find((p) => p.id === propertyId)?.assetId;
+  // A depreciation report is normally a one-off document per property (unlike a bill, which
+  // legitimately recurs) — a second upload from the same surveyor with the same reference/date
+  // is treated as the identical document re-uploaded by mistake. See findDuplicateDepreciationReport's
+  // doc comment for why a differently-dated report is deliberately NOT flagged here.
+  const dup = assetId
+    ? findDuplicateDepreciationReport(state.depreciationItems, {
+        assetId,
+        quantitySurveyor: payload.quantitySurveyor,
+        reportReference: payload.reportReference,
+        reportDate: payload.reportDate,
+      })
+    : null;
 
   const confirm = () => {
-    const assetId = state.properties.find((p) => p.id === propertyId)?.assetId;
     if (!assetId) return toast.error("Select a property first");
-    const reportId = uid("dr");
+    if (dup && replaceExisting) {
+      state.depreciationItems.filter((it) => it.reportId === dup.reportId).forEach((it) => deleteDepreciationItem(it.id));
+    }
+    // Reuse the existing report's id when replacing, so the report stays one continuous record
+    // instead of leaving a dangling old reportId with nothing in it.
+    const reportId = dup && replaceExisting ? dup.reportId : uid("dr");
     let count = 0;
     payload.items.forEach((it, i) => {
       if (!included[i]) return;
@@ -1361,7 +1380,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
     });
     if (count === 0) return toast.error("Select at least one item to add");
     markProposalApplied(proposal.id, { propertyId });
-    toast.success(`Added ${count} depreciation item(s) from report`);
+    toast.success(dup && replaceExisting ? `Replaced existing report with ${count} item(s)` : `Added ${count} depreciation item(s) from report`);
   };
 
   return (
@@ -1392,6 +1411,24 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
           </div>
         )}
 
+        {dup && (
+          <div className="space-y-1.5 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+            <div>
+              A report from {dup.quantitySurveyor} dated {dup.reportDate || "—"} already exists for this property (
+              {dup.itemCount} item{dup.itemCount === 1 ? "" : "s"}, {fmtCurrency(dup.totalCost)}) — this looks like the
+              same document.
+            </div>
+            <label className="flex items-center gap-2">
+              <input type="radio" checked={replaceExisting} onChange={() => setReplaceExisting(true)} />
+              <span>Replace existing report (recommended)</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" checked={!replaceExisting} onChange={() => setReplaceExisting(false)} />
+              <span>Add as a separate report</span>
+            </label>
+          </div>
+        )}
+
         <div className="space-y-1 rounded border p-2">
           <div className="text-[11px] font-medium text-muted-foreground">Depreciating assets</div>
           {payload.items.map((it, i) => (
@@ -1411,7 +1448,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
 
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
-            Add selected items
+            {dup && replaceExisting ? "Replace existing report" : "Add selected items"}
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss

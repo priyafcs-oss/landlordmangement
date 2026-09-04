@@ -1,4 +1,4 @@
-import type { Expense, LedgerEntry, PropertyBill } from "./types";
+import type { DepreciationItem, Expense, LedgerEntry, PropertyBill } from "./types";
 
 export interface BillMatchCandidate {
   propertyId?: string;
@@ -226,4 +226,57 @@ export function findDuplicateLedgerEntry(
         symmetricDateWithinWindow(e.date, candidate.date, LEDGER_DUPLICATE_WINDOW_DAYS),
     ) ?? null
   );
+}
+
+export interface DepreciationReportDuplicateMatch {
+  reportId: string;
+  itemCount: number;
+  totalCost: number;
+  quantitySurveyor?: string;
+  reportDate?: string;
+  reportReference?: string;
+}
+
+export interface DepreciationReportCandidate {
+  assetId: string;
+  quantitySurveyor?: string;
+  reportReference?: string;
+  reportDate?: string;
+}
+
+/**
+ * Checks an about-to-be-applied Depreciation Report proposal against reports already on file for
+ * this asset. Unlike a bill, a QS depreciation report is normally a one-off document per
+ * property — there's no legitimate "recurring" case the way a monthly bill has one — so a second
+ * report from the same surveyor with the same reference/date is treated as the identical document
+ * re-uploaded by mistake, not a new revision. Deliberately narrow: a differently-dated/referenced
+ * report from the same (or a different) surveyor is a genuine revision and is NOT flagged here —
+ * reconciling that against years already claimed on a lodged return is a judgment call for the
+ * landlord/accountant, not something to auto-resolve. Requires a surveyor name on both sides
+ * (never matches against older items saved with nothing recorded).
+ */
+export function findDuplicateDepreciationReport(
+  items: DepreciationItem[],
+  candidate: DepreciationReportCandidate,
+): DepreciationReportDuplicateMatch | null {
+  if (!candidate.quantitySurveyor) return null;
+  const matching = items.filter(
+    (it) =>
+      it.assetId === candidate.assetId &&
+      it.reportId &&
+      vendorMatches(it.quantitySurveyor, candidate.quantitySurveyor!) &&
+      (referenceMatches(it.reportReference, candidate.reportReference) || referenceMatches(it.reportDate, candidate.reportDate)),
+  );
+  if (matching.length === 0) return null;
+
+  const reportId = matching[0].reportId!;
+  const group = matching.filter((it) => it.reportId === reportId);
+  return {
+    reportId,
+    itemCount: group.length,
+    totalCost: group.reduce((s, it) => s + it.purchaseCost, 0),
+    quantitySurveyor: group[0].quantitySurveyor,
+    reportDate: group[0].reportDate,
+    reportReference: group[0].reportReference,
+  };
 }
