@@ -89,6 +89,7 @@ import type {
   UnclassifiedProposalPayload,
   LoanDocumentProposalPayload,
   LoanStatementProposalPayload,
+  LoanStatementLineItem,
   BankStatementProposalPayload,
   PropertySaleProposalPayload,
   AgencyAgreementProposalPayload,
@@ -1655,17 +1656,106 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
   const payload = proposal.payload as LoanStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [loanId, setLoanId] = useState(proposal.matchedLoanId ?? "");
-  const [logInterest, setLogInterest] = useState(!!payload.interestCharged);
 
+  // Older proposals (staged before line-item extraction existed) only ever had the aggregate
+  // fields — fall back to a single line dated at period end so this card still works for them.
+  const initialLines: LoanStatementLineItem[] =
+    payload.lineItems && payload.lineItems.length > 0
+      ? payload.lineItems
+      : payload.interestCharged !== undefined || payload.principalPaid !== undefined
+        ? [
+            {
+              date: payload.periodEnd || payload.periodStart || todayISO(),
+              interestCharged: payload.interestCharged,
+              principalPaid: payload.principalPaid,
+              repaymentAmount: payload.repaymentsMade,
+              balanceAfter: payload.closingBalance,
+            },
+          ]
+        : [];
+
+  const [lines, setLines] = useState<LoanStatementLineItem[]>(initialLines);
   const loansForProperty = propertyId ? state.loans.filter((l) => l.propertyId === propertyId) : [];
+  const loan = state.loans.find((l) => l.id === loanId);
+
+  // Each line's interest is what actually gets posted as a deductible Expense (dated to that
+  // line, not lumped into one figure) — check each one against existing bills/expenses the same
+  // way Add Bill/Add Transaction do, so re-approving the same statement twice (or two statements
+  // with overlapping periods) is caught instead of silently doubling up the interest deduction.
+  const duplicates = lines.map((li) =>
+    li.interestCharged
+      ? findDuplicateRecord(state.bills, state.expenses, {
+          propertyId: propertyId || undefined,
+          vendorOrDescription: `${payload.lenderName} — loan interest`,
+          amount: li.interestCharged,
+          date: li.date,
+        })
+      : null,
+  );
+  const [included, setIncluded] = useState<boolean[]>(() => duplicates.map((d) => !d));
+
+  const updateLine = (i: number, patch: Partial<LoanStatementLineItem>) =>
+    setLines((ls) => ls.map((li, j) => (j === i ? { ...li, ...patch } : li)));
+  const removeLine = (i: number) => {
+    setLines((ls) => ls.filter((_, j) => j !== i));
+    setIncluded((inc) => inc.filter((_, j) => j !== i));
+  };
 
   const confirm = () => {
     if (!loanId) return toast.error("Select which loan this statement is for");
+    const selected = lines.filter((_, i) => included[i]);
+    if (selected.length === 0) return toast.error("Select at least one line to apply");
+
+    selected.forEach((li) => {
+      // Only the interest portion is a deductible expense / cashflow-affecting transaction.
+      // Principal never posts here — it only reduces the loan balance below.
+      const expenseId = li.interestCharged
+        ? addExpense({
+            itemName: `${payload.lenderName} — loan interest`,
+            cost: li.interestCharged,
+            date: li.date,
+            propertyId,
+            assetId: loan?.assetId,
+            taxCategory: "Immediate Deduction",
+            hasWarranty: false,
+            rechargeToTenant: false,
+            status: "approved",
+            source: "upload",
+            sourceFileName: proposal.sourceFileName,
+            sourceFileData: proposal.sourceFileData,
+          })
+        : undefined;
+
+      addLoanStatement({
+        loanId,
+        propertyId,
+        periodStart: li.date,
+        periodEnd: li.date,
+        interestCharged: li.interestCharged,
+        principalPaid: li.principalPaid,
+        repaymentsMade: li.repaymentAmount,
+        closingBalance: li.balanceAfter,
+        sourceFileName: proposal.sourceFileName,
+        sourceFileData: proposal.sourceFileData,
+        proposalId: proposal.id,
+        expenseId,
+      });
+    });
+
     // Every field below is behind its own presence check — a statement missing emi/due-date/
     // account-last-4 must never overwrite manually-entered data with a blank (updateRow's
     // stripUndefined in lib/db.ts drops undefined keys too, as a second safety net).
     const patch: Record<string, unknown> = {};
-    if (payload.closingBalance !== undefined) patch.totalBalance = payload.closingBalance;
+    // Principal reduces the running balance — prefer the last applied line's own stated balance
+    // (most authoritative, straight off the statement); fall back to subtracting the total
+    // principal paid across applied lines from the loan's current balance.
+    const lastBalance = selected.at(-1)?.balanceAfter;
+    const totalPrincipal = selected.reduce((s, li) => s + (li.principalPaid ?? 0), 0);
+    if (lastBalance !== undefined) patch.totalBalance = lastBalance;
+    else if (totalPrincipal > 0 && loan) patch.totalBalance = Math.max(0, loan.totalBalance - totalPrincipal);
+    else if (payload.closingBalance !== undefined) patch.totalBalance = payload.closingBalance;
+    // The monthly repayment amount doesn't post as its own transaction — it feeds Loan.monthlyEmi,
+    // which is what the Forecasts tab's cashflow projection reads (src/routes/forecasts.tsx).
     if (payload.emiAmountDue !== undefined) patch.monthlyEmi = payload.emiAmountDue;
     if (payload.nextEmiDueDate) {
       patch.nextRepaymentDate = payload.nextEmiDueDate;
@@ -1674,46 +1764,13 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
     if (payload.accountNumberLast4) patch.accountNumber = payload.accountNumberLast4;
     // updateLoan snapshots totalBalance into loanBalanceSnapshots whenever the patch includes it
     // (see store.tsx) — applying a statement will therefore also produce a balance-snapshot row
-    // alongside the loan_statements row added below. That's intentional overlap, not a bug: the
+    // alongside the loan_statements row(s) added above. That's intentional overlap, not a bug: the
     // snapshot feeds the portfolio-wide Dashboard trend (every balance-changing edit, manual or
     // statement-driven), while loan_statements is this specific loan's interest/principal history.
     if (Object.keys(patch).length > 0) updateLoan(loanId, patch as Partial<Loan>);
 
-    addLoanStatement({
-      loanId,
-      propertyId,
-      periodStart: payload.periodStart,
-      periodEnd: payload.periodEnd,
-      interestCharged: payload.interestCharged,
-      principalPaid: payload.principalPaid,
-      repaymentsMade: payload.repaymentsMade,
-      closingBalance: payload.closingBalance,
-      sourceFileName: proposal.sourceFileName,
-      sourceFileData: proposal.sourceFileData,
-      proposalId: proposal.id,
-    });
-
-    if (logInterest && payload.interestCharged) {
-      const loan = state.loans.find((l) => l.id === loanId);
-      addExpense({
-        itemName: `${payload.lenderName} — loan interest`,
-        cost: payload.interestCharged,
-        date: payload.periodEnd || todayISO(),
-        propertyId,
-        assetId: loan?.assetId,
-        taxCategory: "Immediate Deduction",
-        hasWarranty: false,
-        rechargeToTenant: false,
-        status: "approved",
-        source: "upload",
-        periodStart: payload.periodStart || undefined,
-        periodEnd: payload.periodEnd || undefined,
-        sourceFileName: proposal.sourceFileName,
-        sourceFileData: proposal.sourceFileData,
-      });
-    }
     markProposalApplied(proposal.id, { propertyId });
-    toast.success("Loan statement applied");
+    toast.success(`Loan statement applied — ${selected.length} period(s)`);
   };
 
   return (
@@ -1753,22 +1810,6 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
 
         <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
           <div>
-            <div className="text-muted-foreground">Interest charged</div>
-            <div className="font-medium">{payload.interestCharged ? fmtCurrency(payload.interestCharged) : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Principal paid</div>
-            <div className="font-medium">{payload.principalPaid ? fmtCurrency(payload.principalPaid) : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Repayments made</div>
-            <div className="font-medium">{payload.repaymentsMade ? fmtCurrency(payload.repaymentsMade) : "—"}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Closing balance</div>
-            <div className="font-medium">{payload.closingBalance ? fmtCurrency(payload.closingBalance) : "—"}</div>
-          </div>
-          <div>
             <div className="text-muted-foreground">EMI due</div>
             <div className="font-medium">{payload.emiAmountDue ? fmtCurrency(payload.emiAmountDue) : "—"}</div>
           </div>
@@ -1776,17 +1817,78 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
             <div className="text-muted-foreground">Next due date</div>
             <div className="font-medium">{payload.nextEmiDueDate || "—"}</div>
           </div>
+          <div>
+            <div className="text-muted-foreground">Statement closing balance</div>
+            <div className="font-medium">{payload.closingBalance ? fmtCurrency(payload.closingBalance) : "—"}</div>
+          </div>
         </div>
 
-        {!!payload.interestCharged && (
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={logInterest} onChange={(e) => setLogInterest(e.target.checked)} />
-            <span>Log {fmtCurrency(payload.interestCharged)} interest charged as a deductible expense</span>
-          </label>
-        )}
+        <div className="space-y-1 rounded border p-2">
+          <div className="text-[11px] font-medium text-muted-foreground">
+            Interest is logged as a deductible expense on its own date below; principal only reduces the loan
+            balance — tick which periods to apply.
+          </div>
+          {lines.map((li, i) => (
+            <div key={i} className="space-y-1 border-b pb-1.5 last:border-b-0 last:pb-0">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={included[i]}
+                  onChange={(e) => setIncluded((inc) => inc.map((v, j) => (j === i ? e.target.checked : v)))}
+                />
+                <Input
+                  type="date"
+                  value={li.date}
+                  onChange={(e) => updateLine(i, { date: e.target.value })}
+                  className="h-7 w-[130px] text-xs"
+                />
+                <span className="text-muted-foreground">Interest</span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={li.interestCharged ?? ""}
+                  onChange={(e) => updateLine(i, { interestCharged: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  className="h-7 w-[90px] text-xs"
+                  placeholder="—"
+                />
+                <span className="text-muted-foreground">Principal</span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={li.principalPaid ?? ""}
+                  onChange={(e) => updateLine(i, { principalPaid: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  className="h-7 w-[90px] text-xs"
+                  placeholder="—"
+                />
+                <span className="text-muted-foreground">Balance after</span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={li.balanceAfter ?? ""}
+                  onChange={(e) => updateLine(i, { balanceAfter: e.target.value === "" ? undefined : Number(e.target.value) })}
+                  className="h-7 w-[100px] text-xs"
+                  placeholder="—"
+                />
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => removeLine(i)} title="Remove this line">
+                  <span aria-hidden>✕</span>
+                </Button>
+              </div>
+              {duplicates[i] && (
+                <div className="ml-6 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  <span>
+                    Looks like a matching {fmtCurrency(duplicates[i]!.amount)} expense already exists on {duplicates[i]!.date}
+                    {duplicates[i]!.status ? ` (${duplicates[i]!.status})` : ""} — left unchecked to avoid logging interest twice.
+                    Tick the box above to apply anyway.
+                  </span>
+                </div>
+              )}
+            </div>
+          ))}
+          {lines.length === 0 && <div className="text-xs text-muted-foreground">No interest/repayment lines extracted.</div>}
+        </div>
 
         <div className="flex flex-wrap gap-2 pt-1">
-          <Button size="sm" disabled={!loanId} onClick={confirm}>
+          <Button size="sm" disabled={!loanId || lines.length === 0} onClick={confirm}>
             Apply to loan
           </Button>
           <Button size="sm" variant="outline" onClick={onDismiss}>
@@ -1815,6 +1917,19 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       : null,
   );
   const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
+  // Same duplicate check Add Bill/Add Transaction run before saving — a debit line that already
+  // matches a posted Expense/Bill is flagged so re-importing the same bank statement (or one
+  // covering an overlapping period) doesn't silently double up the transaction.
+  const duplicateMatches = payload.transactions.map((tx) =>
+    tx.direction === "out"
+      ? findDuplicateRecord(state.bills, state.expenses, {
+          propertyId: propertyId || undefined,
+          vendorOrDescription: tx.description,
+          amount: tx.amount,
+          date: tx.date,
+        })
+      : null,
+  );
 
   const confirm = () => {
     if (!propertyId) return toast.error("Select a property first");
@@ -1896,6 +2011,14 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                       ` (bill is ${fmtCurrency(billMatches[i]!.amount)}, statement says ${fmtCurrency(tx.amount)})`}
                   </span>
                 </label>
+              )}
+              {!billMatches[i] && duplicateMatches[i] && (
+                <div className="ml-6 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  <span>
+                    A matching {fmtCurrency(duplicateMatches[i]!.amount)} {duplicateMatches[i]!.kind} already exists on{" "}
+                    {duplicateMatches[i]!.date} — check this isn't the same transaction imported before.
+                  </span>
+                </div>
               )}
             </div>
           ))}

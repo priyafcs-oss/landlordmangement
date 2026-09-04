@@ -199,6 +199,7 @@ interface StoreCtx {
   updateLoan: (id: string, l: Partial<Loan>) => void;
   deleteLoan: (id: string) => void;
   addLoanStatement: (s: Omit<LoanStatement, "id">) => void;
+  deleteLoanStatement: (id: string) => void;
 
   addBankAccount: (a: Omit<BankAccount, "id">) => void;
   updateBankAccount: (id: string, a: Partial<BankAccount>) => void;
@@ -914,6 +915,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: LoanStatement = { ...ls, id: uid("lst") };
       void upsertRow(TABLES.loanStatements, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, loanStatements: [...s.loanStatements, row] }));
+    },
+    deleteLoanStatement: (id) => {
+      void deleteRow(TABLES.loanStatements, id);
+      set((s) => ({ ...s, loanStatements: s.loanStatements.filter((x) => x.id !== id) }));
     },
 
     addExpense: (e) => {

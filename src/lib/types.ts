@@ -251,6 +251,10 @@ export interface LoanStatement {
   sourceFileData?: string;
   /** Which ai_intake_proposals row this came from — traceability only, nothing reads it back. */
   proposalId?: string;
+  /** The deductible Expense this line's interest was posted as, when any — lets deleting this
+   * statement row also offer to remove the matching interest expense instead of leaving it
+   * orphaned. Undefined for lines with no interest posted. */
+  expenseId?: string;
   appliedAt?: string;
 }
 
@@ -1060,18 +1064,42 @@ export interface LoanDocumentProposalPayload {
   confidence: number;
 }
 
-/** Extracted from an ongoing loan statement — matched against an existing Loan to update, not create. */
+/** One repayment event within a loan statement — a statement covering several months (e.g. a
+ * quarterly or half-yearly mortgage statement) breaks out each month's own interest/principal
+ * split under its own actual date, rather than one lump sum for the whole statement period. */
+export interface LoanStatementLineItem {
+  /** YYYY-MM-DD — the actual date this interest/repayment was charged, not the statement's
+   * print date. Interest is posted to Expenses against this date. */
+  date: string;
+  interestCharged?: number;
+  /** Reduces Loan.totalBalance only — never posted as an Expense/cashflow entry itself. */
+  principalPaid?: number;
+  /** The full amount debited this period (interest + principal) — informational per-line total,
+   * distinct from Loan.monthlyEmi (the going-forward fixed instalment amount used by Forecasts). */
+  repaymentAmount?: number;
+  /** The loan's outstanding balance immediately after this line item, when stated. */
+  balanceAfter?: number;
+}
+
+/** Extracted from an ongoing loan statement — matched against an existing Loan to update, not
+ * create. lineItems holds the actual per-period breakdown (see LoanStatementLineItem); the
+ * aggregate fields below are the sum/latest across those lines, kept for older proposals and for
+ * the card's summary badges. */
 export interface LoanStatementProposalPayload {
   lenderName: string;
   periodStart?: string;
   periodEnd?: string;
+  lineItems?: LoanStatementLineItem[];
+  /** Sum of lineItems[].interestCharged, or the statement's own stated total when no breakdown
+   * was extractable. */
   interestCharged?: number;
   repaymentsMade?: number;
   closingBalance?: number;
   /** The portion of repaymentsMade that reduced principal this period, when the statement
    * breaks it out separately from interestCharged. */
   principalPaid?: number;
-  /** The fixed repayment amount due each period, when stated — applied to Loan.monthlyEmi. */
+  /** The fixed repayment amount due each period, when stated — applied to Loan.monthlyEmi, which
+   * is what Forecasts reads to project cashflow (see src/routes/forecasts.tsx). */
   emiAmountDue?: number;
   /** YYYY-MM-DD — the next scheduled repayment date, when stated — applied to
    * Loan.nextRepaymentDate/dueDayOfMonth. */

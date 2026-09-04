@@ -4,7 +4,9 @@ import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { DocumentLink } from "@/components/DocumentLink";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, ResponsiveContainer } from "recharts";
-import { FileText } from "lucide-react";
+import { FileText, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 /** Per-loan statement history — the interest/principal breakdown across every applied
  * loan_statement proposal (LoanStatementProposalCard's "Apply to loan"), plus a link back to
@@ -12,12 +14,19 @@ import { FileText } from "lucide-react";
  * when a loan has no applied statements yet, so it never bloats a loan card that's only ever
  * been entered/edited manually. */
 export function LoanStatementHistory({ loanId }: { loanId: string }) {
-  const { state } = useStore();
+  const { state, deleteLoanStatement, deleteExpense } = useStore();
   const statements = state.loanStatements
     .filter((s) => s.loanId === loanId)
     .sort((a, b) => (a.periodEnd ?? a.appliedAt ?? "").localeCompare(b.periodEnd ?? b.appliedAt ?? ""));
 
   if (statements.length === 0) return null;
+
+  const removeStatement = (id: string, expenseId?: string) => {
+    if (!confirm(expenseId ? "Delete this statement entry and its logged interest expense?" : "Delete this statement entry?")) return;
+    deleteLoanStatement(id);
+    if (expenseId) deleteExpense(expenseId);
+    toast.success("Statement entry removed");
+  };
 
   const chartData = statements.map((s) => ({
     name: s.periodEnd?.slice(0, 7) ?? s.periodStart?.slice(0, 7) ?? "—",
@@ -61,6 +70,15 @@ export function LoanStatementHistory({ loanId }: { loanId: string }) {
                   <FileText className="h-3 w-3 shrink-0" /> Statement
                 </DocumentLink>
               )}
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                title="Delete this entry"
+                onClick={() => removeStatement(s.id, s.expenseId)}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
             </div>
           ))}
         </div>

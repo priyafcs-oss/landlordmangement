@@ -237,11 +237,25 @@ export interface ParsedLoanDocumentFields {
 }
 
 /** Strict JSON shape requested from Gemini for an ongoing loan statement. */
+/** One repayment event within the statement, under its own actual date — a statement covering
+ * several months must return one entry per month here, not a single aggregate. */
+export interface ParsedLoanStatementLineItem {
+  date: string; // YYYY-MM-DD, the actual charge/repayment date
+  interest_charged: number | null;
+  principal_paid: number | null;
+  repayment_amount: number | null;
+  balance_after: number | null;
+}
+
 export interface ParsedLoanStatementFields {
   property_address: string;
   lender_name: string;
   period_start: string | null; // YYYY-MM-DD
   period_end: string | null; // YYYY-MM-DD
+  /** Every distinct interest/repayment event covered by the statement, each under its own actual
+   * date — see ParsedLoanStatementLineItem. Empty/absent only if the statement gives nothing but
+   * period totals with no way to attribute them to a date. */
+  line_items: ParsedLoanStatementLineItem[] | null;
   interest_charged: number | null;
   repayments_made: number | null;
   closing_balance: number | null;
