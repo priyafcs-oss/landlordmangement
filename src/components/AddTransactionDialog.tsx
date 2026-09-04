@@ -42,6 +42,7 @@ import {
 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
+import { AssessDepreciationDialog } from "@/components/AssessDepreciationDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, Expense, ExpenseProposalPayload, ExtractBillResult } from "@/lib/types";
@@ -167,6 +168,7 @@ export function AddTransactionDialog({
   // Shown right after the Payee field prefills a line's category from a matched existing
   // provider's defaultCategory — so the auto-fill is visible/undoable rather than a silent trap.
   const [categoryPrefillNote, setCategoryPrefillNote] = useState<string | null>(null);
+  const [assessingDepreciation, setAssessingDepreciation] = useState(false);
 
   const blankForm = () => ({
     propertyId: lockedPropertyId ?? state.properties[0]?.id ?? "",
@@ -1015,6 +1017,11 @@ export function AddTransactionDialog({
               </Button>
             </>
           )}
+          {expense && expense.direction !== "Income" && (
+            <Button variant="outline" onClick={() => setAssessingDepreciation(true)}>
+              Assess depreciation
+            </Button>
+          )}
           <Button onClick={attemptSave} disabled={busy}>
             Save
           </Button>
@@ -1022,6 +1029,7 @@ export function AddTransactionDialog({
       </DialogContent>
     </Dialog>
     <DuplicateWarningDialog match={duplicateMatch} onCancel={() => setDuplicateMatch(null)} onSaveAnyway={commitSave} />
+    <AssessDepreciationDialog expense={assessingDepreciation ? (expense ?? null) : null} onClose={() => setAssessingDepreciation(false)} />
     </>
   );
 }

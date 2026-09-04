@@ -215,6 +215,13 @@ export interface DepreciationItem {
   effectiveFrom?: string;
   sourceFileName?: string;
   sourceFileData?: string;
+  /** Set when this item was created by "assessing" an existing Expense as a capital purchase
+   * rather than entered from scratch — links back to the Expense whose taxCategory/category was
+   * flipped to Capital Works/Depreciation at the same time, so the two never silently disagree
+   * (the expense staying an immediate deduction while this item also claims the same cost). Same
+   * link-back idea as LoanStatement.expenseId, just the reverse direction (there: an Expense is
+   * created FROM a statement; here: a DepreciationItem is created FROM an existing Expense). */
+  sourceExpenseId?: string;
 }
 
 /** One point-in-time value for an asset — captured automatically whenever currentValue changes,

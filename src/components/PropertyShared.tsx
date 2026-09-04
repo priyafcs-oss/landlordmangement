@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Building2,
   Pencil,
@@ -46,6 +47,7 @@ import {
   Calculator,
   Eye,
   Landmark,
+  Info,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory } from "@/lib/calculations";
@@ -2883,10 +2885,20 @@ function ValueJourneyChart({ actualPoints, estimatedPoints }: { actualPoints: Va
   );
 }
 
-function PerfTile({ label, value, caption }: { label: string; value: string; caption?: string }) {
+function PerfTile({ label, value, caption, tooltip }: { label: string; value: string; caption?: string; tooltip?: string }) {
   return (
     <div className="rounded-md bg-muted p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <span>{label}</span>
+        {tooltip && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Info className="h-3 w-3 shrink-0 cursor-help" aria-label={`How ${label} is calculated`} />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs text-xs">{tooltip}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       <div className="mt-1 text-base font-semibold">{value}</div>
       {caption && <div className="mt-0.5 text-xs text-muted-foreground">{caption}</div>}
     </div>
@@ -3003,36 +3015,46 @@ export function PropertyPerformanceTab({ prop, loan, tenants, expenses }: { prop
     <div className="space-y-4 text-sm">
       <Card>
         <CardContent className="space-y-4 p-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <PerfTile
-              label="Total return"
-              value={totalReturnPctPa !== null ? `${totalReturnPctPa.toFixed(1)}% p.a.` : "—"}
-              caption={
-                !purchaseDate
-                  ? "Add a purchase date"
-                  : !hasFullYearHeld
-                    ? "Needs at least 1 year of ownership"
-                    : `${totalReturnDollar >= 0 ? "+" : ""}${fmtCurrency(totalReturnDollar)} over the hold`
-              }
-            />
-            <PerfTile
-              label="Capital growth"
-              value={capitalGrowthPct !== null ? `${capitalGrowthPct.toFixed(1)}% p.a.` : "—"}
-              caption={
-                !purchaseDate
-                  ? "Add a purchase date"
-                  : !hasFullYearHeld
-                    ? "Needs at least 1 year of ownership"
-                    : `${capitalGrowthDollar >= 0 ? "+" : ""}${fmtCurrency(capitalGrowthDollar)} since purchase`
-              }
-            />
-            <PerfTile label="Yield on cost" value={`${yieldOnCost.toFixed(1)}%`} caption={`rent ${fmtCurrency(baseline.annualRent)}/yr`} />
-            <PerfTile
-              label="Cash-on-cash"
-              value={cashOnCash !== null ? `${cashOnCash.toFixed(1)}%` : "—"}
-              caption={`${baseline.netCashflow >= 0 ? "+" : ""}${fmtCurrency(baseline.netCashflow)}/yr · ${baseline.netCashflow < 0 ? "negative" : "positive"} gearing`}
-            />
-          </div>
+          <TooltipProvider delayDuration={200}>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <PerfTile
+                label="Total return"
+                value={totalReturnPctPa !== null ? `${totalReturnPctPa.toFixed(1)}% p.a.` : "—"}
+                caption={
+                  !purchaseDate
+                    ? "Add a purchase date"
+                    : !hasFullYearHeld
+                      ? "Needs at least 1 year of ownership"
+                      : `${totalReturnDollar >= 0 ? "+" : ""}${fmtCurrency(totalReturnDollar)} over the hold`
+                }
+                tooltip={`Compound annual return: (1 + total return ÷ cost base) ^ (1 ÷ years held) − 1. Cashflow is counted from this property's first recorded transaction (${cashflowStart}) — periods before that aren't included. Needs at least 1 year of ownership.`}
+              />
+              <PerfTile
+                label="Capital growth"
+                value={capitalGrowthPct !== null ? `${capitalGrowthPct.toFixed(1)}% p.a.` : "—"}
+                caption={
+                  !purchaseDate
+                    ? "Add a purchase date"
+                    : !hasFullYearHeld
+                      ? "Needs at least 1 year of ownership"
+                      : `${capitalGrowthDollar >= 0 ? "+" : ""}${fmtCurrency(capitalGrowthDollar)} since purchase`
+                }
+                tooltip="Compound annual growth rate: (current value ÷ purchase price) ^ (1 ÷ years held) − 1. Needs at least 1 year of ownership."
+              />
+              <PerfTile
+                label="Yield on cost"
+                value={`${yieldOnCost.toFixed(1)}%`}
+                caption={`rent ${fmtCurrency(baseline.annualRent)}/yr`}
+                tooltip="Annual rent ÷ (purchase price + stamp duty & buying costs + capital improvements). Uses your current lease's annualised rent."
+              />
+              <PerfTile
+                label="Cash-on-cash"
+                value={cashOnCash !== null ? `${cashOnCash.toFixed(1)}%` : "—"}
+                caption={`${baseline.netCashflow >= 0 ? "+" : ""}${fmtCurrency(baseline.netCashflow)}/yr · ${baseline.netCashflow < 0 ? "negative" : "positive"} gearing`}
+                tooltip="Net annual cashflow ÷ cash invested. Pre-tax, using your current rent, costs, and loan figures."
+              />
+            </div>
+          </TooltipProvider>
           <div className="space-y-1">
             <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <div
