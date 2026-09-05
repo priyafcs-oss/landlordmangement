@@ -291,6 +291,13 @@ export interface ParsedLoanStatementFields {
 export interface ParsedBankStatementFields {
   property_address: string | null;
   bank_name: string | null;
+  /** The account's own name/nickname as printed (e.g. "Everyday Offset", "Smith Family Trust
+   * Account") — null if the statement only shows the account holder's name, not a distinct
+   * account label. Used only to prefill a new BankAccount's name if the landlord creates one
+   * from this statement, never to match an existing one. */
+  account_name: string | null;
+  bsb: string | null;
+  account_number: string | null;
   period_start: string | null; // YYYY-MM-DD
   period_end: string | null; // YYYY-MM-DD
   transactions: { date: string; description: string; amount: number; direction: "in" | "out" }[];

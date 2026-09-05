@@ -196,13 +196,13 @@ interface StoreCtx {
   updateInvoice: (id: string, i: Partial<TenantInvoice>) => void;
   deleteInvoice: (id: string) => void;
 
-  addLoan: (l: Omit<Loan, "id">) => void;
+  addLoan: (l: Omit<Loan, "id">) => string;
   updateLoan: (id: string, l: Partial<Loan>) => void;
   deleteLoan: (id: string) => void;
   addLoanStatement: (s: Omit<LoanStatement, "id">) => void;
   deleteLoanStatement: (id: string) => void;
 
-  addBankAccount: (a: Omit<BankAccount, "id">) => void;
+  addBankAccount: (a: Omit<BankAccount, "id">) => string;
   updateBankAccount: (id: string, a: Partial<BankAccount>) => void;
   deleteBankAccount: (id: string) => void;
 
@@ -895,6 +895,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void upsertRow(TABLES.loans, row as unknown as Record<string, unknown>);
       const snap = snapshotLoanBalance(row.id, row.totalBalance);
       set((s) => ({ ...s, loans: [...s.loans, row], loanBalanceSnapshots: [...s.loanBalanceSnapshots, snap] }));
+      return row.id;
     },
     updateLoan: (id, l) => {
       const stamped = { ...l, updatedAt: new Date().toISOString() };
@@ -1265,6 +1266,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: BankAccount = { ...a, id: uid("bank") };
       void upsertRow(TABLES.bankAccounts, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, bankAccounts: [...s.bankAccounts, row] }));
+      return row.id;
     },
     updateBankAccount: (id, patch) => {
       const stamped = { ...patch, updatedAt: new Date().toISOString() };

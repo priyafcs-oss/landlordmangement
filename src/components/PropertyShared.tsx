@@ -1692,10 +1692,16 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
 }
 
 function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateLoan, addExpense, addLoanStatement, findOrCreateProvider, markProposalApplied } = useStore();
+  const { state, addLoan, updateLoan, updateProposal, addExpense, addLoanStatement, findOrCreateProvider, markProposalApplied } = useStore();
   const payload = proposal.payload as LoanStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [loanId, setLoanId] = useState(proposal.matchedLoanId ?? "");
+  // Offered whenever there's no existing loan to pick for this property — the statement's own
+  // extracted figures (lender name, EMI, closing balance, account last-4) prefill the new Loan
+  // so confirming this card can also be the first time the loan itself gets created, instead of
+  // requiring a separate trip to "Add Loan" first with no data carried over.
+  const [creatingLoan, setCreatingLoan] = useState(false);
+  const [newLoanInterestRate, setNewLoanInterestRate] = useState("");
 
   // Older proposals (staged before line-item extraction existed) only ever had the aggregate
   // fields — fall back to a single line dated at period end so this card still works for them.
@@ -1746,6 +1752,27 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
   const removeLine = (i: number) => {
     setLines((ls) => ls.filter((_, j) => j !== i));
     setIncluded((inc) => inc.filter((_, j) => j !== i));
+  };
+
+  const createLoan = () => {
+    if (!propertyId) return toast.error("Select the property first");
+    const rate = parseFloat(newLoanInterestRate);
+    if (!rate || rate <= 0) return toast.error("Enter the loan's interest rate to create it");
+    const newLoanId = addLoan({
+      propertyId,
+      bankName: payload.lenderName,
+      accountNumber: payload.accountNumberLast4,
+      totalBalance: payload.closingBalance ?? 0,
+      interestRate: rate,
+      monthlyEmi: payload.emiAmountDue ?? 0,
+      nextRepaymentDate: payload.nextEmiDueDate,
+      dueDayOfMonth: payload.nextEmiDueDate ? new Date(payload.nextEmiDueDate).getDate() : undefined,
+      status: "Active",
+    });
+    updateProposal(proposal.id, { matchedLoanId: newLoanId });
+    setLoanId(newLoanId);
+    setCreatingLoan(false);
+    toast.success(`${payload.lenderName} loan created`);
   };
 
   const confirm = () => {
@@ -1845,7 +1872,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
           </div>
         )}
 
-        {propertyId && (
+        {propertyId && !creatingLoan && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-muted-foreground">Loan:</span>
             <Select value={loanId} onValueChange={setLoanId}>
@@ -1860,6 +1887,49 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                 ))}
               </SelectContent>
             </Select>
+            <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" onClick={() => setCreatingLoan(true)}>
+              <Plus className="h-3 w-3" /> New loan
+            </Button>
+          </div>
+        )}
+
+        {propertyId && creatingLoan && (
+          <div className="space-y-2 rounded border border-dashed p-2">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              No loan on file for {payload.lenderName} yet — create one from this statement's own figures.
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <div>
+                <div className="text-muted-foreground">Lender</div>
+                <div className="font-medium">{payload.lenderName}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">Current balance</div>
+                <div className="font-medium">{payload.closingBalance ? fmtCurrency(payload.closingBalance) : "—"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">Repayment</div>
+                <div className="font-medium">{payload.emiAmountDue ? fmtCurrency(payload.emiAmountDue) : "—"}</div>
+              </div>
+              <Field label="Interest rate (%)">
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={newLoanInterestRate}
+                  onChange={(e) => setNewLoanInterestRate(e.target.value)}
+                  className="h-7 text-xs"
+                  placeholder="not on the statement"
+                />
+              </Field>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" className="h-7 text-xs" onClick={createLoan}>
+                Create loan
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setCreatingLoan(false)}>
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
 
@@ -1981,9 +2051,15 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
 }
 
 function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addExpense, markBillPaid, markProposalApplied } = useStore();
+  const { state, addExpense, addBankAccount, updateProposal, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as BankStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
+  const [bankAccountId, setBankAccountId] = useState(proposal.bankAccountId ?? "");
+  // Offered whenever this statement isn't already linked to a BankAccount — the statement's own
+  // extracted institution/account details prefill the new account, so this card can also be the
+  // first time that account gets added, matching what LoanStatementProposalCard already does.
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [newAccountEntityId, setNewAccountEntityId] = useState(state.entities[0]?.id ?? "");
   const [included, setIncluded] = useState<boolean[]>(() => payload.transactions.map(() => false));
   // Only an "out" (debit) line can be paying an existing bill — "in" is income. Suggests
   // marking that bill paid instead of importing the line as a second, disconnected Expense.
@@ -2021,6 +2097,23 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       : null,
   );
 
+  const createAccount = () => {
+    if (!newAccountEntityId) return toast.error("Add an entity first (Entities page) before adding a bank account");
+    const newId = addBankAccount({
+      entityId: newAccountEntityId,
+      institution: payload.bankName,
+      accountName: payload.accountName || payload.bankName || "Bank account",
+      accountType: "Transaction",
+      bsb: payload.bsb,
+      accountNumber: payload.accountNumber,
+      currentBalance: 0,
+    });
+    updateProposal(proposal.id, { bankAccountId: newId });
+    setBankAccountId(newId);
+    setCreatingAccount(false);
+    toast.success("Bank account created");
+  };
+
   const confirm = () => {
     if (!propertyId) return toast.error("Select a property first");
     let count = 0;
@@ -2056,7 +2149,7 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       count++;
     });
     if (count === 0) return toast.error("Select at least one transaction to import");
-    markProposalApplied(proposal.id, { propertyId });
+    markProposalApplied(proposal.id, { propertyId, ...(bankAccountId ? { bankAccountId } : {}) });
     toast.success(`Imported ${count} transaction(s)`);
   };
 
@@ -2074,6 +2167,58 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
           <span className="text-xs text-muted-foreground">Apply selected lines to:</span>
           <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
         </div>
+
+        {!bankAccountId && !creatingAccount && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Not linked to a bank account on file yet.</span>
+            <Button size="sm" variant="ghost" className="h-6 gap-1 px-2 text-xs" onClick={() => setCreatingAccount(true)}>
+              <Plus className="h-3 w-3" /> Add as new bank account
+            </Button>
+          </div>
+        )}
+        {bankAccountId && <div className="text-xs text-muted-foreground">Linked to {state.bankAccounts.find((a) => a.id === bankAccountId)?.accountName ?? "a bank account"}.</div>}
+
+        {creatingAccount && (
+          <div className="space-y-2 rounded border border-dashed p-2">
+            <div className="text-[11px] font-medium text-muted-foreground">Create a bank account from this statement's own details.</div>
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <div>
+                <div className="text-muted-foreground">Institution</div>
+                <div className="font-medium">{payload.bankName || "—"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">Account name</div>
+                <div className="font-medium">{payload.accountName || payload.bankName || "—"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">BSB / account</div>
+                <div className="font-medium">{payload.bsb || payload.accountNumber ? `${payload.bsb ?? "—"} / ${payload.accountNumber ?? "—"}` : "—"}</div>
+              </div>
+              <Field label="Owning entity">
+                <Select value={newAccountEntityId} onValueChange={setNewAccountEntityId}>
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue placeholder="Select entity" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {state.entities.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" className="h-7 text-xs" onClick={createAccount}>
+                Create bank account
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setCreatingAccount(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="max-h-64 space-y-1 overflow-y-auto rounded border p-2">
           <div className="text-[11px] font-medium text-muted-foreground">

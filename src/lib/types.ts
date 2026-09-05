@@ -1204,6 +1204,12 @@ export interface LoanStatementProposalPayload {
  * a personal account can mix multiple properties, or entirely unrelated spending. */
 export interface BankStatementProposalPayload {
   bankName?: string;
+  /** The account's own name/nickname as printed, distinct from bankName (the institution) —
+   * used only to prefill a new BankAccount's name if the landlord creates one from this
+   * statement, since this proposal type isn't matched to an existing account by name. */
+  accountName?: string;
+  bsb?: string;
+  accountNumber?: string;
   periodStart?: string;
   periodEnd?: string;
   transactions: {

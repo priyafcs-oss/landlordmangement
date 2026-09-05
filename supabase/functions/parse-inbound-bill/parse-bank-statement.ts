@@ -9,6 +9,9 @@ const PROMPT = `You are extracting transactions from a landlord's own personal o
 Extract the fields defined in the response schema as strict JSON.
 - property_address: which property this account relates to, if the statement or its transactions make that clear — null if it's a general account not obviously tied to one property.
 - bank_name: the bank's name, if shown.
+- account_name: the account's own name/nickname as printed (e.g. "Everyday Offset", "Smith Family Trust Account") — null if the statement only shows the account holder's name, not a distinct account label.
+- bsb: the BSB printed on the statement, null if not shown.
+- account_number: the account number printed on the statement, null if not shown.
 - period_start, period_end: YYYY-MM-DD, the statement's covering period, null if not stated.
 - transactions is REQUIRED — always include it, even as an empty array [] if none can be read. Extract EVERY line item: date (YYYY-MM-DD), description (the payee/narration as printed), amount (a positive number), and direction — "in" for money received (credits/deposits) or "out" for money paid (debits/withdrawals). This is a general account, so transactions may include rent income, bills paid, transfers, or entirely unrelated personal spending — extract everything as printed, the landlord will pick which lines are relevant to this property in the review step.
 - addressed_to: the account holder name printed on the statement, if shown — null if not stated. Do not guess.
@@ -19,6 +22,9 @@ const SCHEMA = {
   properties: {
     property_address: { type: "STRING", nullable: true },
     bank_name: { type: "STRING", nullable: true },
+    account_name: { type: "STRING", nullable: true },
+    bsb: { type: "STRING", nullable: true },
+    account_number: { type: "STRING", nullable: true },
     period_start: { type: "STRING", nullable: true },
     period_end: { type: "STRING", nullable: true },
     addressed_to: { type: "STRING", nullable: true },
@@ -108,6 +114,9 @@ export async function parseBankStatement(
     addressedTo: parsed.addressed_to ?? undefined,
     payload: {
       bankName: parsed.bank_name ?? undefined,
+      accountName: parsed.account_name ?? undefined,
+      bsb: parsed.bsb ?? undefined,
+      accountNumber: parsed.account_number ?? undefined,
       periodStart: parsed.period_start ?? undefined,
       periodEnd: parsed.period_end ?? undefined,
       transactions,
