@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { useStore } from "@/lib/store";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { AiIntakeProposal } from "@/lib/types";
+
+/** Set by `ProposalReviewDialog` (the after-upload review popup) so its "Review later" action
+ * stays reachable from inside the fullscreen enlarge view below, which opens its own nested Dialog
+ * that visually covers the outer dialog's own footer. Unset (no button rendered) for every other
+ * place DocumentReviewCard is used, e.g. the inline Assets-page pending list, which has no
+ * separate "review later" concept to begin with. */
+export const ReviewLaterContext = createContext<(() => void) | null>(null);
 
 const KIND_LABELS: Record<AiIntakeProposal["kind"], string> = {
   bill: "Bill",
@@ -67,6 +75,7 @@ function DocumentPane({
  * collapse-until-asked-for pattern without needing each kind's own card to know about it. */
 export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeProposal; children: React.ReactNode }) {
   const { state } = useStore();
+  const reviewLater = useContext(ReviewLaterContext);
   const [expanded, setExpanded] = useState(false);
   // There's no host dialog here to resize (unlike Add Bill/Transaction) — this card is inline on
   // the page — so "Enlarge" instead opens its own full-screen Dialog with both panes. The inline
@@ -133,6 +142,13 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
     <Dialog open={fullscreen} onOpenChange={setFullscreen}>
       <DialogContent className="flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-hidden p-4">
         <DialogTitle className="sr-only">{KIND_LABELS[proposal.kind] ?? proposal.kind}</DialogTitle>
+        {reviewLater && (
+          <div className="flex shrink-0 justify-end pr-10">
+            <Button variant="ghost" size="sm" onClick={reviewLater}>
+              Review later
+            </Button>
+          </div>
+        )}
         <div className="grid flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="overflow-y-auto">
             <DocumentPane proposal={proposal} expanded onToggleExpand={() => setFullscreen(false)} />

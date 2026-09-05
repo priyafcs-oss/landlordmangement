@@ -48,6 +48,7 @@ import {
   Eye,
   Landmark,
   Info,
+  Download,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory } from "@/lib/calculations";
@@ -108,7 +109,7 @@ import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
-import { DocumentReviewCard } from "@/components/DocumentReviewCard";
+import { DocumentReviewCard, ReviewLaterContext } from "@/components/DocumentReviewCard";
 import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
@@ -120,6 +121,7 @@ import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries } from "@/lib/documents";
 import { bucketBy } from "@/lib/group";
+import { downloadCsv } from "@/lib/csv";
 import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
 import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
@@ -311,13 +313,16 @@ export function ProposalReviewDialog({
         <DialogHeader>
           <DialogTitle>Review document</DialogTitle>
         </DialogHeader>
-        <ProposalCard
-          proposal={proposal}
-          onDismiss={() => {
-            dismissProposal(proposal.id);
-            onOpenChange(false);
-          }}
-        />
+        <ReviewLaterContext.Provider value={() => onOpenChange(false)}>
+          <ProposalCard
+            key={proposal.id}
+            proposal={proposal}
+            onDismiss={() => {
+              dismissProposal(proposal.id);
+              onOpenChange(false);
+            }}
+          />
+        </ReviewLaterContext.Provider>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Review later
@@ -708,6 +713,10 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // line amount, so the landlord has to deliberately opt in (and, ideally, edit the amount down
   // to just the usage component first) rather than have it silently pre-checked.
   const [rechargeIncluded, setRechargeIncluded] = useState<boolean[]>(() => expenseLines.map(() => false));
+  // The water-charge caveat below is only worth full sentences once — a statement with several
+  // deduction lines was showing that same paragraph in full under every single one of them.
+  // Collapsed by default; a small "Why?" toggle reveals it per line.
+  const [waterHintExpanded, setWaterHintExpanded] = useState<boolean[]>(() => expenseLines.map(() => false));
   // An agent statement's deduction is often just reporting that a bill already sitting in
   // Bills/Unpaid was paid on the owner's behalf — suggest marking THAT bill paid instead of
   // creating a second, disconnected Expense for the same real-world payment.
@@ -736,6 +745,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     setExpTenantIds((v) => [...v, soleTxTenant]);
     setMatchAsBill((v) => [...v, false]);
     setRechargeIncluded((v) => [...v, false]);
+    setWaterHintExpanded((v) => [...v, false]);
   };
   const removeExpRow = (i: number) => {
     setExpRows((rows) => rows.filter((_, j) => j !== i));
@@ -743,6 +753,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     setExpTenantIds((v) => v.filter((_, j) => j !== i));
     setMatchAsBill((v) => v.filter((_, j) => j !== i));
     setRechargeIncluded((v) => v.filter((_, j) => j !== i));
+    setWaterHintExpanded((v) => v.filter((_, j) => j !== i));
   };
   /** The AI sometimes puts a line in the wrong section entirely — a tenant-paid recharge parsed
    * as a deduction, or (more rarely) an agent charge parsed as income. Moving converts between
@@ -763,6 +774,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     setExpTenantIds((v) => [...v, soleTxTenant]);
     setMatchAsBill((v) => [...v, false]);
     setRechargeIncluded((v) => [...v, false]);
+    setWaterHintExpanded((v) => [...v, false]);
   };
 
   const includedIncome = txRows.reduce((s, tx, i) => (included[i] ? s + tx.amount : s), 0);
@@ -971,7 +983,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                 ))}
               </SelectContent>
             </Select>
-            {!txTenantIds[0] && (
+            {/* Shown either when nothing is selected yet, or when a single-tenant property
+                auto-selected its one existing tenant but the statement's own extracted name
+                doesn't actually match them — otherwise a statement for a brand-new tenant
+                silently gets attributed to whoever's already on file with no way to fix it. */}
+            {(!txTenantIds[0] || (payload.tenantName && !tenantNameMatched)) && (
               <>
                 {payload.tenantName && !tenantNameMatched && (
                   <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
@@ -1186,8 +1202,20 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                       {realTenantId
                         ? `Recharge ${fmtCurrency(e.amount)} to ${rechargeTenant?.name ?? "tenant"} (adds an invoice they'll owe)`
                         : "Recharge to tenant — assign a specific tenant above first"}
+                      {isWaterCharge && (
+                        <button
+                          type="button"
+                          className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                          onClick={(ev) => {
+                            ev.preventDefault();
+                            setWaterHintExpanded((v) => v.map((val, j) => (j === i ? !val : val)));
+                          }}
+                        >
+                          Why only part of this?
+                        </button>
+                      )}
                     </label>
-                    {isWaterCharge && (
+                    {isWaterCharge && waterHintExpanded[i] && (
                       <div className="text-[10px] text-amber-700">
                         This line is usually the FULL water bill (fixed service charges + usage) — only the usage
                         portion is the tenant's to pay. Edit the amount above down to just the usage component before
@@ -7291,6 +7319,10 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
       </div>
 
       <div className="border-t pt-4">
+        <OwnerLedgerSection propertyId={propertyId} tenantOptions={tenantsAtPropertyOptions} />
+      </div>
+
+      <div className="border-t pt-4">
         <DocumentsPanel title="Lease & tenant documents" entries={tenancyDocuments} tenantOptions={tenantsAtPropertyOptions} />
       </div>
 
@@ -7495,6 +7527,231 @@ function AgentStatementsSection({
                     {key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
                   </div>
                   <div className="space-y-1">{rows.map((p) => StatementRow(p))}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+interface OwnerLedgerRow {
+  id: string;
+  date: string;
+  description: string;
+  category?: string;
+  tenantName?: string;
+  moneyIn: number;
+  moneyOut: number;
+  balance: number;
+  sourceFileName?: string | null;
+  sourceFileData?: string | null;
+}
+
+/**
+ * Rebuilds the managing agent's own "ownership statement" running ledger from what's actually
+ * been posted to this property — every ledger_entries/expenses row with `source: "agent_statement"`
+ * (i.e. confirmed from a reviewed rent statement, not a manual entry or bank-feed line), in one
+ * chronological running-balance view. This is deliberately scoped to agent-statement-sourced rows
+ * only — the portfolio-wide Transactions ledger already shows everything regardless of source; the
+ * point here is to let the landlord check this property's own numbers against what the agent
+ * reports, the same way they'd read the agent's PDF statement.
+ */
+function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string; tenantOptions?: { id: string; name: string }[] }) {
+  const { state } = useStore();
+  const [query, setQuery] = useState("");
+  const [fy, setFy] = useState("all");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+  const [tenantId, setTenantId] = useState("__all__");
+  const fys = buildFyOptions();
+
+  const tenantsAtProperty = state.tenants.filter((t) => t.propertyId === propertyId);
+  const tenantNameById = new Map(tenantsAtProperty.map((t) => [t.id, t.name]));
+
+  const rows: OwnerLedgerRow[] = useMemo(() => {
+    const income: OwnerLedgerRow[] = state.ledger
+      .filter((l) => l.source === "agent_statement" && tenantNameById.has(l.tenantId))
+      .map((l) => ({
+        id: `l_${l.id}`,
+        date: l.date,
+        description: l.description || l.type,
+        tenantName: tenantNameById.get(l.tenantId),
+        moneyIn: l.credit,
+        moneyOut: l.debit,
+        balance: 0,
+        sourceFileName: l.sourceFileName,
+        sourceFileData: l.sourceFileData,
+      }));
+    const outgoings: OwnerLedgerRow[] = state.expenses
+      .filter((e) => e.source === "agent_statement" && e.propertyId === propertyId)
+      .map((e) => ({
+        id: `e_${e.id}`,
+        date: e.date,
+        description: e.itemName,
+        category: e.category,
+        tenantName: e.tenantId ? tenantNameById.get(e.tenantId) : undefined,
+        moneyIn: 0,
+        moneyOut: e.cost,
+        balance: 0,
+        sourceFileName: e.sourceFileName,
+        sourceFileData: e.sourceFileData,
+      }));
+    // Running balance is computed chronologically (oldest first) over the FULL unfiltered set —
+    // it reflects this property's true cumulative position, same as a bank statement still shows
+    // the real balance on a line even once you've filtered/searched down to fewer rows.
+    const chronological = [...income, ...outgoings].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+    let running = 0;
+    for (const r of chronological) {
+      running += r.moneyIn - r.moneyOut;
+      r.balance = running;
+    }
+    return chronological;
+  }, [state.ledger, state.expenses, propertyId, tenantNameById]);
+
+  const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
+  const filtered = rows.filter((r) => {
+    if (fy !== "all" && !(r.date >= start && r.date <= end)) return false;
+    if (tenantId !== "__all__" && r.tenantName !== tenantOptions?.find((t) => t.id === tenantId)?.name) return false;
+    if (query && !`${r.description} ${r.category ?? ""} ${r.tenantName ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+    return true;
+  });
+  // Newest first for display, matching every other list in this app — the running balance on
+  // each row was already fixed above from the true chronological pass, so reversing here is
+  // purely a display-order choice and doesn't touch the numbers.
+  const display = [...filtered].reverse();
+
+  const groups = useMemo(() => {
+    if (groupBy === "none") return null;
+    const map = bucketBy(display, (r) => (groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date)));
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [display, groupBy]);
+
+  const totalIn = filtered.reduce((s, r) => s + r.moneyIn, 0);
+  const totalOut = filtered.reduce((s, r) => s + r.moneyOut, 0);
+
+  const exportCsv = () => {
+    downloadCsv(
+      `owner-ledger-${propertyId}.csv`,
+      ["Date", "Description", "Tenant", "Money in", "Money out", "Balance"],
+      filtered.map((r) => [r.date, r.description, r.tenantName ?? "", r.moneyIn, -r.moneyOut, r.balance]),
+    );
+  };
+
+  const Row = (r: OwnerLedgerRow) => (
+    <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="shrink-0 text-muted-foreground">{r.date}</span>
+        <span className="min-w-0 truncate font-medium">{r.description}</span>
+        {r.tenantName && <span className="shrink-0 text-muted-foreground">{r.tenantName}</span>}
+        {r.category && (
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {r.category}
+          </Badge>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        {r.sourceFileData && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6"
+            title={r.sourceFileName ?? undefined}
+            onClick={() => openBillDocument(r.sourceFileName ?? undefined, r.sourceFileData ?? undefined)}
+          >
+            <Eye className="h-3 w-3" />
+          </Button>
+        )}
+        <span className={r.moneyIn > 0 ? "text-emerald-700" : "text-muted-foreground"}>
+          {r.moneyIn > 0 ? `+${fmtCurrency(r.moneyIn)}` : "—"}
+        </span>
+        <span className={r.moneyOut > 0 ? "text-destructive" : "text-muted-foreground"}>
+          {r.moneyOut > 0 ? `−${fmtCurrency(r.moneyOut)}` : "—"}
+        </span>
+        <span className="w-20 shrink-0 text-right font-medium">{fmtCurrency(r.balance)}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-medium">Owner ledger (as reported by managing agent)</div>
+        {rows.length > 0 && (
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" /> Export CSV
+          </Button>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <div className="text-xs text-muted-foreground">
+          Nothing posted from an agent statement yet — apply a reviewed rent statement above and it'll show up here.
+        </div>
+      ) : (
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="Search description…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-7 w-[180px] text-xs"
+            />
+            <Select value={fy} onValueChange={setFy}>
+              <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                {fys.map((y) => (
+                  <SelectItem key={y} value={y}>
+                    FY {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <SelectTrigger className="h-7 w-[150px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No grouping</SelectItem>
+                <SelectItem value="month">By month</SelectItem>
+                <SelectItem value="fy">By financial year</SelectItem>
+              </SelectContent>
+            </Select>
+            {tenantOptions && tenantOptions.length > 1 && (
+              <Select value={tenantId} onValueChange={setTenantId}>
+                <SelectTrigger className="h-7 w-[150px] text-xs">
+                  <SelectValue placeholder="All tenants" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All tenants</SelectItem>
+                  {tenantOptions.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <span className="text-xs text-muted-foreground">
+              In {fmtCurrency(totalIn)} · Out {fmtCurrency(totalOut)} · Net {fmtCurrency(totalIn - totalOut)}
+            </span>
+          </div>
+
+          {display.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No entries match these filters.</div>
+          ) : groupBy === "none" || !groups ? (
+            <div className="space-y-1">{display.map((r) => Row(r))}</div>
+          ) : (
+            <div className="space-y-3">
+              {groups.map(([key, groupRows]) => (
+                <div key={key}>
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
+                  </div>
+                  <div className="space-y-1">{groupRows.map((r) => Row(r))}</div>
                 </div>
               ))}
             </div>
