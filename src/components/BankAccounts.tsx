@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { fmtCurrency, expenseCategoryToTaxCategory } from "@/lib/calculations";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -20,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/Field";
 import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
+import { CompiledFeedTable, type CompiledFeedRow } from "@/components/CompiledFeedTable";
 import { DocumentLink } from "@/components/DocumentLink";
 import { AddBankAccountDialog } from "@/components/AddBankAccountDialog";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
@@ -191,56 +191,17 @@ function FeedRowList({
   onRecord: (r: FeedRow) => void;
   onUnrecord: (r: FeedRow) => void;
 }) {
-  const recordedCount = rows.filter((r) => r.recorded).length;
-  return (
-    <div className="space-y-1">
-      <div className="text-xs text-muted-foreground">
-        {recordedCount} recorded · {rows.length - recordedCount} feed only
-      </div>
-      {rows.map((r) => (
-        <div
-          key={`${r.proposalId}-${r.lineIndex}`}
-          className="flex flex-wrap items-center gap-2 rounded border p-2 text-xs"
-        >
-          <span className="w-24 shrink-0 text-muted-foreground">{r.date}</span>
-          <span
-            className={
-              "w-20 shrink-0 text-right font-medium " +
-              (r.direction === "in" ? "text-emerald-600" : "")
-            }
-          >
-            {r.direction === "in" ? "+" : "−"}
-            {fmtCurrency(r.amount)}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-muted-foreground" title={r.description}>
-            {r.description}
-          </span>
-          {r.recorded ? (
-            <>
-              <Badge variant="secondary">Recorded</Badge>
-              {r.expenseId && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 text-xs"
-                  onClick={() => onUnrecord(r)}
-                >
-                  Unrecord
-                </Button>
-              )}
-            </>
-          ) : (
-            <>
-              <Badge variant="outline">Feed only</Badge>
-              <Button size="sm" className="h-6 text-xs" onClick={() => onRecord(r)}>
-                Record
-              </Button>
-            </>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+  const tableRows: CompiledFeedRow[] = rows.map((r) => ({
+    key: `${r.proposalId}-${r.lineIndex}`,
+    date: r.date,
+    description: r.description,
+    amount: r.amount,
+    direction: r.direction === "in" ? "credit" : "debit",
+    status: r.recorded ? "recorded" : "feed_only",
+    onRecord: !r.recorded ? () => onRecord(r) : undefined,
+    onUnrecord: r.recorded && r.expenseId ? () => onUnrecord(r) : undefined,
+  }));
+  return <CompiledFeedTable rows={tableRows} />;
 }
 
 function relevantBankStatementProposals(

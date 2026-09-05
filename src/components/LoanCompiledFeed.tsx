@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { fmtCurrency, expenseCategoryToTaxCategory } from "@/lib/calculations";
 import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
-import { Badge } from "@/components/ui/badge";
+import { CompiledFeedTable, type CompiledFeedRow } from "@/components/CompiledFeedTable";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -299,6 +299,21 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
   const feedOnlyCount = recordable.length - recordedCount;
   const referenceCount = rows.length - recordable.length;
 
+  const tableRows: CompiledFeedRow[] = rows.map((r) => ({
+    key: keyOf(r),
+    date: r.date,
+    description: r.description,
+    amount: r.amount,
+    direction: r.direction,
+    status: r.kind === "reference" ? "reference" : r.recorded ? "recorded" : "feed_only",
+    statusNote:
+      r.kind === "reference"
+        ? "Whole repayment — interest is recorded on its own line when the statement itemizes it; this line itself isn't posted as an expense."
+        : undefined,
+    onRecord: r.kind !== "reference" && !r.recorded ? () => openRecord(r) : undefined,
+    onUnrecord: r.recorded && r.expenseId ? () => unrecord(r) : undefined,
+  }));
+
   return (
     <CollapsibleGroupSection
       label="Compiled bank feed"
@@ -308,57 +323,8 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
         </span>
       }
     >
-      <div className="space-y-1 p-3">
-        {rows.map((r) => (
-          <div
-            key={keyOf(r)}
-            className="flex flex-wrap items-center gap-2 rounded border p-2 text-xs"
-          >
-            <span className="w-24 shrink-0 text-muted-foreground">{r.date}</span>
-            <span
-              className={
-                "w-20 shrink-0 text-right font-medium " +
-                (r.direction === "credit" ? "text-emerald-600" : "")
-              }
-            >
-              {r.direction === "credit" ? "+" : "−"}
-              {fmtCurrency(r.amount)}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-muted-foreground" title={r.description}>
-              {r.description}
-            </span>
-            {r.kind === "reference" ? (
-              <Badge
-                variant="outline"
-                className="border-dashed text-muted-foreground"
-                title="Whole repayment — interest is recorded on its own line when the statement itemizes it; this line itself isn't posted as an expense."
-              >
-                Reference only
-              </Badge>
-            ) : r.recorded ? (
-              <>
-                <Badge variant="secondary">Recorded</Badge>
-                {r.expenseId && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 text-xs"
-                    onClick={() => unrecord(r)}
-                  >
-                    Unrecord
-                  </Button>
-                )}
-              </>
-            ) : (
-              <>
-                <Badge variant="outline">Feed only</Badge>
-                <Button size="sm" className="h-6 text-xs" onClick={() => openRecord(r)}>
-                  Record
-                </Button>
-              </>
-            )}
-          </div>
-        ))}
+      <div className="p-3">
+        <CompiledFeedTable rows={tableRows} includeReferenceFilter />
       </div>
 
       <Dialog open={!!recording} onOpenChange={(o) => !o && setRecording(null)}>
