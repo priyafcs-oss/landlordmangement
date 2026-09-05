@@ -7608,12 +7608,16 @@ interface OwnerLedgerRow {
  * point here is to let the landlord check this property's own numbers against what the agent
  * reports, the same way they'd read the agent's PDF statement.
  */
+type OwnerLedgerSortField = "date" | "in" | "out" | "balance";
+
 function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string; tenantOptions?: { id: string; name: string }[] }) {
   const { state } = useStore();
   const [query, setQuery] = useState("");
   const [fy, setFy] = useState("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
   const [tenantId, setTenantId] = useState("__all__");
+  // Newest first by default, matching every other list in this app.
+  const [sort, setSort] = useState<SortState<OwnerLedgerSortField>>({ field: "date", dir: "desc" });
   const fys = buildFyOptions();
 
   const tenantsAtProperty = state.tenants.filter((t) => t.propertyId === propertyId);
@@ -7666,10 +7670,20 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
     if (query && !`${r.description} ${r.category ?? ""} ${r.tenantName ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
-  // Newest first for display, matching every other list in this app — the running balance on
-  // each row was already fixed above from the true chronological pass, so reversing here is
-  // purely a display-order choice and doesn't touch the numbers.
-  const display = [...filtered].reverse();
+  // The running balance on each row was already fixed above from the true chronological pass —
+  // sorting here is purely a display-order choice and never touches those numbers.
+  const sortValueOf = (r: OwnerLedgerRow, field: OwnerLedgerSortField): number | string => {
+    if (field === "date") return r.date;
+    if (field === "in") return r.moneyIn;
+    if (field === "out") return r.moneyOut;
+    return r.balance;
+  };
+  const display = [...filtered].sort((a, b) => {
+    const av = sortValueOf(a, sort.field);
+    const bv = sortValueOf(b, sort.field);
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return sort.dir === "asc" ? cmp : -cmp;
+  });
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
@@ -7689,18 +7703,25 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
   };
 
   const Row = (r: OwnerLedgerRow) => (
-    <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="shrink-0 text-muted-foreground">{r.date}</span>
-        <span className="min-w-0 truncate font-medium">{r.description}</span>
-        {r.tenantName && <span className="shrink-0 text-muted-foreground">{r.tenantName}</span>}
-        {r.category && (
-          <Badge variant="outline" className="shrink-0 text-[10px]">
+    <tr key={r.id} className="border-b text-xs last:border-b-0">
+      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.date}</td>
+      <td className="min-w-0 max-w-[260px] truncate px-3 py-2 font-medium" title={r.description}>
+        {r.description}
+      </td>
+      <td className="px-3 py-2 text-muted-foreground">{r.tenantName ?? "—"}</td>
+      <td className="px-3 py-2">
+        {r.category ? (
+          <Badge variant="outline" className="text-[10px]">
             {r.category}
           </Badge>
+        ) : (
+          "—"
         )}
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap text-right text-emerald-700">{r.moneyIn > 0 ? `+${fmtCurrency(r.moneyIn)}` : "—"}</td>
+      <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{r.moneyOut > 0 ? `−${fmtCurrency(r.moneyOut)}` : "—"}</td>
+      <td className="px-3 py-2 whitespace-nowrap text-right font-medium">{fmtCurrency(r.balance)}</td>
+      <td className="px-3 py-2">
         {r.sourceFileData && (
           <Button
             size="icon"
@@ -7712,15 +7733,24 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
             <Eye className="h-3 w-3" />
           </Button>
         )}
-        <span className={r.moneyIn > 0 ? "text-emerald-700" : "text-muted-foreground"}>
-          {r.moneyIn > 0 ? `+${fmtCurrency(r.moneyIn)}` : "—"}
-        </span>
-        <span className={r.moneyOut > 0 ? "text-destructive" : "text-muted-foreground"}>
-          {r.moneyOut > 0 ? `−${fmtCurrency(r.moneyOut)}` : "—"}
-        </span>
-        <span className="w-20 shrink-0 text-right font-medium">{fmtCurrency(r.balance)}</span>
-      </div>
-    </div>
+      </td>
+    </tr>
+  );
+
+  const onSort = (field: OwnerLedgerSortField) => setSort((s) => toggleSort(s, field));
+  const OwnerLedgerTableHead = () => (
+    <thead>
+      <tr className="border-b text-left text-xs text-muted-foreground">
+        <SortableTh field="date" label="Date" sort={sort} onSort={onSort} />
+        <th className="px-3 py-2 text-left font-medium">Description</th>
+        <th className="px-3 py-2 text-left font-medium">Tenant</th>
+        <th className="px-3 py-2 text-left font-medium">Category</th>
+        <SortableTh field="in" label="Money in" align="right" sort={sort} onSort={onSort} />
+        <SortableTh field="out" label="Money out" align="right" sort={sort} onSort={onSort} />
+        <SortableTh field="balance" label="Balance" align="right" sort={sort} onSort={onSort} />
+        <th className="px-3 py-2" />
+      </tr>
+    </thead>
   );
 
   return (
@@ -7791,18 +7821,23 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
 
           {display.length === 0 ? (
             <div className="text-xs text-muted-foreground">No entries match these filters.</div>
-          ) : groupBy === "none" || !groups ? (
-            <div className="space-y-1">{display.map((r) => Row(r))}</div>
           ) : (
-            <div className="space-y-3">
-              {groups.map(([key, groupRows]) => (
-                <div key={key}>
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
-                  </div>
-                  <div className="space-y-1">{groupRows.map((r) => Row(r))}</div>
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded border">
+              <table className="w-full text-sm">
+                <OwnerLedgerTableHead />
+                <tbody>
+                  {groupBy === "none" || !groups
+                    ? display.map((r) => Row(r))
+                    : groups.flatMap(([key, groupRows]) => [
+                        <tr key={`${key}-hdr`} className="border-b bg-muted/40">
+                          <td colSpan={8} className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
+                          </td>
+                        </tr>,
+                        ...groupRows.map((r) => Row(r)),
+                      ])}
+                </tbody>
+              </table>
             </div>
           )}
         </>
