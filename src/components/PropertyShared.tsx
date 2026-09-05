@@ -1745,7 +1745,12 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         })
       : null,
   );
-  const [included, setIncluded] = useState<boolean[]>(() => duplicates.map((d) => !d));
+  // Separate from the interest-expense check above: a period-only line (no interest extracted, or
+  // this loan is principal/fee-only) never trips `duplicates`, so a proposal re-applied after the
+  // card failed to disappear (e.g. a dropped markProposalApplied write) would otherwise insert a
+  // second loan_statements row for the same period with no warning at all.
+  const alreadyApplied = lines.map((li) => state.loanStatements.some((ls) => ls.loanId === loanId && ls.periodStart === li.date && ls.periodEnd === li.date));
+  const [included, setIncluded] = useState<boolean[]>(() => duplicates.map((d, i) => !d && !alreadyApplied[i]));
 
   const updateLine = (i: number, patch: Partial<LoanStatementLineItem>) =>
     setLines((ls) => ls.map((li, j) => (j === i ? { ...li, ...patch } : li)));
@@ -1758,6 +1763,19 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
     if (!propertyId) return toast.error("Select the property first");
     const rate = parseFloat(newLoanInterestRate);
     if (!rate || rate <= 0) return toast.error("Enter the loan's interest rate to create it");
+    // The property's matchedLoanId may have failed to resolve (lender-name text variance between
+    // statements) even though a loan for this same account already exists — catching that here by
+    // account number stops a second, duplicate Loan record from being created for what is really
+    // one real-world loan.
+    const existingByAccount = payload.accountNumberLast4
+      ? loansForProperty.find((l) => l.accountNumber && l.accountNumber === payload.accountNumberLast4)
+      : undefined;
+    if (existingByAccount) {
+      toast.error(`A ${existingByAccount.bankName} loan ending ${existingByAccount.accountNumber} already exists for this property — select it above instead of creating a new one.`);
+      setLoanId(existingByAccount.id);
+      setCreatingLoan(false);
+      return;
+    }
     const newLoanId = addLoan({
       propertyId,
       bankName: payload.lenderName,
@@ -2024,6 +2042,14 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                   <span aria-hidden>✕</span>
                 </Button>
               </div>
+              {alreadyApplied[i] && (
+                <div className="ml-6 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  <span>
+                    This loan already has a statement period recorded for {li.date} — left unchecked to avoid a duplicate
+                    entry. Tick the box above to apply anyway.
+                  </span>
+                </div>
+              )}
               {duplicates[i] && (
                 <div className="ml-6 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
                   <span>

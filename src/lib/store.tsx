@@ -911,7 +911,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     deleteLoan: (id) => {
       void deleteRow(TABLES.loans, id);
-      set((s) => ({ ...s, loans: s.loans.filter((x) => x.id !== id) }));
+      void deleteWhere(TABLES.loanBalanceSnapshots, "loanId", id);
+      void deleteWhere(TABLES.loanStatements, "loanId", id);
+      set((s) => ({
+        ...s,
+        loans: s.loans.filter((x) => x.id !== id),
+        loanBalanceSnapshots: s.loanBalanceSnapshots.filter((ls) => ls.loanId !== id),
+        loanStatements: s.loanStatements.filter((ls) => ls.loanId !== id),
+      }));
     },
     addLoanStatement: (ls) => {
       const row: LoanStatement = { ...ls, id: uid("lst") };
@@ -1225,12 +1232,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteAsset: (id) => {
       void deleteRow(TABLES.assets, id);
       void deleteWhere(TABLES.depreciationItems, "assetId", id);
+      void deleteWhere(TABLES.valuationSnapshots, "assetId", id);
+      void deleteWhere(TABLES.goldDetails, "assetId", id);
+      void deleteWhere(TABLES.etfDetails, "assetId", id);
       set((s) => ({
         ...s,
         assets: s.assets.filter((a) => a.id !== id),
         goldDetails: s.goldDetails.filter((g) => g.assetId !== id),
         etfDetails: s.etfDetails.filter((e) => e.assetId !== id),
         depreciationItems: s.depreciationItems.filter((d) => d.assetId !== id),
+        valuationSnapshots: s.valuationSnapshots.filter((v) => v.assetId !== id),
       }));
     },
 

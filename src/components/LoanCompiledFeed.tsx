@@ -191,7 +191,6 @@ function buildFeedRows(
   expenses: ReturnType<typeof useStore>["state"]["expenses"],
   loanStatements: ReturnType<typeof useStore>["state"]["loanStatements"],
 ): FeedRow[] {
-  const forThisLoan = loanStatements.filter((s) => s.loanId === loan.id);
   const relevant = relevantLoanStatementProposals(loan.id, proposals, loanStatements);
 
   const rows: FeedRow[] = [];
@@ -211,7 +210,12 @@ function buildFeedRows(
             recorded = true;
             expenseId = match.id;
           } else if (c.kind === "interest") {
-            recorded = forThisLoan.some(
+            // Checked against ALL loans' statements, not just this one — the same proposal can
+            // end up matched to more than one Loan record (e.g. a duplicate loan created by
+            // mistake from a second statement upload), and this line must still read as "already
+            // recorded" wherever it's viewed from, or it double-posts the same real-world interest
+            // charge as a second deductible expense under the other loan.
+            recorded = loanStatements.some(
               (s) => s.proposalId === p.id && s.periodStart === li.date && s.periodEnd === li.date,
             );
           }
