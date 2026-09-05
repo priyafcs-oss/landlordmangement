@@ -51,7 +51,8 @@ import {
   Download,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified } from "@/lib/calculations";
+import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
 import {
@@ -7341,6 +7342,8 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
  * search/FY/group-by filters as the portfolio-wide Documents page — kept here too since a
  * statement's own fee-verification relevance makes it worth finding without leaving Tenancy.
  */
+type StatementSortField = "period" | "added" | "file";
+
 function AgentStatementsSection({
   statements,
   onReview,
@@ -7355,6 +7358,8 @@ function AgentStatementsSection({
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
   const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
+  // Newest-added on top by default — the point of a review queue is seeing what just landed.
+  const [sort, setSort] = useState<SortState<StatementSortField>>({ field: "added", dir: "desc" });
 
   const fys = buildFyOptions();
 
@@ -7400,51 +7405,90 @@ function AgentStatementsSection({
     return true;
   });
 
+  const sortValueOf = (p: AiIntakeProposal, field: StatementSortField): string => {
+    if (field === "period") return periodOf(p);
+    if (field === "added") return p.created_at ?? "";
+    return (p.sourceFileName ?? "").toLowerCase();
+  };
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const av = sortValueOf(a, sort.field);
+      const bv = sortValueOf(b, sort.field);
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
+  }, [filtered, sort]);
+
+  // Grouping still orders newest-period-group-first regardless of the row-level sort above —
+  // `sorted`'s order is preserved *within* each group either way.
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = bucketBy(filtered, (p) => {
+    const map = bucketBy(sorted, (p) => {
       const date = periodOf(p);
       return !date ? "unknown" : groupBy === "month" ? date.slice(0, 7) : ausFinancialYear(date);
     });
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [filtered, groupBy]);
+  }, [sorted, groupBy]);
 
   const StatementRow = (p: AiIntakeProposal) => {
     const payload = p.payload as RentLedgerProposalPayload;
     const names = tenantNamesOf(payload);
     return (
-      <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="shrink-0 font-medium">
-            {payload.periodStart || "—"} → {payload.periodEnd || "—"}
-          </span>
-          {names.length > 0 && <span className="text-muted-foreground">{names.join(", ")}</span>}
-          {payload.netToOwner !== undefined && <span className="shrink-0 text-muted-foreground">Net {fmtCurrency(payload.netToOwner)}</span>}
-          <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="shrink-0 text-[10px]">
+      <tr key={p.id} className="border-b text-xs last:border-b-0">
+        <td className="px-3 py-2 whitespace-nowrap font-medium">
+          {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+        </td>
+        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{fmtModified(p.created_at) ?? "—"}</td>
+        <td className="min-w-0 max-w-[220px] truncate px-3 py-2 text-muted-foreground" title={p.sourceFileName ?? undefined}>
+          {p.sourceFileName || "—"}
+        </td>
+        <td className="px-3 py-2 text-muted-foreground">{names.length > 0 ? names.join(", ") : "—"}</td>
+        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+          {payload.netToOwner !== undefined ? fmtCurrency(payload.netToOwner) : "—"}
+        </td>
+        <td className="px-3 py-2">
+          <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="text-[10px]">
             {p.status}
           </Badge>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {p.sourceFileData && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 max-w-[420px] gap-1 text-xs"
-              title={p.sourceFileName}
-              onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}
-            >
-              <Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{p.sourceFileName || "View"}</span>
-            </Button>
-          )}
-          {p.status === "pending" && (
-            <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => onReview(p.id)}>
-              Review
-            </Button>
-          )}
-        </div>
-      </div>
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex items-center justify-end gap-1">
+            {p.sourceFileData && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                title="View document"
+                onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}
+              >
+                <Eye className="h-3 w-3" />
+              </Button>
+            )}
+            {p.status === "pending" && (
+              <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => onReview(p.id)}>
+                Review
+              </Button>
+            )}
+          </div>
+        </td>
+      </tr>
     );
   };
+
+  const onSort = (field: StatementSortField) => setSort((s) => toggleSort(s, field));
+  const StatementTableHead = () => (
+    <thead>
+      <tr className="border-b text-left text-xs text-muted-foreground">
+        <SortableTh field="period" label="Period" sort={sort} onSort={onSort} />
+        <SortableTh field="added" label="Added" sort={sort} onSort={onSort} />
+        <SortableTh field="file" label="File name" sort={sort} onSort={onSort} />
+        <th className="px-3 py-2 text-left font-medium">Tenant(s)</th>
+        <th className="px-3 py-2 text-left font-medium">Net</th>
+        <th className="px-3 py-2 text-left font-medium">Status</th>
+        <th className="px-3 py-2" />
+      </tr>
+    </thead>
+  );
 
   return (
     <div>
@@ -7515,20 +7559,25 @@ function AgentStatementsSection({
             )}
           </div>
 
-          {filtered.length === 0 ? (
+          {sorted.length === 0 ? (
             <div className="text-xs text-muted-foreground">No statements match these filters.</div>
-          ) : groupBy === "none" || !groups ? (
-            <div className="space-y-1">{filtered.map((p) => StatementRow(p))}</div>
           ) : (
-            <div className="space-y-3">
-              {groups.map(([key, rows]) => (
-                <div key={key}>
-                  <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
-                  </div>
-                  <div className="space-y-1">{rows.map((p) => StatementRow(p))}</div>
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded border">
+              <table className="w-full text-sm">
+                <StatementTableHead />
+                <tbody>
+                  {groupBy === "none" || !groups
+                    ? sorted.map((p) => StatementRow(p))
+                    : groups.flatMap(([key, rows]) => [
+                        <tr key={`${key}-hdr`} className="border-b bg-muted/40">
+                          <td colSpan={7} className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
+                          </td>
+                        </tr>,
+                        ...rows.map((p) => StatementRow(p)),
+                      ])}
+                </tbody>
+              </table>
             </div>
           )}
         </>
