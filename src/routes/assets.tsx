@@ -44,7 +44,7 @@ import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/
 import { PropertyDialog, AiProposalsSection } from "@/components/PropertyShared";
 import { BillsBoard } from "@/components/BillsBoard";
 import { AddBillDialog } from "@/components/AddBillDialog";
-import { BankFeedContent } from "@/components/BankFeed";
+import { BankAccountsContent } from "@/components/BankAccounts";
 import { LedgerTab } from "@/routes/transactions";
 import { LoanSummaryTab } from "@/components/LoanSummaryTab";
 import { PortfolioCostBaseTab, PortfolioDepreciationTab, PortfolioPnLTab } from "@/components/PortfolioRollups";
@@ -560,14 +560,14 @@ function AllAssetsContent() {
   );
 }
 
-type Section = "all" | "bills" | "transactions" | "loans" | "bankfeed" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents" | "inbox" | "providers";
+type Section = "all" | "bills" | "transactions" | "loans" | "bankaccounts" | "costbase" | "depreciation" | "pnl" | "forecasts" | "buffers" | "documents" | "inbox" | "providers";
 
 const NAV: { section: Section; label: string; icon: React.ComponentType<{ className?: string }>; group?: string }[] = [
   { section: "all", label: "All Assets", icon: LayoutGrid },
   { section: "bills", label: "Bills", icon: Receipt, group: "Finance" },
   { section: "transactions", label: "Transactions", icon: ListOrdered, group: "Finance" },
   { section: "loans", label: "Loans", icon: Landmark, group: "Finance" },
-  { section: "bankfeed", label: "Bank Feed", icon: Banknote, group: "Finance" },
+  { section: "bankaccounts", label: "Bank Accounts", icon: Banknote, group: "Finance" },
   { section: "costbase", label: "Cost Base", icon: Calculator, group: "Finance" },
   { section: "depreciation", label: "Depreciation", icon: LineChart, group: "Finance" },
   { section: "pnl", label: "YTD P&L", icon: FileText, group: "Finance" },
@@ -630,7 +630,7 @@ function AssetsPage() {
         {section === "bills" && <PortfolioBillsContent />}
         {section === "transactions" && <LedgerTab />}
         {section === "loans" && <LoanSummaryTab />}
-        {section === "bankfeed" && <BankFeedContent />}
+        {section === "bankaccounts" && <BankAccountsContent />}
         {section === "costbase" && <PortfolioCostBaseTab />}
         {section === "depreciation" && <PortfolioDepreciationTab />}
         {section === "pnl" && <PortfolioPnLTab />}

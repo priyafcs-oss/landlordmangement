@@ -1292,6 +1292,11 @@ export interface AiIntakeProposal {
   matchedTenantId?: string;
   /** loan_statement only — set when exactly one loan on the matched property shares the extracted lender name. */
   matchedLoanId?: string;
+  /** bank_statement only — set when this upload was made via the "Upload statement" button on one
+   * specific BankAccount, so that account's own Statement files/Compiled feed can filter to just
+   * its own proposals instead of showing every bank_statement upload across the portfolio.
+   * Undefined for one forwarded by email (nothing to pre-target it at) or uploaded generically. */
+  bankAccountId?: string;
   rawPropertyAddress?: string;
   sourceSubject?: string;
   emailMessageId?: string;

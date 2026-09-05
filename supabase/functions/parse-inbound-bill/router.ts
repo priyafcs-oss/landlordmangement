@@ -32,6 +32,9 @@ export async function routeInboundDocument(
   if (input.loanIdHint) {
     return { ...(await parseLoanStatement(supabase, input, emailMessageId)), documentType: "loan_statement" };
   }
+  if (input.bankAccountIdHint) {
+    return { ...(await parseBankStatement(supabase, input, emailMessageId)), documentType: "bank_statement" };
+  }
 
   // Best-effort — classification is still useful without it, so a lookup failure shouldn't
   // block the whole pipeline the way a genuine classification failure does below.

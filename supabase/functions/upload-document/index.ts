@@ -10,6 +10,8 @@ interface UploadRequest {
   mimeType?: string;
   /** Set by the "Upload statement to this loan" button — see NormalizedBillInput.loanIdHint. */
   loanId?: string;
+  /** Set by the "Upload statement" button on a BankAccount — see NormalizedBillInput.bankAccountIdHint. */
+  bankAccountId?: string;
 }
 
 /** Gemini reads PDFs and common image formats natively as inlineData — anything else is rejected. */
@@ -73,6 +75,7 @@ Deno.serve(async (req) => {
     pdfFileName: body.fileName,
     attachmentMimeType: body.mimeType,
     loanIdHint: body.loanId,
+    bankAccountIdHint: body.bankAccountId,
   };
 
   const supabase = createClient(

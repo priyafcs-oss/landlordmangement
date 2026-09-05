@@ -44,6 +44,7 @@ interface UploadResult {
  */
 export function UploadDocumentDialog({
   loanId,
+  bankAccountId,
   trigger,
 }: {
   /** Pre-targets this upload at one specific Loan (the "Upload statement" button on a loan card)
@@ -51,6 +52,10 @@ export function UploadDocumentDialog({
    * the loan record instead of the usual fuzzy address/lender matching. Omit for the ordinary
    * global "Upload document" button, used for any bill/lease/statement/property document. */
   loanId?: string;
+  /** Pre-targets this upload at one specific BankAccount (the "Upload statement" button on a
+   * bank account) — same idea as loanId, skips classification and stamps the resulting
+   * bank_statement proposal with this account directly. Mutually exclusive with loanId. */
+  bankAccountId?: string;
   /** Custom open trigger — falls back to the default "Upload document" button when omitted. */
   trigger?: React.ReactNode;
 } = {}) {
@@ -81,7 +86,7 @@ export function UploadDocumentDialog({
       throw new Error(`Couldn't read ${file.name}`);
     });
     const { data, error } = await supabase.functions.invoke<UploadResult>("upload-document", {
-      body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf", loanId },
+      body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf", loanId, bankAccountId },
     });
     if (error) throw error;
     return data ?? { ok: false, error: "Couldn't process this document" };
@@ -171,13 +176,21 @@ export function UploadDocumentDialog({
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{loanId ? "Upload a loan statement for this loan" : "Upload a bill, rent statement, lease, management agreement or property document"}</DialogTitle>
+            <DialogTitle>
+              {loanId
+                ? "Upload a loan statement for this loan"
+                : bankAccountId
+                  ? "Upload a bank statement for this account"
+                  : "Upload a bill, rent statement, lease, management agreement or property document"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
               {loanId
                 ? "Same AI reader as the email inbox — reads the statement and stages it for your review, pre-matched to this exact loan (no need to pick the property or loan again)."
-                : "Same AI reader as the email inbox — a PDF or photo of a council/water bill, agent rent statement, lease agreement, signed management/agency agreement, settlement statement, insurance certificate or strata notice. It's matched to a property and staged for your review the same way an emailed document would be."}
+                : bankAccountId
+                  ? "Same AI reader as the email inbox — reads every transaction on the statement and stages it in this account's own Compiled bank feed, ready to record against whichever property each one belongs to."
+                  : "Same AI reader as the email inbox — a PDF or photo of a council/water bill, agent rent statement, lease agreement, signed management/agency agreement, settlement statement, insurance certificate or strata notice. It's matched to a property and staged for your review the same way an emailed document would be."}
             </p>
             <p className="text-xs font-medium text-foreground">
               You can select several files at once — in the file picker that opens, hold Ctrl (Windows) or Cmd (Mac)

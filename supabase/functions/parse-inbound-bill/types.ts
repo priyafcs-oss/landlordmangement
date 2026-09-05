@@ -13,6 +13,10 @@ export interface NormalizedBillInput {
    * classification entirely and parse-loan-statement resolves the match/property directly from
    * the loan record instead of the usual fuzzy property/lender matching. */
   loanIdHint?: string;
+  /** Set only by the "Upload statement" button on a specific BankAccount — same idea as
+   * loanIdHint, asserting this document is a general bank statement for that exact account so
+   * the router skips classification and parse-bank-statement stamps bankAccountId directly. */
+  bankAccountIdHint?: string;
 }
 
 /** A later instalment printed on the same notice (e.g. quarterly council/water rates) — not yet due. */

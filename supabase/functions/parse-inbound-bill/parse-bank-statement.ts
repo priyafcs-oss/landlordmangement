@@ -97,6 +97,7 @@ export async function parseBankStatement(
     kind: "bank_statement",
     status: "pending",
     propertyId: matchedPropertyId,
+    bankAccountId: input.bankAccountIdHint,
     rawPropertyAddress: parsed.property_address ?? undefined,
     sourceSubject: input.subject,
     emailMessageId,
