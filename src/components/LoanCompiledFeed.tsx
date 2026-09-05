@@ -21,9 +21,17 @@ import type {
   LoanStatementProposalPayload,
 } from "@/lib/types";
 
+type RowKind = "interest" | "principal" | "fee" | "reference";
+
 interface FeedRow {
   proposalId: string;
-  lineIndex: number;
+  originalLineIndex: number;
+  kind: RowKind;
+  /** i*2 for interest/fee, i*2+1 for principal — two independently-recordable components can
+   * come from one statement line, so a plain line index can't identify either on its own. See
+   * Expense.feedLineIndex for the encoding note. Undefined for a "reference" row, which is never
+   * recordable and so never needs one. */
+  feedKey?: number;
   date: string;
   description: string;
   amount: number;
@@ -35,40 +43,140 @@ interface FeedRow {
   expenseId?: string;
 }
 
-/** Best-effort description/direction/headline-amount for a line staged before this field existed
- * (or when the statement genuinely had no description column) — keeps an older proposal showing
- * something sensible in the feed instead of going blank, without requiring a re-upload. */
-function describeLine(li: LoanStatementLineItem): {
-  description: string;
-  direction: "debit" | "credit";
-  amount: number;
-} {
-  const amount = li.repaymentAmount ?? li.interestCharged ?? li.principalPaid ?? 0;
-  if (li.description && li.direction)
-    return { description: li.description, direction: li.direction, amount };
-  const direction: "debit" | "credit" =
-    li.direction ?? (li.repaymentAmount || li.principalPaid ? "credit" : "debit");
-  const description =
-    li.description ??
-    (li.repaymentAmount
-      ? "Repayment"
-      : li.interestCharged
-        ? "Interest charged"
-        : "Principal payment");
-  return { description, direction, amount };
+const CATEGORY_BY_KIND: Record<Exclude<RowKind, "reference">, ExpenseCategory> = {
+  interest: "Interest on Loan",
+  principal: "Loan Principal Repayment",
+  fee: "Borrowing Expenses",
+};
+
+/** Every proposal that plausibly belongs to this loan's statement history — shared by
+ * LoanCompiledFeed and LoanStatementHistory so the two can't silently disagree on what counts.
+ * A proposal counts once it's either matched to this loan directly (matchedLoanId, set for a
+ * still-pending upload) or has already produced a loan_statements row for this loan (proposalId,
+ * from the classic "Apply to loan" flow) — dismissed proposals are excluded either way. */
+export function relevantLoanStatementProposals(
+  loanId: string,
+  proposals: AiIntakeProposal[],
+  loanStatements: ReturnType<typeof useStore>["state"]["loanStatements"],
+): AiIntakeProposal[] {
+  const forThisLoan = loanStatements.filter((s) => s.loanId === loanId);
+  return proposals.filter(
+    (p) =>
+      p.kind === "loan_statement" &&
+      p.status !== "dismissed" &&
+      (p.matchedLoanId === loanId || forThisLoan.some((s) => s.proposalId === p.id)),
+  );
 }
 
-/** Every line ever extracted from an uploaded/emailed statement for this loan, shown exactly like
- * PropertyBankFeed's general bank-account feed — one row per printed statement line, independently
- * created (with its own picked category) or reverted. Reconstructed from ai_intake_proposals
- * rather than a separate feed table: a proposal's payload never changes after upload, so a line
- * with no matching Expense (by feedProposalId + feedLineIndex) is "still in the feed". This is
- * deliberately a simpler, flatter tool than the structured "Upload → Apply to loan" review card
- * (LoanStatementProposalCard) or the manual entry dialog — both of which still do the finer-
- * grained interest/principal split into two separate records; here, one line becomes one Expense
- * under whichever single category is picked for it, same as a personal bank statement line.
- * Recorded status also checks the older per-period loan_statements record (proposalId + date) so
- * a line already applied via that classic flow isn't offered up to be recorded a second time. */
+/** A proposal predating per-date line_items (or one the statement genuinely gave only one period
+ * total for) falls back to a single synthetic line covering the whole period. */
+function linesFor(
+  payload: LoanStatementProposalPayload,
+  proposalCreatedAt?: string,
+): LoanStatementLineItem[] {
+  if (payload.lineItems && payload.lineItems.length > 0) return payload.lineItems;
+  if (
+    payload.interestCharged !== undefined ||
+    payload.principalPaid !== undefined ||
+    payload.repaymentsMade !== undefined
+  ) {
+    return [
+      {
+        date: payload.periodEnd || payload.periodStart || proposalCreatedAt?.slice(0, 10) || "",
+        interestCharged: payload.interestCharged,
+        principalPaid: payload.principalPaid,
+        repaymentAmount: payload.repaymentsMade,
+        balanceAfter: payload.closingBalance,
+      },
+    ];
+  }
+  return [];
+}
+
+interface LineComponent {
+  kind: RowKind;
+  feedKey?: number;
+  amount: number;
+  direction: "debit" | "credit";
+  description: string;
+}
+
+/**
+ * Splits one printed statement line into its independently-recordable components — never by
+ * guessing from the amount or description text, only by which numeric field the AI extraction
+ * actually populated for that line. A line can yield an interest row, a principal row, both, or
+ * neither.
+ *
+ * A line that's just the whole EMI bank transfer (only `repaymentAmount` known — no interest/
+ * principal breakdown on that line) becomes a "reference" row instead: informational only, never
+ * offered up to record. Recording the FULL repayment under a single category (as an earlier
+ * version of this component did, defaulting to "Interest on Loan") would overstate the interest
+ * deduction, since principal is never deductible — real interest, when a statement itemizes it at
+ * all, always shows up as its own separate line with `interestCharged` set, which the branch
+ * above already handles correctly. The one exception is a lender-fee line (no interest/principal,
+ * but the description says "fee") — that blended figure legitimately maps to one category
+ * ("Borrowing Expenses"), so it stays recordable.
+ */
+function componentsFor(li: LoanStatementLineItem, i: number): LineComponent[] {
+  const out: LineComponent[] = [];
+  if (li.interestCharged !== undefined) {
+    out.push({
+      kind: "interest",
+      feedKey: i * 2,
+      amount: li.interestCharged,
+      direction: "debit",
+      description: li.description ?? "Interest charged",
+    });
+  }
+  if (li.principalPaid !== undefined) {
+    out.push({
+      kind: "principal",
+      feedKey: i * 2 + 1,
+      amount: li.principalPaid,
+      direction: "credit",
+      description: li.description ?? "Principal payment",
+    });
+  }
+  if (out.length === 0 && li.repaymentAmount !== undefined) {
+    if (/fee/i.test(li.description ?? "")) {
+      out.push({
+        kind: "fee",
+        feedKey: i * 2,
+        amount: li.repaymentAmount,
+        direction: "debit",
+        description: li.description ?? "Lender fee",
+      });
+    } else {
+      out.push({
+        kind: "reference",
+        amount: li.repaymentAmount,
+        direction: li.direction === "debit" ? "debit" : "credit",
+        description: li.description ?? "Repayment",
+      });
+    }
+  }
+  if (out.length === 0) {
+    out.push({
+      kind: "reference",
+      amount: 0,
+      direction: li.direction ?? "credit",
+      description: li.description ?? "Statement line",
+    });
+  }
+  return out;
+}
+
+/** Every line ever extracted from an uploaded/emailed statement for this loan, shown one row per
+ * printed-line component — same visual shape as PropertyBankFeed's general bank-account feed, but
+ * a loan-statement line can split into up to two rows (see componentsFor) since interest and
+ * principal are never both safely filed under one category. Reconstructed from
+ * ai_intake_proposals rather than a separate feed table: a proposal's payload never changes after
+ * upload, so a component with no matching Expense (by feedProposalId + feedKey) is "still in the
+ * feed". Recorded status for an "interest" row also checks the older per-period loan_statements
+ * record (proposalId + date) so a line already applied via that classic flow isn't offered up to
+ * be recorded a second time — that fallback never applies to "principal" rows, since the classic
+ * flow never posted principal as an expense in the first place.
+ */
 function buildFeedRows(
   loan: Loan,
   proposals: AiIntakeProposal[],
@@ -76,66 +184,50 @@ function buildFeedRows(
   loanStatements: ReturnType<typeof useStore>["state"]["loanStatements"],
 ): FeedRow[] {
   const forThisLoan = loanStatements.filter((s) => s.loanId === loan.id);
-  const relevant = proposals.filter(
-    (p) =>
-      p.kind === "loan_statement" &&
-      p.status !== "dismissed" &&
-      (p.matchedLoanId === loan.id || forThisLoan.some((s) => s.proposalId === p.id)),
-  );
+  const relevant = relevantLoanStatementProposals(loan.id, proposals, loanStatements);
 
   const rows: FeedRow[] = [];
   for (const p of relevant) {
     const payload = p.payload as LoanStatementProposalPayload;
-    const lines: LoanStatementLineItem[] =
-      payload.lineItems && payload.lineItems.length > 0
-        ? payload.lineItems
-        : payload.interestCharged !== undefined ||
-            payload.principalPaid !== undefined ||
-            payload.repaymentsMade !== undefined
-          ? [
-              {
-                date: payload.periodEnd || payload.periodStart || p.created_at?.slice(0, 10) || "",
-                interestCharged: payload.interestCharged,
-                principalPaid: payload.principalPaid,
-                repaymentAmount: payload.repaymentsMade,
-                balanceAfter: payload.closingBalance,
-              },
-            ]
-          : [];
+    const lines = linesFor(payload, p.created_at);
 
     lines.forEach((li, i) => {
-      const { description, direction, amount } = describeLine(li);
-      const recordedNew = expenses.some((e) => e.feedProposalId === p.id && e.feedLineIndex === i);
-      const recordedClassic = forThisLoan.some(
-        (s) => s.proposalId === p.id && s.periodStart === li.date && s.periodEnd === li.date,
-      );
-      const expenseId = expenses.find(
-        (e) => e.feedProposalId === p.id && e.feedLineIndex === i,
-      )?.id;
-      rows.push({
-        proposalId: p.id,
-        lineIndex: i,
-        date: li.date,
-        description,
-        amount,
-        direction,
-        lenderName: payload.lenderName,
-        sourceFileName: p.sourceFileName,
-        sourceFileData: p.sourceFileData,
-        recorded: recordedNew || recordedClassic,
-        expenseId,
-      });
+      for (const c of componentsFor(li, i)) {
+        let recorded = false;
+        let expenseId: string | undefined;
+        if (c.feedKey !== undefined) {
+          const match = expenses.find(
+            (e) => e.feedProposalId === p.id && e.feedLineIndex === c.feedKey,
+          );
+          if (match) {
+            recorded = true;
+            expenseId = match.id;
+          } else if (c.kind === "interest") {
+            recorded = forThisLoan.some(
+              (s) => s.proposalId === p.id && s.periodStart === li.date && s.periodEnd === li.date,
+            );
+          }
+        }
+        rows.push({
+          proposalId: p.id,
+          originalLineIndex: i,
+          kind: c.kind,
+          feedKey: c.feedKey,
+          date: li.date,
+          description: c.description,
+          amount: c.amount,
+          direction: c.direction,
+          lenderName: payload.lenderName,
+          sourceFileName: p.sourceFileName,
+          sourceFileData: p.sourceFileData,
+          recorded,
+          expenseId,
+        });
+      }
     });
   }
   return rows.sort((a, b) => (a.date < b.date ? 1 : -1));
 }
-
-const defaultCategoryFor = (description: string): ExpenseCategory => {
-  const d = description.toLowerCase();
-  if (d.includes("fee")) return "Borrowing Expenses";
-  if (d.includes("principal") || d.includes("redraw")) return "Loan Principal Repayment";
-  return "Interest on Loan";
-};
 
 /** Per-loan "compiled bank feed" — see buildFeedRows above. Renders nothing when a loan has never
  * had a statement uploaded/emailed for it. */
@@ -146,8 +238,9 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
   const [categories, setCategories] = useState<Record<string, ExpenseCategory>>({});
   if (rows.length === 0) return null;
 
-  const keyOf = (r: FeedRow) => `${r.proposalId}-${r.lineIndex}`;
-  const categoryFor = (r: FeedRow) => categories[keyOf(r)] ?? defaultCategoryFor(r.description);
+  const keyOf = (r: FeedRow) => `${r.proposalId}-${r.originalLineIndex}-${r.kind}`;
+  const categoryFor = (r: FeedRow) =>
+    categories[keyOf(r)] ?? CATEGORY_BY_KIND[r.kind as Exclude<RowKind, "reference">];
 
   const create = (r: FeedRow) => {
     const category = categoryFor(r);
@@ -173,7 +266,7 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
       sourceFileName: r.sourceFileName,
       sourceFileData: r.sourceFileData,
       feedProposalId: r.proposalId,
-      feedLineIndex: r.lineIndex,
+      feedLineIndex: r.feedKey,
     });
     markProposalApplied(r.proposalId, { propertyId: loan.propertyId });
     toast.success("Recorded");
@@ -186,14 +279,17 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
     toast.success("Reverted to feed");
   };
 
-  const recordedCount = rows.filter((r) => r.recorded).length;
+  const recordable = rows.filter((r) => r.kind !== "reference");
+  const recordedCount = recordable.filter((r) => r.recorded).length;
+  const feedOnlyCount = recordable.length - recordedCount;
+  const referenceCount = rows.length - recordable.length;
 
   return (
     <CollapsibleGroupSection
       label="Compiled bank feed"
       summary={
         <span>
-          {recordedCount} recorded · {rows.length - recordedCount} feed only
+          {recordedCount} recorded · {feedOnlyCount} feed only · {referenceCount} reference
         </span>
       }
     >
@@ -216,7 +312,15 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
             <span className="min-w-0 flex-1 truncate text-muted-foreground" title={r.description}>
               {r.description}
             </span>
-            {r.recorded ? (
+            {r.kind === "reference" ? (
+              <Badge
+                variant="outline"
+                className="border-dashed text-muted-foreground"
+                title="Whole repayment — interest is recorded on its own line when the statement itemizes it; this line itself isn't posted as an expense."
+              >
+                Reference only
+              </Badge>
+            ) : r.recorded ? (
               <>
                 <Badge variant="secondary">Recorded</Badge>
                 {r.expenseId && (

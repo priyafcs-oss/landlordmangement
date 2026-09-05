@@ -553,11 +553,15 @@ export interface Expense {
   reviewReason?: string | null;
   sourceSubject?: string;
   sourceEmailBody?: string;
-  /** Which ai_intake_proposals row (kind "bank_statement") and which of its transactions[] this
-   * expense was created from, when created via the property's Compiled bank feed rather than
-   * typed in directly — lets that feed tell "already recorded" apart from "still feed only" for
-   * the same transaction, and lets "Unrecord" find this exact expense to delete. Undefined for
-   * every expense entered any other way (manual, agent statement, a plain bill payment, ...). */
+  /** Which ai_intake_proposals row this expense was created from via a Compiled bank feed rather
+   * than typed in directly — lets that feed tell "already recorded" apart from "still feed only"
+   * for the same line, and lets "Unrecord" find this exact expense to delete. Undefined for every
+   * expense entered any other way (manual, agent statement, a plain bill payment, ...).
+   * feedLineIndex's meaning depends on which feed created it: PropertyBankFeed (kind
+   * "bank_statement") uses the plain index into payload.transactions[]; LoanCompiledFeed (kind
+   * "loan_statement") instead encodes which *component* of a statement line was recorded —
+   * `i*2` for the interest/fee component, `i*2+1` for the principal component — since one loan
+   * statement line can independently produce both an interest expense and a principal one. */
   feedProposalId?: string;
   feedLineIndex?: number;
 }
