@@ -105,7 +105,6 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/l
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
-import { PropertyBankFeed } from "@/components/PropertyBankFeed";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
@@ -5936,7 +5935,6 @@ export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
       </div>
 
       <BillsBoard propertyId={propertyId} />
-      <PropertyBankFeed propertyId={propertyId} />
     </div>
   );
 }

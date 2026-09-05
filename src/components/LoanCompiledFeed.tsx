@@ -11,6 +11,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field } from "@/components/Field";
 import { toast } from "sonner";
 import { EXPENSE_CATEGORIES } from "@/lib/types";
 import type {
@@ -167,7 +175,7 @@ function componentsFor(li: LoanStatementLineItem, i: number): LineComponent[] {
 }
 
 /** Every line ever extracted from an uploaded/emailed statement for this loan, shown one row per
- * printed-line component — same visual shape as PropertyBankFeed's general bank-account feed, but
+ * printed-line component — same visual shape as BankFeed's general bank-account feed, but
  * a loan-statement line can split into up to two rows (see componentsFor) since interest and
  * principal are never both safely filed under one category. Reconstructed from
  * ai_intake_proposals rather than a separate feed table: a proposal's payload never changes after
@@ -229,47 +237,54 @@ function buildFeedRows(
   return rows.sort((a, b) => (a.date < b.date ? 1 : -1));
 }
 
-/** Per-loan "compiled bank feed" — see buildFeedRows above. Renders nothing when a loan has never
- * had a statement uploaded/emailed for it. */
+/** Per-loan "compiled bank feed" — see buildFeedRows above. The category picker isn't shown up
+ * front for every row (noisy on a statement with many lines) — "Record" opens a small dialog
+ * asking for it just for that one line, pre-filled with the sensible per-kind default. Renders
+ * nothing when a loan has never had a statement uploaded/emailed for it. */
 export function LoanCompiledFeed({ loan }: { loan: Loan }) {
   const { state, addExpense, deleteExpense, findOrCreateProvider, markProposalApplied } =
     useStore();
   const rows = buildFeedRows(loan, state.aiProposals, state.expenses, state.loanStatements);
-  const [categories, setCategories] = useState<Record<string, ExpenseCategory>>({});
+  const [recording, setRecording] = useState<FeedRow | null>(null);
+  const [category, setCategory] = useState<ExpenseCategory>("Interest on Loan");
   if (rows.length === 0) return null;
 
   const keyOf = (r: FeedRow) => `${r.proposalId}-${r.originalLineIndex}-${r.kind}`;
-  const categoryFor = (r: FeedRow) =>
-    categories[keyOf(r)] ?? CATEGORY_BY_KIND[r.kind as Exclude<RowKind, "reference">];
 
-  const create = (r: FeedRow) => {
-    const category = categoryFor(r);
+  const openRecord = (r: FeedRow) => {
+    setRecording(r);
+    setCategory(CATEGORY_BY_KIND[r.kind as Exclude<RowKind, "reference">]);
+  };
+
+  const confirmRecord = () => {
+    if (!recording) return;
     const lenderProviderId = findOrCreateProvider(
-      r.lenderName,
+      recording.lenderName,
       loan.propertyId,
       "Interest on Loan",
     );
     addExpense({
-      itemName: `${r.lenderName} — ${r.description}`,
-      cost: r.amount,
-      date: r.date,
+      itemName: `${recording.lenderName} — ${recording.description}`,
+      cost: recording.amount,
+      date: recording.date,
       propertyId: loan.propertyId,
       assetId: loan.assetId,
       category,
       taxCategory: expenseCategoryToTaxCategory(category),
-      providerName: r.lenderName,
+      providerName: recording.lenderName,
       providerId: lenderProviderId,
       hasWarranty: false,
       rechargeToTenant: false,
       status: "approved",
       source: "upload",
-      sourceFileName: r.sourceFileName,
-      sourceFileData: r.sourceFileData,
-      feedProposalId: r.proposalId,
-      feedLineIndex: r.feedKey,
+      sourceFileName: recording.sourceFileName,
+      sourceFileData: recording.sourceFileData,
+      feedProposalId: recording.proposalId,
+      feedLineIndex: recording.feedKey,
     });
-    markProposalApplied(r.proposalId, { propertyId: loan.propertyId });
+    markProposalApplied(recording.proposalId, { propertyId: loan.propertyId });
     toast.success("Recorded");
+    setRecording(null);
   };
 
   const unrecord = (r: FeedRow) => {
@@ -336,13 +351,30 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
               </>
             ) : (
               <>
-                <Select
-                  value={categoryFor(r)}
-                  onValueChange={(v) =>
-                    setCategories((c) => ({ ...c, [keyOf(r)]: v as ExpenseCategory }))
-                  }
-                >
-                  <SelectTrigger className="h-6 w-[190px] text-xs">
+                <Badge variant="outline">Feed only</Badge>
+                <Button size="sm" className="h-6 text-xs" onClick={() => openRecord(r)}>
+                  Record
+                </Button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <Dialog open={!!recording} onOpenChange={(o) => !o && setRecording(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Record line</DialogTitle>
+          </DialogHeader>
+          {recording && (
+            <div className="space-y-3 text-sm">
+              <div className="rounded border p-2 text-xs text-muted-foreground">
+                {recording.date} · {recording.description} ·{" "}
+                <span className="font-medium text-foreground">{fmtCurrency(recording.amount)}</span>
+              </div>
+              <Field label="Category">
+                <Select value={category} onValueChange={(v) => setCategory(v as ExpenseCategory)}>
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -353,15 +385,17 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <Badge variant="outline">Feed only</Badge>
-                <Button size="sm" className="h-6 text-xs" onClick={() => create(r)}>
-                  Create
-                </Button>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
+              </Field>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecording(null)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmRecord}>Record</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </CollapsibleGroupSection>
   );
 }

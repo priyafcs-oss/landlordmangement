@@ -557,11 +557,12 @@ export interface Expense {
    * than typed in directly — lets that feed tell "already recorded" apart from "still feed only"
    * for the same line, and lets "Unrecord" find this exact expense to delete. Undefined for every
    * expense entered any other way (manual, agent statement, a plain bill payment, ...).
-   * feedLineIndex's meaning depends on which feed created it: PropertyBankFeed (kind
-   * "bank_statement") uses the plain index into payload.transactions[]; LoanCompiledFeed (kind
-   * "loan_statement") instead encodes which *component* of a statement line was recorded —
-   * `i*2` for the interest/fee component, `i*2+1` for the principal component — since one loan
-   * statement line can independently produce both an interest expense and a principal one. */
+   * feedLineIndex's meaning depends on which feed created it: BankFeed (kind "bank_statement",
+   * portfolio-wide, not property-scoped) uses the plain index into payload.transactions[]; the
+   * per-loan LoanCompiledFeed (kind "loan_statement") instead encodes which *component* of a
+   * statement line was recorded — `i*2` for the interest/fee component, `i*2+1` for the principal
+   * component — since one loan statement line can independently produce both an interest expense
+   * and a principal one. */
   feedProposalId?: string;
   feedLineIndex?: number;
 }
