@@ -13,7 +13,23 @@ import { parsePropertySale } from "./parse-property-sale.ts";
 import { stageAgencyAgreementProposal } from "./parse-agency-agreement.ts";
 import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./types.ts";
 
-export type RouteResult = (ParseResult | ProposalParseResult) & { skipped?: boolean; documentType?: string };
+/** Escapes ilike's wildcard characters (%, _) so a filename containing either can't accidentally
+ * turn into a wildcard pattern — same guard as parse-bill.ts's own escapeIlike, kept local here
+ * since this module has no other reason to import from there. */
+function escapeIlike(s: string): string {
+  return s.replace(/[%_]/g, (c) => `\\${c}`);
+}
+
+export type RouteResult = (ParseResult | ProposalParseResult) & {
+  skipped?: boolean;
+  documentType?: string;
+  /** Set instead of processing when this exact filename was already seen — see the dedup check
+   * at the top of routeInboundDocument. `existingProposalId`/`existingStatus` let the caller point
+   * the landlord at the proposal already on file rather than silently making a second one. */
+  duplicate?: boolean;
+  existingProposalId?: string;
+  existingStatus?: string;
+};
 
 /**
  * Classifies the inbound document, then dispatches to the type-specific extractor.
@@ -27,6 +43,26 @@ export async function routeInboundDocument(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<RouteResult> {
+  // The same physical statement/bill can arrive twice with no shared emailMessageId to catch it —
+  // a manual re-upload (no message id at all) or the same document forwarded/re-sent as a genuinely
+  // separate email. A byte-identical filename is a strong signal it's the same document (this
+  // pipeline's own auto-named statements especially so, e.g. "OwnershipStatement45_...pdf"), so
+  // check for one before spending a Gemini call and creating a second pending proposal for it.
+  // Dismissed proposals count too — the landlord already made a call on that exact file once.
+  if (input.pdfFileName) {
+    const { data: existing } = await supabase
+      .from("ai_intake_proposals")
+      .select("id, status")
+      .ilike("sourceFileName", escapeIlike(input.pdfFileName))
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      console.log(`[parse-inbound-bill] "${input.pdfFileName}" already on file as ${existing.id} (${existing.status}) — skipping`);
+      return { ok: true, skipped: true, duplicate: true, existingProposalId: existing.id, existingStatus: existing.status };
+    }
+  }
+
   // "Upload statement to this loan" already asserts the document type — classifying it again
   // would just be redundant Gemini cost/latency and a source of misroute risk.
   if (input.loanIdHint) {

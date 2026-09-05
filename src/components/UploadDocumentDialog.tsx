@@ -34,6 +34,11 @@ interface UploadResult {
   proposalId?: string;
   status?: string;
   error?: string;
+  /** Set when this exact filename was already seen (a prior upload, or a separate email carrying
+   * the same document) — see routeInboundDocument's dedup check. Nothing new was created. */
+  duplicate?: boolean;
+  existingProposalId?: string;
+  existingStatus?: string;
 }
 
 /**
@@ -120,6 +125,12 @@ export function UploadDocumentDialog({
         if (!data.ok) {
           toast.error(`${file.name}: ${"error" in data ? data.error : "Couldn't process this document"}`);
           failedFiles.push(file);
+          continue;
+        }
+        if ("duplicate" in data && data.duplicate) {
+          toast.warning(
+            `${file.name} looks like it's already been uploaded (status: ${data.existingStatus ?? "on file"}) — nothing new was created. Check the pending review queue.`,
+          );
           continue;
         }
         if ("skipped" in data && data.skipped) {
