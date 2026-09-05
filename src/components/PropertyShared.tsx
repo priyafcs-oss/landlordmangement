@@ -101,10 +101,11 @@ import type {
   Entity,
   ExpenseCategory,
 } from "@/lib/types";
-import { EXPENSE_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/lib/types";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
+import { PropertyBankFeed } from "@/components/PropertyBankFeed";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
@@ -1998,6 +1999,15 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       : null,
   );
   const [matchAsBill, setMatchAsBill] = useState<boolean[]>(() => billMatches.map((m) => !!m));
+  // Defaults to the matched provider's own default category (same as everywhere else a
+  // providerId is resolved) so a recognised vendor doesn't need re-categorizing every time;
+  // otherwise a generic catch-all per direction, always overridable before importing.
+  const [categories, setCategories] = useState<string[]>(() =>
+    payload.transactions.map((tx) => {
+      const provider = tx.providerId ? state.providers.find((p) => p.id === tx.providerId) : undefined;
+      return provider?.defaultCategory ?? (tx.direction === "in" ? "Other Rental Income" : "Sundry Rental Expenses");
+    }),
+  );
   // Same duplicate check Add Bill/Add Transaction run before saving — a debit line that already
   // matches a posted Expense/Bill is flagged so re-importing the same bank statement (or one
   // covering an overlapping period) doesn't silently double up the transaction.
@@ -2029,13 +2039,20 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         date: tx.date,
         propertyId,
         direction: tx.direction === "in" ? "Income" : undefined,
-        taxCategory: "Immediate Deduction",
+        // taxCategory is meaningless for an Income row (see Expense.taxCategory) — only a
+        // genuine "out" line's chosen category decides Immediate Deduction vs Capital Works.
+        category: categories[i] as ExpenseCategory,
+        taxCategory: tx.direction === "out" ? expenseCategoryToTaxCategory(categories[i]) : "Immediate Deduction",
+        providerId: tx.providerId,
+        providerName: tx.suggestedProviderName,
         hasWarranty: false,
         rechargeToTenant: false,
         status: "approved",
         source: "upload",
         sourceFileName: proposal.sourceFileName,
         sourceFileData: proposal.sourceFileData,
+        feedProposalId: proposal.id,
+        feedLineIndex: i,
       });
       count++;
     });
@@ -2078,6 +2095,23 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                 </span>
                 <span className="flex-1 truncate text-muted-foreground">{tx.description}</span>
               </label>
+              {!(billMatches[i] && matchAsBill[i]) && (
+                <div className="ml-6 flex items-center gap-1.5">
+                  <span className="text-[11px] text-muted-foreground">Category:</span>
+                  <Select value={categories[i]} onValueChange={(v) => setCategories((c) => c.map((x, j) => (j === i ? v : x)))}>
+                    <SelectTrigger className="h-6 w-[190px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(tx.direction === "in" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {billMatches[i] && (
                 <label className="ml-6 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
                   <input
@@ -5902,6 +5936,7 @@ export function PropertyBillsTab({ propertyId }: { propertyId: string }) {
       </div>
 
       <BillsBoard propertyId={propertyId} />
+      <PropertyBankFeed propertyId={propertyId} />
     </div>
   );
 }

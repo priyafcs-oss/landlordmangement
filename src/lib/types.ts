@@ -553,6 +553,13 @@ export interface Expense {
   reviewReason?: string | null;
   sourceSubject?: string;
   sourceEmailBody?: string;
+  /** Which ai_intake_proposals row (kind "bank_statement") and which of its transactions[] this
+   * expense was created from, when created via the property's Compiled bank feed rather than
+   * typed in directly — lets that feed tell "already recorded" apart from "still feed only" for
+   * the same transaction, and lets "Unrecord" find this exact expense to delete. Undefined for
+   * every expense entered any other way (manual, agent statement, a plain bill payment, ...). */
+  feedProposalId?: string;
+  feedLineIndex?: number;
 }
 
 export interface ChecklistItem {
