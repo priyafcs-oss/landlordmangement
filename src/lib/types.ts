@@ -1147,6 +1147,15 @@ export interface LoanStatementLineItem {
   /** YYYY-MM-DD — the actual date this interest/repayment was charged, not the statement's
    * print date. Interest is posted to Expenses against this date. */
   date: string;
+  /** The literal label printed against this line on the statement (e.g. "Direct Debit
+   * Repayment", "Interest Charged") — lets the per-loan Compiled Bank Feed show an actual
+   * statement line rather than a bucket of figures. Absent on a proposal staged before this
+   * field existed, or when the statement itself has no description column. */
+  description?: string;
+  /** "debit" = this line increased the balance owed (interest, a fee); "credit" = it reduced it
+   * (a repayment, an extra payment). Absent on older proposals — the Compiled Bank Feed falls
+   * back to inferring it from which of the amount fields below is set. */
+  direction?: "debit" | "credit";
   interestCharged?: number;
   /** Reduces Loan.totalBalance only — never posted as an Expense/cashflow entry itself. */
   principalPaid?: number;

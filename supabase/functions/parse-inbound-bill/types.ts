@@ -241,6 +241,14 @@ export interface ParsedLoanDocumentFields {
  * several months must return one entry per month here, not a single aggregate. */
 export interface ParsedLoanStatementLineItem {
   date: string; // YYYY-MM-DD, the actual charge/repayment date
+  /** The literal label printed against this line on the statement (e.g. "Direct Debit
+   * Repayment", "Interest Charged", "Redraw"), null if the statement has no such column — lets
+   * this line show up as an actual statement line in the Compiled Bank Feed, not just a bucket
+   * of figures. */
+  description: string | null;
+  /** "debit" = this line increased the balance owed (interest, fees); "credit" = this line
+   * reduced it (a repayment, an extra payment). Null if not confidently determinable. */
+  direction: "debit" | "credit" | null;
   interest_charged: number | null;
   principal_paid: number | null;
   repayment_amount: number | null;

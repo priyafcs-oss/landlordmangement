@@ -9,7 +9,7 @@ Extract the fields defined in the response schema as strict JSON.
 - property_address: the property this loan is secured against.
 - lender_name: the bank/lender's name.
 - period_start, period_end: YYYY-MM-DD, the statement's covering period, null if not stated.
-- line_items: THIS IS THE MOST IMPORTANT FIELD. List every distinct interest-charge/repayment event shown in the statement's transaction table, each as its own entry with its OWN actual date (the date printed against that line, e.g. "01 Jun", "01 Jul", "01 Aug" — NOT the statement's period_start/period_end or print date). If the statement covers several months (a quarterly, half-yearly, or multi-month statement), you MUST return one line_items entry per month/period shown — never collapse multiple months into a single aggregated figure. For each entry: date (YYYY-MM-DD), interest_charged (that period's interest portion), principal_paid (that period's principal portion, distinct from interest — null if the statement doesn't break it out for that line), repayment_amount (the full amount debited that period, interest+principal, if a repayment happened that period, else null), balance_after (the running balance immediately after that line, if the statement shows it). If the statement genuinely gives only one period total with no per-date breakdown at all, return a single line_items entry dated period_end (or the statement's document date) with that one total.
+- line_items: THIS IS THE MOST IMPORTANT FIELD. List every distinct interest-charge/repayment event shown in the statement's transaction table, each as its own entry with its OWN actual date (the date printed against that line, e.g. "01 Jun", "01 Jul", "01 Aug" — NOT the statement's period_start/period_end or print date). If the statement covers several months (a quarterly, half-yearly, or multi-month statement), you MUST return one line_items entry per month/period shown — never collapse multiple months into a single aggregated figure. For each entry: date (YYYY-MM-DD), description (the literal label printed against this line, e.g. "Direct Debit Repayment", "Interest Charged", "Redraw" — null only if the statement truly has no description column), direction ("debit" if this line increased the balance owed such as interest or a fee, "credit" if it reduced the balance owed such as a repayment or extra payment, null if genuinely unclear), interest_charged (that period's interest portion), principal_paid (that period's principal portion, distinct from interest — null if the statement doesn't break it out for that line), repayment_amount (the full amount debited that period, interest+principal, if a repayment happened that period, else null), balance_after (the running balance immediately after that line, if the statement shows it). If the statement genuinely gives only one period total with no per-date breakdown at all, return a single line_items entry dated period_end (or the statement's document date) with that one total.
 - interest_charged, repayments_made: the TOTAL amounts over this whole statement period, summed across all line_items — null if not stated.
 - principal_paid: the total portion of repayments_made that reduced the principal over this whole period, distinct from interest_charged — null if not stated or not broken out separately.
 - closing_balance: the loan's outstanding balance at the end of this statement (should match the last line_item's balance_after when both are known), null if not stated.
@@ -34,6 +34,8 @@ const SCHEMA = {
         type: "OBJECT",
         properties: {
           date: { type: "STRING" },
+          description: { type: "STRING", nullable: true },
+          direction: { type: "STRING", nullable: true, enum: ["debit", "credit"] },
           interest_charged: { type: "NUMBER", nullable: true },
           principal_paid: { type: "NUMBER", nullable: true },
           repayment_amount: { type: "NUMBER", nullable: true },
@@ -129,6 +131,8 @@ export async function parseLoanStatement(
     .filter((li) => !!li.date)
     .map((li) => ({
       date: li.date,
+      description: li.description ?? undefined,
+      direction: li.direction ?? undefined,
       interestCharged: li.interest_charged ?? undefined,
       principalPaid: li.principal_paid ?? undefined,
       repaymentAmount: li.repayment_amount ?? undefined,
