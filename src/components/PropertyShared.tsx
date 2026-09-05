@@ -7303,9 +7303,22 @@ function AgentStatementsSection({
   const periodOf = (p: AiIntakeProposal) =>
     (p.payload as RentLedgerProposalPayload).periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
 
+  // On a changeover statement, the statement's OWN overall tenantName is often left blank —
+  // per-line tenantName is set instead, one per transaction, since a changeover statement spans
+  // more than one tenant (see RentLedgerProposalPayload.transactions[].tenantName). Every tenant
+  // filter/search/display below has to look at both, or a changeover statement (or one where the
+  // top-level field was never populated for any reason) becomes invisible to a tenant filter and
+  // shows no name of its own in the list.
+  const tenantNamesOf = (payload: RentLedgerProposalPayload): string[] => {
+    if (payload.tenantName) return [payload.tenantName];
+    const names = new Set(payload.transactions?.map((t) => t.tenantName).filter((n): n is string => !!n) ?? []);
+    return [...names];
+  };
+
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const filtered = statements.filter((p) => {
     const payload = p.payload as RentLedgerProposalPayload;
+    const names = tenantNamesOf(payload);
     const date = periodOf(p);
     if (fy !== "all" && !(date >= start && date <= end)) return false;
     if (fileFormat !== "__all__" && fileFormatOf({ fileName: p.sourceFileName, fileData: p.sourceFileData, emailBody: p.sourceEmailBody }) !== fileFormat) return false;
@@ -7313,14 +7326,14 @@ function AgentStatementsSection({
       // matchedTenantId is only ever set once a statement has actually been reviewed/applied —
       // most statements (especially still-pending ones) have it unset, which would otherwise
       // make this filter hide everyone regardless of which tenant was picked. Fall back to the
-      // statement's own extracted tenantName against the selected tenant's real name so the
+      // statement's own extracted tenant name(s) against the selected tenant's real name so the
       // filter still works before that match has been made.
       const selectedTenantName = tenantOptions?.find((t) => t.id === tenantId)?.name;
-      const matchesByName = !!selectedTenantName && !!payload.tenantName && payload.tenantName.toLowerCase().includes(selectedTenantName.toLowerCase());
+      const matchesByName = !!selectedTenantName && names.some((n) => n.toLowerCase().includes(selectedTenantName.toLowerCase()));
       if (p.matchedTenantId !== tenantId && !matchesByName) return false;
     }
     if (query) {
-      const haystack = `${payload.tenantName ?? ""} ${payload.periodStart ?? ""} ${payload.periodEnd ?? ""} ${p.sourceFileName ?? ""}`.toLowerCase();
+      const haystack = `${names.join(" ")} ${payload.periodStart ?? ""} ${payload.periodEnd ?? ""} ${p.sourceFileName ?? ""}`.toLowerCase();
       if (!haystack.includes(query.toLowerCase())) return false;
     }
     return true;
@@ -7337,15 +7350,16 @@ function AgentStatementsSection({
 
   const StatementRow = (p: AiIntakeProposal) => {
     const payload = p.payload as RentLedgerProposalPayload;
+    const names = tenantNamesOf(payload);
     return (
       <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="shrink-0 font-medium">
             {payload.periodStart || "—"} → {payload.periodEnd || "—"}
           </span>
-          {payload.tenantName && <span className="text-muted-foreground">{payload.tenantName}</span>}
-          {payload.netToOwner !== undefined && <span className="text-muted-foreground">Net {fmtCurrency(payload.netToOwner)}</span>}
-          <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="text-[10px]">
+          {names.length > 0 && <span className="text-muted-foreground">{names.join(", ")}</span>}
+          {payload.netToOwner !== undefined && <span className="shrink-0 text-muted-foreground">Net {fmtCurrency(payload.netToOwner)}</span>}
+          <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="shrink-0 text-[10px]">
             {p.status}
           </Badge>
         </div>
@@ -7354,7 +7368,7 @@ function AgentStatementsSection({
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 max-w-[180px] gap-1 text-xs"
+              className="h-6 max-w-[420px] gap-1 text-xs"
               title={p.sourceFileName}
               onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}
             >
