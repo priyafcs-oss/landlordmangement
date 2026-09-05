@@ -7355,7 +7355,10 @@ function AgentStatementsSection({
       // statement's own extracted tenant name(s) against the selected tenant's real name so the
       // filter still works before that match has been made.
       const selectedTenantName = tenantOptions?.find((t) => t.id === tenantId)?.name;
-      const matchesByName = !!selectedTenantName && names.some((n) => n.toLowerCase().includes(selectedTenantName.toLowerCase()));
+      // Exact (trimmed, case-insensitive) match — `names` are whole extracted tenant names, not
+      // free text, so `includes` here would also match a different tenant whose name happens to be
+      // a substring of this one (e.g. filtering by "Jo Smith" would wrongly also match "Jo Smithson").
+      const matchesByName = !!selectedTenantName && names.some((n) => n.trim().toLowerCase() === selectedTenantName.trim().toLowerCase());
       if (p.matchedTenantId !== tenantId && !matchesByName) return false;
     }
     if (query) {
