@@ -7305,12 +7305,21 @@ function AgentStatementsSection({
 
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const filtered = statements.filter((p) => {
+    const payload = p.payload as RentLedgerProposalPayload;
     const date = periodOf(p);
     if (fy !== "all" && !(date >= start && date <= end)) return false;
     if (fileFormat !== "__all__" && fileFormatOf({ fileName: p.sourceFileName, fileData: p.sourceFileData, emailBody: p.sourceEmailBody }) !== fileFormat) return false;
-    if (tenantId !== "__all__" && p.matchedTenantId !== tenantId) return false;
+    if (tenantId !== "__all__") {
+      // matchedTenantId is only ever set once a statement has actually been reviewed/applied —
+      // most statements (especially still-pending ones) have it unset, which would otherwise
+      // make this filter hide everyone regardless of which tenant was picked. Fall back to the
+      // statement's own extracted tenantName against the selected tenant's real name so the
+      // filter still works before that match has been made.
+      const selectedTenantName = tenantOptions?.find((t) => t.id === tenantId)?.name;
+      const matchesByName = !!selectedTenantName && !!payload.tenantName && payload.tenantName.toLowerCase().includes(selectedTenantName.toLowerCase());
+      if (p.matchedTenantId !== tenantId && !matchesByName) return false;
+    }
     if (query) {
-      const payload = p.payload as RentLedgerProposalPayload;
       const haystack = `${payload.tenantName ?? ""} ${payload.periodStart ?? ""} ${payload.periodEnd ?? ""} ${p.sourceFileName ?? ""}`.toLowerCase();
       if (!haystack.includes(query.toLowerCase())) return false;
     }
@@ -7342,8 +7351,14 @@ function AgentStatementsSection({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {p.sourceFileData && (
-            <Button size="sm" variant="ghost" className="h-6 gap-1 text-xs" onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}>
-              <Eye className="h-3 w-3" /> View
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 max-w-[180px] gap-1 text-xs"
+              title={p.sourceFileName}
+              onClick={() => openBillDocument(p.sourceFileName, p.sourceFileData)}
+            >
+              <Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{p.sourceFileName || "View"}</span>
             </Button>
           )}
           {p.status === "pending" && (
