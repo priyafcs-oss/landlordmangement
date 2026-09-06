@@ -64,7 +64,7 @@ export function UploadDocumentDialog({
   /** Custom open trigger — falls back to the default "Upload document" button when omitted. */
   trigger?: React.ReactNode;
 } = {}) {
-  const { refresh } = useStore();
+  const { refreshOne } = useStore();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -144,8 +144,12 @@ export function UploadDocumentDialog({
 
         // The edge function writes rows server-side, so the client store's cached state doesn't
         // know about this file's result yet — needed now (not batched at the end) since the next
-        // proposal has to actually be in state before the review dialog can find it.
-        await refresh();
+        // proposal has to actually be in state before the review dialog can find it. Fetching just
+        // the row(s) this file's result named (instead of a full refresh() across every table)
+        // avoids re-downloading every stored file blob in the portfolio once per uploaded file.
+        if ("proposalId" in data && data.proposalId) await refreshOne("aiProposals", data.proposalId);
+        if ("billId" in data && data.billId) await refreshOne("bills", data.billId);
+        if ("linkedExpenseId" in data && data.linkedExpenseId) await refreshOne("expenses", data.linkedExpenseId);
 
         if ("proposalId" in data && data.proposalId) {
           setReviewQueue((q) => [...q, data.proposalId!]);

@@ -637,7 +637,7 @@ function namesOverlap(a: string, b: string): boolean {
 }
 
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied, refresh } = useStore();
+  const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied, refreshOne, removeOne } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const expenseLines = payload.expenseLines ?? [];
@@ -925,7 +925,12 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     if (!proposal.sourceFileData) return;
     setReparsing(true);
     try {
-      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>("reparse-document", {
+      const { data, error } = await supabase.functions.invoke<{
+        ok?: boolean;
+        error?: string;
+        proposalId?: string;
+        billId?: string;
+      }>("reparse-document", {
         body: { proposalId: proposal.id, documentType: "rent_statement" },
       });
       if (error) throw error;
@@ -933,7 +938,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         toast.error(data?.error || "Re-parse failed");
         return;
       }
-      await refresh();
+      // reparse-document deletes the original proposal server-side once its replacement is
+      // written, so mirror that here instead of re-fetching every table via refresh().
+      removeOne("aiProposals", proposal.id);
+      if (data.proposalId) await refreshOne("aiProposals", data.proposalId);
+      if (data.billId) await refreshOne("bills", data.billId);
       toast.success("Re-parsed — check the review queue for the fresh version");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Re-parse failed");
@@ -1527,7 +1536,7 @@ const REPARSE_DOCUMENT_TYPES: { value: string; label: string }[] = [
 ];
 
 function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProposal, refresh } = useStore();
+  const { state, updateProposal, refreshOne, removeOne } = useStore();
   const payload = proposal.payload as UnclassifiedProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [reclassifyAs, setReclassifyAs] = useState("");
@@ -1546,7 +1555,12 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
     if (!reclassifyAs) return toast.error("Choose what kind of document this is first");
     setReparsing(true);
     try {
-      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>("reparse-document", {
+      const { data, error } = await supabase.functions.invoke<{
+        ok?: boolean;
+        error?: string;
+        proposalId?: string;
+        billId?: string;
+      }>("reparse-document", {
         body: { proposalId: proposal.id, documentType: reclassifyAs },
       });
       if (error) throw error;
@@ -1554,7 +1568,11 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
         toast.error(data?.error || "Couldn't read this document as that type");
         return;
       }
-      await refresh();
+      // reparse-document deletes the original proposal server-side once its replacement is
+      // written, so mirror that here instead of re-fetching every table via refresh().
+      removeOne("aiProposals", proposal.id);
+      if (data.proposalId) await refreshOne("aiProposals", data.proposalId);
+      if (data.billId) await refreshOne("bills", data.billId);
       toast.success(
         `Re-parsed as ${REPARSE_DOCUMENT_TYPES.find((t) => t.value === reclassifyAs)?.label ?? reclassifyAs} — check the review queue`,
       );

@@ -54,6 +54,14 @@ export async function selectAll<T>(table: string): Promise<T[]> {
   return (data ?? []) as T[];
 }
 
+/** Fetches a single row by id — for refreshing local state after an action that's known to have
+ * touched exactly one row, instead of re-pulling every table via `selectAll`. */
+export async function selectOne<T>(table: string, id: string): Promise<T | null> {
+  const { data, error } = await db.from(table).select("*").eq("id", id).maybeSingle();
+  report(`select ${table} by id`, error);
+  return (data ?? null) as T | null;
+}
+
 export interface PublicProperty {
   id: string;
   address: string;

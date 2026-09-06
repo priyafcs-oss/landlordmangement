@@ -42,6 +42,7 @@ import type {
 import {
   TABLES,
   selectAll,
+  selectOne,
   upsertRow,
   updateRow,
   deleteRow,
@@ -157,6 +158,15 @@ interface StoreCtx {
   state: AppState;
   loading: boolean;
   refresh: () => Promise<void>;
+  /** Re-fetches a single row (by TABLES key + id) and merges it into that table's array in
+   * state — replaces it if present, appends it if new. Use after a server-side action (e.g. an
+   * edge function) that wrote/updated exactly one row whose id is already known, instead of
+   * `refresh()` re-pulling every table (including every stored file blob) to reflect a one-row
+   * change. */
+  refreshOne: (tableKey: keyof typeof TABLES, id: string) => Promise<void>;
+  /** Drops one row from local state by id, with no network call — for when a server action is
+   * already known to have deleted that row and state just needs to catch up. */
+  removeOne: (tableKey: keyof typeof TABLES, id: string) => void;
   set: (updater: (s: AppState) => AppState) => void;
   reset: () => void;
 
@@ -519,6 +529,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const refreshOne: StoreCtx["refreshOne"] = async (tableKey, id) => {
+    const row = await selectOne<{ id: string }>(TABLES[tableKey], id);
+    if (!row) return;
+    setState((s) => {
+      const arr = s[tableKey] as unknown as { id: string }[];
+      const idx = arr.findIndex((x) => x.id === id);
+      const nextArr = idx === -1 ? [...arr, row] : arr.map((x, i) => (i === idx ? row : x));
+      return { ...s, [tableKey]: nextArr };
+    });
+  };
+
+  const removeOne: StoreCtx["removeOne"] = (tableKey, id) =>
+    setState((s) => {
+      const arr = s[tableKey] as unknown as { id: string }[];
+      return { ...s, [tableKey]: arr.filter((x) => x.id !== id) };
+    });
+
   const set: StoreCtx["set"] = (updater) => setState((s) => updater(s));
 
   /**
@@ -543,6 +570,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state,
     loading,
     refresh,
+    refreshOne,
+    removeOne,
     set,
     reset: () => void 0,
 
