@@ -7697,8 +7697,8 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
   const exportCsv = () => {
     downloadCsv(
       `owner-ledger-${propertyId}.csv`,
-      ["Date", "Description", "Tenant", "Money in", "Money out", "Balance"],
-      filtered.map((r) => [r.date, r.description, r.tenantName ?? "", r.moneyIn, -r.moneyOut, r.balance]),
+      ["Date", "Description", "Tenant", "Money in", "Money out", "Balance", "Statement"],
+      filtered.map((r) => [r.date, r.description, r.tenantName ?? "", r.moneyIn, -r.moneyOut, r.balance, r.sourceFileName ?? ""]),
     );
   };
 
@@ -7721,17 +7721,25 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
       <td className="px-3 py-2 whitespace-nowrap text-right text-emerald-700">{r.moneyIn > 0 ? `+${fmtCurrency(r.moneyIn)}` : "—"}</td>
       <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{r.moneyOut > 0 ? `−${fmtCurrency(r.moneyOut)}` : "—"}</td>
       <td className="px-3 py-2 whitespace-nowrap text-right font-medium">{fmtCurrency(r.balance)}</td>
-      <td className="px-3 py-2">
-        {r.sourceFileData && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6"
-            title={r.sourceFileName ?? undefined}
-            onClick={() => openBillDocument(r.sourceFileName ?? undefined, r.sourceFileData ?? undefined)}
-          >
-            <Eye className="h-3 w-3" />
-          </Button>
+      <td className="min-w-0 max-w-[200px] px-3 py-2">
+        {r.sourceFileName ? (
+          r.sourceFileData ? (
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-1 truncate text-left text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+              title={r.sourceFileName}
+              onClick={() => openBillDocument(r.sourceFileName ?? undefined, r.sourceFileData ?? undefined)}
+            >
+              <Eye className="h-3 w-3 shrink-0" />
+              <span className="truncate">{r.sourceFileName}</span>
+            </button>
+          ) : (
+            <span className="block truncate text-muted-foreground" title={r.sourceFileName}>
+              {r.sourceFileName}
+            </span>
+          )
+        ) : (
+          "—"
         )}
       </td>
     </tr>
@@ -7748,7 +7756,7 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
         <SortableTh field="in" label="Money in" align="right" sort={sort} onSort={onSort} />
         <SortableTh field="out" label="Money out" align="right" sort={sort} onSort={onSort} />
         <SortableTh field="balance" label="Balance" align="right" sort={sort} onSort={onSort} />
-        <th className="px-3 py-2" />
+        <th className="px-3 py-2 text-left font-medium">Statement</th>
       </tr>
     </thead>
   );
