@@ -616,6 +616,26 @@ function isRentTransaction(description: string): boolean {
   return !/\bwater\b|\busage\b|\binv\s*[:#]/i.test(description);
 }
 
+/** Splits a name that may join multiple co-tenants ("Cary Morsink & Rebecca Huxley-Morsink") into
+ * its individual parts. */
+function splitCoTenantNames(name: string): string[] {
+  return name
+    .split(/\s*(?:&|\band\b)\s*/i)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** True on an exact (trimmed, case-insensitive) match, or when either name is one of the other's
+ * individual co-tenants — a changeover statement's per-line tenantName is often just ONE half of a
+ * joint tenancy ("Rebecca Huxley-Morsink"), which would never exact-match the tenant record's full
+ * combined name ("Cary Morsink & Rebecca Huxley-Morsink"), leaving that line's tenant unassigned. */
+function namesOverlap(a: string, b: string): boolean {
+  if (a.trim().toLowerCase() === b.trim().toLowerCase()) return true;
+  const aParts = splitCoTenantNames(a);
+  const bParts = splitCoTenantNames(b);
+  return aParts.some((p) => bParts.includes(p));
+}
+
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
   const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied, refresh } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
@@ -639,7 +659,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // attributed individually rather than one tenant picked for the whole statement — but that's
   // only ever ambiguous when the property actually has more than one tenant on file.
   const multiTenant = tenantsAtProperty.length > 1;
-  const nameMatchesExistingTenant = (name: string) => tenantsAtProperty.some((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const nameMatchesExistingTenant = (name: string) => tenantsAtProperty.some((t) => namesOverlap(t.name, name));
   // Checked against every name the statement mentions at all — its own top-level tenantName AND
   // every transaction's own tenantName — not just the top-level field, since that's often left
   // blank on statements the AI didn't extract an overall name for (not only changeover ones), even
@@ -653,8 +673,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
    * statement. Left blank (forcing a manual pick) when none of those apply. */
   const defaultTenantFor = (name?: string): string => {
     if (name) {
-      const q = name.trim().toLowerCase();
-      const match = tenantsAtProperty.find((t) => t.name.trim().toLowerCase() === q);
+      const match = tenantsAtProperty.find((t) => namesOverlap(t.name, name));
       if (match) return match.id;
     }
     if (tenantsAtProperty.length === 1) return tenantsAtProperty[0].id;
