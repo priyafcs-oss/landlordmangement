@@ -669,11 +669,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     .find((n) => !nameMatchesExistingTenant(n));
 
   /** Best guess for one transaction row: its own extracted tenantName (changeover statements) >
-   * the sole tenant at the property > whatever the server-side matcher resolved for the whole
-   * statement. Left blank (forcing a manual pick) when none of those apply. */
+   * the statement's overall tenantName (every OTHER statement — a line never repeats a name at all
+   * when there's only one tenant the whole document is for) > the sole tenant at the property >
+   * whatever the server-side matcher resolved for the whole statement. Left blank (forcing a
+   * manual pick) when none of those apply. */
   const defaultTenantFor = (name?: string): string => {
-    if (name) {
-      const match = tenantsAtProperty.find((t) => namesOverlap(t.name, name));
+    const candidate = name || payload.tenantName;
+    if (candidate) {
+      const match = tenantsAtProperty.find((t) => namesOverlap(t.name, candidate));
       if (match) return match.id;
     }
     if (tenantsAtProperty.length === 1) return tenantsAtProperty[0].id;
