@@ -646,8 +646,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // attributed individually rather than one tenant picked for the whole statement — but that's
   // only ever ambiguous when the property actually has more than one tenant on file.
   const multiTenant = tenantsAtProperty.length > 1;
-  const tenantNameMatched =
-    !payload.tenantName || tenantsAtProperty.some((t) => t.name.trim().toLowerCase() === payload.tenantName!.trim().toLowerCase());
+  const nameMatchesExistingTenant = (name: string) => tenantsAtProperty.some((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase());
+  // Checked against every name the statement mentions at all — its own top-level tenantName AND
+  // every transaction's own tenantName — not just the top-level field, since that's often left
+  // blank on statements the AI didn't extract an overall name for (not only changeover ones), even
+  // though individual lines still carry a real name that may not match who's currently on file.
+  const unmatchedStatementTenantName = [payload.tenantName, ...payload.transactions.map((t) => t.tenantName)]
+    .filter((n): n is string => !!n)
+    .find((n) => !nameMatchesExistingTenant(n));
 
   /** Best guess for one transaction row: its own extracted tenantName (changeover statements) >
    * the sole tenant at the property > whatever the server-side matcher resolved for the whole
@@ -984,29 +990,27 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                 ))}
               </SelectContent>
             </Select>
-            {/* Shown either when nothing is selected yet, or when a single-tenant property
-                auto-selected its one existing tenant but the statement's own extracted name
-                doesn't actually match them — otherwise a statement for a brand-new tenant
-                silently gets attributed to whoever's already on file with no way to fix it. */}
-            {(!txTenantIds[0] || (payload.tenantName && !tenantNameMatched)) && (
-              <>
-                {payload.tenantName && !tenantNameMatched && (
-                  <span className="text-xs text-destructive">No tenant found matching "{payload.tenantName}"</span>
-                )}
-                <TenantDialog
-                  propertyId={propertyId}
-                  initialValues={payload.tenantName ? { name: payload.tenantName } : undefined}
-                  onSaved={(id) => {
-                    setTxTenantIds((ids) => ids.map(() => id));
-                    setExpTenantIds((ids) => ids.map(() => id));
-                  }}
-                >
-                  <Button size="sm" variant="outline" disabled={!propertyId}>
-                    Add as new tenant
-                  </Button>
-                </TenantDialog>
-              </>
+            {unmatchedStatementTenantName && (
+              <span className="text-xs text-destructive">No tenant found matching "{unmatchedStatementTenantName}"</span>
             )}
+            {/* Always available, not just when a mismatch is auto-detected — the statement-level
+                tenantName is often blank on statements the AI didn't extract a name for at all
+                (not just changeover statements), so there's no name here to compare against even
+                though the landlord can see with their own eyes that it's a different tenant. The
+                single existing tenant still gets auto-selected as the likely default above; this
+                is the manual override for when that guess is wrong. */}
+            <TenantDialog
+              propertyId={propertyId}
+              initialValues={unmatchedStatementTenantName ? { name: unmatchedStatementTenantName } : undefined}
+              onSaved={(id) => {
+                setTxTenantIds((ids) => ids.map(() => id));
+                setExpTenantIds((ids) => ids.map(() => id));
+              }}
+            >
+              <Button size="sm" variant="outline" disabled={!propertyId}>
+                Add as new tenant
+              </Button>
+            </TenantDialog>
           </div>
         )}
 
