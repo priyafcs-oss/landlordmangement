@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { useStore } from "@/lib/store";
-import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, RefreshCw } from "lucide-react";
+import { openBillDocument } from "@/lib/files";
+import { ChevronDown, ChevronRight, ExternalLink, RefreshCw } from "lucide-react";
 import type { AiIntakeProposal } from "@/lib/types";
 
 /** Set by `ProposalReviewDialog` (the after-upload review popup) so its "Review later" action is
@@ -71,35 +72,25 @@ function DocumentPane({
 }
 
 /** One consistent top bar for every place DocumentReviewCard shows its full two-pane content —
- * "view document only" (hides the form, widens the document pane to fill the space) plus whichever
- * of Re-parse/Review later apply from context. Renders nothing (not even a border) when neither
- * context is set and no document exists to toggle to, so a plain inline-list card stays exactly as
+ * a real "Open document" link (opens the actual file in a new browser tab, same as the plain link
+ * this used to be before the two-pane review layout existed — NOT an in-page layout toggle) plus
+ * whichever of Re-parse/Review later apply from context. Renders nothing (not even a border) when
+ * neither context is set and there's no file to open, so a plain inline-list card stays exactly as
  * minimal as before. */
-function ReviewActionsBar({
-  hasDocument,
-  docOnly,
-  setDocOnly,
-}: {
-  hasDocument: boolean;
-  docOnly: boolean;
-  setDocOnly: (v: boolean) => void;
-}) {
+function ReviewActionsBar({ proposal }: { proposal: AiIntakeProposal }) {
   const reviewLater = useContext(ReviewLaterContext);
   const reparseCtx = useContext(ReparseContext);
-  if (!hasDocument && !reparseCtx && !reviewLater) return null;
+  if (!proposal.sourceFileData && !reparseCtx && !reviewLater) return null;
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b pb-2">
-      {hasDocument ? (
-        <Button size="sm" variant="outline" className="gap-1" onClick={() => setDocOnly(!docOnly)}>
-          {docOnly ? (
-            <>
-              <PanelRightOpen className="h-3.5 w-3.5" /> Show details
-            </>
-          ) : (
-            <>
-              <PanelRightClose className="h-3.5 w-3.5" /> View document only
-            </>
-          )}
+      {proposal.sourceFileData ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1"
+          onClick={() => openBillDocument(proposal.sourceFileName, proposal.sourceFileData)}
+        >
+          <ExternalLink className="h-3.5 w-3.5" /> Open document
         </Button>
       ) : (
         <span />
@@ -153,8 +144,6 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
   // expanded view is hidden while it's open (rather than left mounted underneath) so the
   // kind-specific `children` form isn't mounted twice at once with two independently-typed copies.
   const [fullscreen, setFullscreen] = useState(false);
-  const [docOnly, setDocOnly] = useState(false);
-  const hasDocument = !!proposal.sourceFileData || !!proposal.sourceEmailBody;
   const property = proposal.propertyId ? state.properties.find((p) => p.id === proposal.propertyId) : undefined;
   const meta = [
     proposal.providerName && { label: "Provider", value: proposal.providerName },
@@ -165,18 +154,14 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
 
   const twoPane = (fullSize: boolean) => (
     <div className={`flex ${fullSize ? "h-full" : ""} min-h-0 flex-1 flex-col gap-3`}>
-      <ReviewActionsBar hasDocument={hasDocument} docOnly={docOnly} setDocOnly={setDocOnly} />
+      <ReviewActionsBar proposal={proposal} />
       <div
-        className={
-          docOnly
-            ? "min-h-0 flex-1 overflow-y-auto"
-            : `grid min-h-0 flex-1 gap-4 overflow-hidden ${fullSize ? "lg:grid-cols-[minmax(0,1fr)_380px]" : "lg:grid-cols-[minmax(0,320px)_1fr]"}`
-        }
+        className={`grid min-h-0 flex-1 gap-4 overflow-hidden ${fullSize ? "lg:grid-cols-[minmax(0,1fr)_380px]" : "lg:grid-cols-[minmax(0,320px)_1fr]"}`}
       >
-        <div className={fullSize || docOnly ? "overflow-y-auto" : "lg:sticky lg:top-4 lg:self-start"}>
-          <DocumentPane proposal={proposal} expanded={fullSize || docOnly} onToggleExpand={() => setFullscreen((v) => !v)} />
+        <div className={fullSize ? "overflow-y-auto" : "lg:sticky lg:top-4 lg:self-start"}>
+          <DocumentPane proposal={proposal} expanded={fullSize} onToggleExpand={() => setFullscreen((v) => !v)} />
         </div>
-        {!docOnly && <div className="min-w-0 space-y-2 overflow-y-auto pr-1">{children}</div>}
+        <div className="min-w-0 space-y-2 overflow-y-auto pr-1">{children}</div>
       </div>
     </div>
   );
