@@ -1197,16 +1197,23 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
                 const isWaterCharge = categorizeAgentStatementLine(e, agent?.name) === "Water Charges";
                 return (
                   <div className="ml-6 space-y-0.5">
-                    <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <label
+                      className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
+                      title={
+                        realTenantId
+                          ? `Recharge ${fmtCurrency(e.amount)} to ${rechargeTenant?.name ?? "tenant"} — adds an invoice they'll owe`
+                          : "Assign a specific tenant above first to recharge this line"
+                      }
+                    >
                       <input
                         type="checkbox"
                         disabled={!realTenantId}
                         checked={rechargeIncluded[i] && !!realTenantId}
                         onChange={(ev) => setRechargeIncluded((v) => v.map((val, j) => (j === i ? ev.target.checked : val)))}
                       />
-                      {realTenantId
-                        ? `Recharge ${fmtCurrency(e.amount)} to ${rechargeTenant?.name ?? "tenant"} (adds an invoice they'll owe)`
-                        : "Recharge to tenant — assign a specific tenant above first"}
+                      <Receipt className="h-3 w-3 shrink-0" />
+                      Recharge
+                      {realTenantId && rechargeIncluded[i] && ` → ${rechargeTenant?.name ?? "tenant"}`}
                       {isWaterCharge && (
                         <button
                           type="button"
