@@ -110,7 +110,7 @@ import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
-import { DocumentReviewCard, ReviewLaterContext } from "@/components/DocumentReviewCard";
+import { DocumentReviewCard, ReviewLaterContext, ReparseContext } from "@/components/DocumentReviewCard";
 import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
@@ -310,10 +310,8 @@ export function ProposalReviewDialog({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Review document</DialogTitle>
-        </DialogHeader>
+      <DialogContent className="flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-hidden p-4">
+        <DialogTitle className="sr-only">Review document</DialogTitle>
         <ReviewLaterContext.Provider value={() => onOpenChange(false)}>
           <ProposalCard
             key={proposal.id}
@@ -324,11 +322,6 @@ export function ProposalReviewDialog({
             }}
           />
         </ReviewLaterContext.Provider>
-        <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Review later
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -928,6 +921,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   };
 
   return (
+    <ReparseContext.Provider value={proposal.sourceFileData ? { reparse, reparsing } : null}>
     <DocumentReviewCard proposal={proposal}>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">Rent statement</Badge>
@@ -1310,20 +1304,9 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           <Button size="sm" variant="outline" onClick={onDismiss}>
             Dismiss
           </Button>
-          {proposal.sourceFileData && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="gap-1 text-muted-foreground"
-              disabled={reparsing}
-              onClick={reparse}
-              title="Re-run the AI reader on the original file — useful if it missed or misread a line. Dismisses this version."
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> {reparsing ? "Re-parsing…" : "Re-parse document"}
-            </Button>
-          )}
         </div>
     </DocumentReviewCard>
+    </ReparseContext.Provider>
   );
 }
 
