@@ -7453,6 +7453,19 @@ function AgentStatementsSection({
     });
   }, [filtered, sort]);
 
+  // Money in/out as actually itemised on the statement (rent transactions vs. expense/deduction
+  // lines) — net falls back to that same difference when the statement's own extracted
+  // netToOwner is missing, rather than showing nothing.
+  const totalsOf = (p: AiIntakeProposal) => {
+    const payload = p.payload as RentLedgerProposalPayload;
+    const totalIn = payload.transactions?.reduce((s, t) => s + t.amount, 0) ?? 0;
+    const totalOut = payload.expenseLines?.reduce((s, e) => s + e.amount, 0) ?? 0;
+    const net = payload.netToOwner ?? totalIn - totalOut;
+    return { totalIn, totalOut, net };
+  };
+  const grandTotalIn = sorted.reduce((s, p) => s + totalsOf(p).totalIn, 0);
+  const grandTotalOut = sorted.reduce((s, p) => s + totalsOf(p).totalOut, 0);
+
   // Grouping still orders newest-period-group-first regardless of the row-level sort above —
   // `sorted`'s order is preserved *within* each group either way.
   const groups = useMemo(() => {
@@ -7467,6 +7480,7 @@ function AgentStatementsSection({
   const StatementRow = (p: AiIntakeProposal) => {
     const payload = p.payload as RentLedgerProposalPayload;
     const names = tenantNamesOf(payload);
+    const { totalIn, totalOut, net } = totalsOf(p);
     return (
       <tr key={p.id} className="border-b text-xs last:border-b-0">
         <td className="px-3 py-2 whitespace-nowrap font-medium">
@@ -7477,9 +7491,9 @@ function AgentStatementsSection({
           {p.sourceFileName || "—"}
         </td>
         <td className="px-3 py-2 text-muted-foreground">{names.length > 0 ? names.join(", ") : "—"}</td>
-        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
-          {payload.netToOwner !== undefined ? fmtCurrency(payload.netToOwner) : "—"}
-        </td>
+        <td className="px-3 py-2 whitespace-nowrap text-right text-emerald-700">{totalIn > 0 ? `+${fmtCurrency(totalIn)}` : "—"}</td>
+        <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{totalOut > 0 ? `−${fmtCurrency(totalOut)}` : "—"}</td>
+        <td className="px-3 py-2 whitespace-nowrap text-right font-medium">{fmtCurrency(net)}</td>
         <td className="px-3 py-2">
           <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="text-[10px]">
             {p.status}
@@ -7517,7 +7531,9 @@ function AgentStatementsSection({
         <SortableTh field="added" label="Added" sort={sort} onSort={onSort} />
         <SortableTh field="file" label="File name" sort={sort} onSort={onSort} />
         <th className="px-3 py-2 text-left font-medium">Tenant(s)</th>
-        <th className="px-3 py-2 text-left font-medium">Net</th>
+        <th className="px-3 py-2 text-right font-medium">In</th>
+        <th className="px-3 py-2 text-right font-medium">Out</th>
+        <th className="px-3 py-2 text-right font-medium">Net</th>
         <th className="px-3 py-2 text-left font-medium">Status</th>
         <th className="px-3 py-2" />
       </tr>
@@ -7591,6 +7607,9 @@ function AgentStatementsSection({
                 </SelectContent>
               </Select>
             )}
+            <span className="text-xs text-muted-foreground">
+              In {fmtCurrency(grandTotalIn)} · Out {fmtCurrency(grandTotalOut)} · Net {fmtCurrency(grandTotalIn - grandTotalOut)}
+            </span>
           </div>
 
           {sorted.length === 0 ? (
@@ -7602,14 +7621,24 @@ function AgentStatementsSection({
                 <tbody>
                   {groupBy === "none" || !groups
                     ? sorted.map((p) => StatementRow(p))
-                    : groups.flatMap(([key, rows]) => [
-                        <tr key={`${key}-hdr`} className="border-b bg-muted/40">
-                          <td colSpan={7} className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                            {key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
-                          </td>
-                        </tr>,
-                        ...rows.map((p) => StatementRow(p)),
-                      ])}
+                    : groups.flatMap(([key, rows]) => {
+                        const label = key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`;
+                        const groupIn = rows.reduce((s, p) => s + totalsOf(p).totalIn, 0);
+                        const groupOut = rows.reduce((s, p) => s + totalsOf(p).totalOut, 0);
+                        return [
+                          <tr key={`${key}-hdr`} className="border-b bg-muted/40">
+                            <td colSpan={9} className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+                              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+                                <span className="uppercase tracking-wide">{label}</span>
+                                <span className="shrink-0 normal-case tracking-normal">
+                                  In {fmtCurrency(groupIn)} · Out {fmtCurrency(groupOut)} · Net {fmtCurrency(groupIn - groupOut)}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>,
+                          ...rows.map((p) => StatementRow(p)),
+                        ];
+                      })}
                 </tbody>
               </table>
             </div>
@@ -7648,8 +7677,9 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
   const { state } = useStore();
   const [query, setQuery] = useState("");
   const [fy, setFy] = useState("all");
-  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy" | "statement">("none");
   const [tenantId, setTenantId] = useState("__all__");
+  const [statementFilter, setStatementFilter] = useState("__all__");
   // Newest first by default, matching every other list in this app.
   const [sort, setSort] = useState<SortState<OwnerLedgerSortField>>({ field: "date", dir: "desc" });
   const fys = buildFyOptions();
@@ -7697,10 +7727,19 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
     return chronological;
   }, [state.ledger, state.expenses, propertyId, tenantNameById]);
 
+  // Distinct source statements this property's ledger rows were posted from — lets the landlord
+  // isolate (or group by) exactly one uploaded statement's worth of rows, the same "statement
+  // level" grouping the agent statements list itself is organised by.
+  const statementOptions = useMemo(() => {
+    const names = new Set(rows.map((r) => r.sourceFileName).filter((n): n is string => !!n));
+    return [...names].sort();
+  }, [rows]);
+
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const filtered = rows.filter((r) => {
     if (fy !== "all" && !(r.date >= start && r.date <= end)) return false;
     if (tenantId !== "__all__" && r.tenantName !== tenantOptions?.find((t) => t.id === tenantId)?.name) return false;
+    if (statementFilter !== "__all__" && (r.sourceFileName ?? "") !== statementFilter) return false;
     if (query && !`${r.description} ${r.category ?? ""} ${r.tenantName ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -7721,8 +7760,20 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
 
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
-    const map = bucketBy(display, (r) => (groupBy === "month" ? r.date.slice(0, 7) : ausFinancialYear(r.date)));
-    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+    const keyOf = (r: OwnerLedgerRow) =>
+      groupBy === "month" ? r.date.slice(0, 7) : groupBy === "fy" ? ausFinancialYear(r.date) : r.sourceFileName || "Unknown statement";
+    const map = bucketBy(display, keyOf);
+    const entries = [...map.entries()];
+    // Month/FY keys sort correctly as plain strings (YYYY-MM, YYYY); a statement's key is its
+    // filename, which doesn't — order those groups by their most recent row's date instead, so
+    // the newest statement still lands on top like every other grouping level here.
+    if (groupBy === "statement") {
+      const latestDateOf = (rs: OwnerLedgerRow[]) => rs.reduce((max, r) => (r.date > max ? r.date : max), "");
+      entries.sort((a, b) => latestDateOf(b[1]).localeCompare(latestDateOf(a[1])));
+    } else {
+      entries.sort((a, b) => b[0].localeCompare(a[0]));
+    }
+    return entries;
   }, [display, groupBy]);
 
   const totalIn = filtered.reduce((s, r) => s + r.moneyIn, 0);
@@ -7839,6 +7890,7 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
                 <SelectItem value="none">No grouping</SelectItem>
                 <SelectItem value="month">By month</SelectItem>
                 <SelectItem value="fy">By financial year</SelectItem>
+                <SelectItem value="statement">By statement</SelectItem>
               </SelectContent>
             </Select>
             {tenantOptions && tenantOptions.length > 1 && (
@@ -7851,6 +7903,21 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
                   {tenantOptions.map((t) => (
                     <SelectItem key={t.id} value={t.id}>
                       {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {statementOptions.length > 1 && (
+              <Select value={statementFilter} onValueChange={setStatementFilter}>
+                <SelectTrigger className="h-7 w-[180px] text-xs">
+                  <SelectValue placeholder="All statements" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All statements</SelectItem>
+                  {statementOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -7870,14 +7937,27 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
                 <tbody>
                   {groupBy === "none" || !groups
                     ? display.map((r) => Row(r))
-                    : groups.flatMap(([key, groupRows]) => [
-                        <tr key={`${key}-hdr`} className="border-b bg-muted/40">
-                          <td colSpan={8} className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                            {groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`}
-                          </td>
-                        </tr>,
-                        ...groupRows.map((r) => Row(r)),
-                      ])}
+                    : groups.flatMap(([key, groupRows]) => {
+                        const label =
+                          groupBy === "month" ? feeVerificationMonthLabel(key) : groupBy === "fy" ? `FY ${key}` : key;
+                        const groupIn = groupRows.reduce((s, r) => s + r.moneyIn, 0);
+                        const groupOut = groupRows.reduce((s, r) => s + r.moneyOut, 0);
+                        return [
+                          <tr key={`${key}-hdr`} className="border-b bg-muted/40">
+                            <td colSpan={8} className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+                              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+                                <span className="truncate uppercase tracking-wide" title={label}>
+                                  {label}
+                                </span>
+                                <span className="shrink-0 normal-case tracking-normal">
+                                  In {fmtCurrency(groupIn)} · Out {fmtCurrency(groupOut)} · Net {fmtCurrency(groupIn - groupOut)}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>,
+                          ...groupRows.map((r) => Row(r)),
+                        ];
+                      })}
                 </tbody>
               </table>
             </div>
