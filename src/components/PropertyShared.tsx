@@ -7703,6 +7703,16 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
   const [statementFilter, setStatementFilter] = useState("__all__");
   // Newest first by default, matching every other list in this app.
   const [sort, setSort] = useState<SortState<OwnerLedgerSortField>>({ field: "date", dir: "desc" });
+  // Tracks EXPANDED groups (not collapsed ones) so a group starts collapsed by default without
+  // needing to know every group key up front — an empty set here means everything is collapsed.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((s) => {
+      const next = new Set(s);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const fys = buildFyOptions();
 
   const tenantsAtProperty = state.tenants.filter((t) => t.propertyId === propertyId);
@@ -7963,21 +7973,29 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
                           groupBy === "month" ? feeVerificationMonthLabel(key) : groupBy === "fy" ? `FY ${key}` : key;
                         const groupIn = groupRows.reduce((s, r) => s + r.moneyIn, 0);
                         const groupOut = groupRows.reduce((s, r) => s + r.moneyOut, 0);
-                        return [
-                          <tr key={`${key}-hdr`} className="border-b bg-muted/40">
+                        const groupKey = `${groupBy}:${key}`;
+                        const isExpanded = expandedGroups.has(groupKey);
+                        const header = (
+                          <tr
+                            key={`${key}-hdr`}
+                            className="cursor-pointer select-none border-b bg-muted/40 hover:bg-muted/60"
+                            onClick={() => toggleGroup(groupKey)}
+                          >
                             <td colSpan={8} className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
                               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
-                                <span className="truncate uppercase tracking-wide" title={label}>
-                                  {label}
+                                <span className="flex min-w-0 items-center gap-1 truncate uppercase tracking-wide" title={label}>
+                                  {isExpanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+                                  <span className="truncate">{label}</span>
+                                  <span className="shrink-0 normal-case text-muted-foreground/70">({groupRows.length})</span>
                                 </span>
                                 <span className="shrink-0 normal-case tracking-normal">
                                   In {fmtCurrency(groupIn)} · Out {fmtCurrency(groupOut)} · Net {fmtCurrency(groupIn - groupOut)}
                                 </span>
                               </div>
                             </td>
-                          </tr>,
-                          ...groupRows.map((r) => Row(r)),
-                        ];
+                          </tr>
+                        );
+                        return isExpanded ? [header, ...groupRows.map((r) => Row(r))] : [header];
                       })}
                 </tbody>
               </table>
