@@ -283,19 +283,26 @@ function ExpenseProposalRow({ proposal, onDismiss }: { proposal: AiIntakeProposa
 export function ProposalReviewDialog({
   proposalId,
   onOpenChange,
+  allowAnyStatus = false,
 }: {
   proposalId: string | null;
   onOpenChange: (open: boolean) => void;
+  /** Skip the auto-close-when-not-pending guard below — for callers (e.g. the Tenancy tab's
+   * Agent statements list) that deliberately reopen an already-applied/dismissed proposal, most
+   * often to recover a line that was left unchecked at review time. The default (unset) keeps the
+   * original after-upload-popup behavior: close itself the instant the proposal it's showing
+   * leaves "pending", so it never lingers open on a stale/handled proposal. */
+  allowAnyStatus?: boolean;
 }) {
   const { state, dismissProposal } = useStore();
   const proposal = proposalId ? state.aiProposals.find((p) => p.id === proposalId) : undefined;
   const isPending = proposal?.status === "pending";
 
   useEffect(() => {
-    if (proposalId && !isPending) onOpenChange(false);
-  }, [proposalId, isPending, onOpenChange]);
+    if (proposalId && !allowAnyStatus && !isPending) onOpenChange(false);
+  }, [proposalId, isPending, allowAnyStatus, onOpenChange]);
 
-  if (!proposal || !isPending) return null;
+  if (!proposal || (!allowAnyStatus && !isPending)) return null;
 
   // Bills and one-off transactions get the real Add Bill / Add Transaction forms, pre-filled
   // from what was already extracted — the same forms used for manual entry, not a lighter-weight
@@ -7367,6 +7374,7 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
         onOpenChange={(v) => {
           if (!v) setReviewProposalId(null);
         }}
+        allowAnyStatus
       />
     </div>
   );
@@ -7523,11 +7531,9 @@ function AgentStatementsSection({
                 <Eye className="h-3 w-3" />
               </Button>
             )}
-            {p.status === "pending" && (
-              <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => onReview(p.id)}>
-                Review
-              </Button>
-            )}
+            <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => onReview(p.id)}>
+              {p.status === "pending" ? "Review" : "Open"}
+            </Button>
           </div>
         </td>
       </tr>
