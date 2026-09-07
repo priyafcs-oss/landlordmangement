@@ -35,6 +35,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   UserCog,
   X,
   Video as VideoIcon,
@@ -7394,6 +7395,16 @@ function AgentStatementsSection({
   const [tenantId, setTenantId] = useState("__all__");
   // Newest-added on top by default — the point of a review queue is seeing what just landed.
   const [sort, setSort] = useState<SortState<StatementSortField>>({ field: "added", dir: "desc" });
+  // Namespaced by groupBy so switching between month/FY grouping never confuses a stale key from
+  // the other mode. Every group starts expanded — collapsing is something the landlord opts into.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) =>
+    setCollapsedGroups((s) => {
+      const next = new Set(s);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const fys = buildFyOptions();
 
@@ -7625,19 +7636,29 @@ function AgentStatementsSection({
                         const label = key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`;
                         const groupIn = rows.reduce((s, p) => s + totalsOf(p).totalIn, 0);
                         const groupOut = rows.reduce((s, p) => s + totalsOf(p).totalOut, 0);
-                        return [
-                          <tr key={`${key}-hdr`} className="border-b bg-muted/40">
+                        const groupKey = `${groupBy}:${key}`;
+                        const isCollapsed = collapsedGroups.has(groupKey);
+                        const header = (
+                          <tr
+                            key={`${key}-hdr`}
+                            className="cursor-pointer select-none border-b bg-muted/40 hover:bg-muted/60"
+                            onClick={() => toggleGroup(groupKey)}
+                          >
                             <td colSpan={9} className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
                               <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
-                                <span className="uppercase tracking-wide">{label}</span>
+                                <span className="flex items-center gap-1 uppercase tracking-wide">
+                                  {isCollapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+                                  {label}
+                                  <span className="normal-case text-muted-foreground/70">({rows.length})</span>
+                                </span>
                                 <span className="shrink-0 normal-case tracking-normal">
                                   In {fmtCurrency(groupIn)} · Out {fmtCurrency(groupOut)} · Net {fmtCurrency(groupIn - groupOut)}
                                 </span>
                               </div>
                             </td>
-                          </tr>,
-                          ...rows.map((p) => StatementRow(p)),
-                        ];
+                          </tr>
+                        );
+                        return isCollapsed ? [header] : [header, ...rows.map((p) => StatementRow(p))];
                       })}
                 </tbody>
               </table>
