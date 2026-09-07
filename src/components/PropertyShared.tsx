@@ -695,25 +695,26 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const [txTenantIds, setTxTenantIds] = useState<string[]>(() =>
     payload.transactions.map((tx) => defaultTenantFor(tx.tenantName)),
   );
-  // Reopening a statement that's already applied/dismissed before (see "Open" on a non-pending
-  // row in Agent statements) is specifically for recovering lines that got silently dropped last
-  // time — so instead of the portfolio-wide fuzzy duplicate check below (which is what caused a
-  // false positive to drop real lines in the first place, see OwnershipStatement34_5032026), each
-  // row is checked against exactly what THIS statement (same sourceFileName) has already posted,
-  // and ticked by default only when it's genuinely still missing.
-  const alreadyReviewedBefore = proposal.status !== "pending";
-  const postedTxForThisStatement =
-    alreadyReviewedBefore && proposal.sourceFileName
-      ? state.ledger
-          .filter((l) => l.source === "agent_statement" && l.sourceFileName === proposal.sourceFileName)
-          .map((l) => ({ amount: l.credit, date: l.date }))
-      : [];
+  // Keyed off the sourceFileName's own posting history, NOT this proposal's own status — a
+  // "Re-parse document" creates a brand-new PENDING proposal for the very same file, and that
+  // proposal needs this precise check just as much as a reopened applied/dismissed one does (a
+  // pending status alone doesn't mean nothing has ever been posted under this filename before).
+  // Each row is checked against exactly what THIS statement has already posted and defaults
+  // unchecked only when a real match is found, instead of the portfolio-wide fuzzy heuristic
+  // below (whose false positive dropped real lines in the first place — see
+  // OwnershipStatement34_5032026 — and whose blind spot, on a freshly reparsed pending proposal,
+  // let genuine duplicates back in a second time).
+  const postedTxForThisStatement = proposal.sourceFileName
+    ? state.ledger
+        .filter((l) => l.source === "agent_statement" && l.sourceFileName === proposal.sourceFileName)
+        .map((l) => ({ amount: l.credit, date: l.date }))
+    : [];
   const alreadyPostedTx = markAlreadyPosted(payload.transactions, postedTxForThisStatement);
   // Rows that already look like a duplicate of a ledger entry that exists at mount time start
   // unchecked, so the landlord has to actively opt back in rather than silently re-posting them.
   const [included, setIncluded] = useState<boolean[]>(() =>
     payload.transactions.map((tx, i) => {
-      if (alreadyReviewedBefore) return !alreadyPostedTx[i];
+      if (alreadyPostedTx[i]) return false;
       const tId = defaultTenantFor(tx.tenantName);
       return tId ? !findDuplicateLedgerEntry(state.ledger, { tenantId: tId, amount: tx.amount, date: tx.date }) : true;
     }),
@@ -723,12 +724,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   );
   // Same "already posted from THIS statement" precision as postedTxForThisStatement above,
   // applied to the deduction lines.
-  const postedExpForThisStatement =
-    alreadyReviewedBefore && proposal.sourceFileName
-      ? state.expenses
-          .filter((e) => e.source === "agent_statement" && e.sourceFileName === proposal.sourceFileName && e.propertyId === propertyId)
-          .map((e) => ({ amount: e.cost, date: e.date }))
-      : [];
+  const postedExpForThisStatement = proposal.sourceFileName
+    ? state.expenses
+        .filter((e) => e.source === "agent_statement" && e.sourceFileName === proposal.sourceFileName && e.propertyId === propertyId)
+        .map((e) => ({ amount: e.cost, date: e.date }))
+    : [];
   const alreadyPostedExp = markAlreadyPosted(expenseLines, postedExpForThisStatement);
   // Rows that already look like a duplicate of a Bill/Expense that exists at mount time start
   // unchecked too — same guardrail as the rent-income rows above (findDuplicateLedgerEntry),
@@ -737,7 +737,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // so re-approving the same statement (or an overlapping one) silently double-booked agent fees.
   const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() =>
     expenseLines.map((e, i) => {
-      if (alreadyReviewedBefore) return !alreadyPostedExp[i];
+      if (alreadyPostedExp[i]) return false;
       return !findDuplicateRecord(state.bills, state.expenses, {
         propertyId: propertyId || undefined,
         vendorOrDescription: e.vendor,
@@ -993,9 +993,9 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           <span className="text-xs text-muted-foreground">
             {payload.periodStart || "—"} → {payload.periodEnd || "—"}
           </span>
-          {alreadyReviewedBefore && (
+          {(postedTxForThisStatement.length > 0 || postedExpForThisStatement.length > 0) && (
             <Badge variant="outline" className="text-[10px] text-muted-foreground">
-              Reopened ({proposal.status}) — only lines missing from the ledger are ticked below
+              This statement already has entries posted — only lines still missing from the ledger are ticked below
             </Badge>
           )}
         </div>
