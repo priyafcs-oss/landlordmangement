@@ -7518,7 +7518,7 @@ function AgentStatementsSection({
   );
   const [query, setQuery] = useState("");
   const [fy, setFy] = useState("all");
-  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
+  const [groupBy, setGroupBy] = useState<"none" | "month" | "fy" | "statement">("none");
   const [fileFormat, setFileFormat] = useState<"__all__" | FileFormat>("__all__");
   const [tenantId, setTenantId] = useState("__all__");
   // Newest-added on top by default — the point of a review queue is seeing what just landed.
@@ -7536,8 +7536,14 @@ function AgentStatementsSection({
 
   const fys = buildFyOptions();
 
-  const periodOf = (p: AiIntakeProposal) =>
-    (p.payload as RentLedgerProposalPayload).periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
+  // Prefer periodEnd over periodStart — a statement is reported (and grouped) by the period it
+  // closes out, not the day it opened. A statement spanning, say, 20 June to 15 July belongs
+  // under July (and FY2026, not FY2025) even though it technically starts in June; grouping by
+  // periodStart put it in the wrong month AND the wrong financial year.
+  const periodOf = (p: AiIntakeProposal) => {
+    const payload = p.payload as RentLedgerProposalPayload;
+    return payload.periodEnd ?? payload.periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
+  };
 
   // On a changeover statement, the statement's OWN overall tenantName is often left blank —
   // per-line tenantName is set instead, one per transaction, since a changeover statement spans
@@ -7602,10 +7608,20 @@ function AgentStatementsSection({
   const groups = useMemo(() => {
     if (groupBy === "none") return null;
     const map = bucketBy(sorted, (p) => {
+      if (groupBy === "statement") return p.sourceFileName || "Unknown statement";
       const date = periodOf(p);
       return !date ? "unknown" : groupBy === "month" ? date.slice(0, 7) : ausFinancialYear(date);
     });
-    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+    const entries = [...map.entries()];
+    // Month/FY keys sort correctly as plain strings; a statement's key is its filename, which
+    // doesn't — order those groups by their most recent statement period instead.
+    if (groupBy === "statement") {
+      const latestPeriodOf = (ps: AiIntakeProposal[]) => ps.reduce((max, p) => (periodOf(p) > max ? periodOf(p) : max), "");
+      entries.sort((a, b) => latestPeriodOf(b[1]).localeCompare(latestPeriodOf(a[1])));
+    } else {
+      entries.sort((a, b) => b[0].localeCompare(a[0]));
+    }
+    return entries;
   }, [sorted, groupBy]);
 
   const StatementRow = (p: AiIntakeProposal) => {
@@ -7729,6 +7745,7 @@ function AgentStatementsSection({
                 <SelectItem value="none">No grouping</SelectItem>
                 <SelectItem value="month">By month</SelectItem>
                 <SelectItem value="fy">By financial year</SelectItem>
+                <SelectItem value="statement">By statement</SelectItem>
               </SelectContent>
             </Select>
             <Select value={fileFormat} onValueChange={(v) => setFileFormat(v as typeof fileFormat)}>
@@ -7774,7 +7791,14 @@ function AgentStatementsSection({
                   {groupBy === "none" || !groups
                     ? sorted.map((p) => StatementRow(p))
                     : groups.flatMap(([key, rows]) => {
-                        const label = key === "unknown" ? "Unknown period" : groupBy === "month" ? feeVerificationMonthLabel(key) : `FY ${key}`;
+                        const label =
+                          key === "unknown"
+                            ? "Unknown period"
+                            : groupBy === "month"
+                              ? feeVerificationMonthLabel(key)
+                              : groupBy === "fy"
+                                ? `FY ${key}`
+                                : key;
                         const groupIn = rows.reduce((s, p) => s + totalsOf(p).totalIn, 0);
                         const groupOut = rows.reduce((s, p) => s + totalsOf(p).totalOut, 0);
                         const groupKey = `${groupBy}:${key}`;
@@ -7802,6 +7826,17 @@ function AgentStatementsSection({
                         return isCollapsed ? [header] : [header, ...rows.map((p) => StatementRow(p))];
                       })}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t bg-muted/30 text-xs font-medium">
+                    <td colSpan={4} className="px-3 py-2 text-right">
+                      Total ({sorted.length})
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right text-emerald-700">{fmtCurrency(grandTotalIn)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{fmtCurrency(grandTotalOut)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right">{fmtCurrency(grandTotalIn - grandTotalOut)}</td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
@@ -7980,6 +8015,13 @@ function OwnerLedgerSection({
 
   const totalIn = filtered.reduce((s, r) => s + r.moneyIn, 0);
   const totalOut = filtered.reduce((s, r) => s + r.moneyOut, 0);
+  // Opening/closing balance for the currently filtered view — always derived chronologically
+  // (never by whatever column the table happens to be sorted by), so it reads like a bank
+  // statement's own opening/closing lines: the true balance carried into and out of this slice.
+  const chronologicalFiltered = [...filtered].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const openingBalance =
+    chronologicalFiltered.length > 0 ? chronologicalFiltered[0].balance - (chronologicalFiltered[0].moneyIn - chronologicalFiltered[0].moneyOut) : 0;
+  const closingBalance = chronologicalFiltered.length > 0 ? chronologicalFiltered[chronologicalFiltered.length - 1].balance : openingBalance;
 
   const exportCsv = () => {
     downloadCsv(
@@ -8208,6 +8250,19 @@ function OwnerLedgerSection({
                         return isExpanded ? [header, ...groupRows.map((r) => Row(r))] : [header];
                       })}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t bg-muted/30 text-xs font-medium">
+                    <td colSpan={4} className="px-3 py-2 text-right">
+                      Total ({filtered.length})
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right text-emerald-700">{fmtCurrency(totalIn)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{fmtCurrency(totalOut)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right" title="Closing balance">
+                      {fmtCurrency(closingBalance)}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">Opening balance: {fmtCurrency(openingBalance)}</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
