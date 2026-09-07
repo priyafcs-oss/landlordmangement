@@ -100,6 +100,7 @@ import type {
   AgencyAgreementProposalPayload,
   Loan,
   Expense,
+  LedgerEntry,
   PropertyUnit,
   Entity,
   ExpenseCategory,
@@ -694,10 +695,25 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const [txTenantIds, setTxTenantIds] = useState<string[]>(() =>
     payload.transactions.map((tx) => defaultTenantFor(tx.tenantName)),
   );
+  // Reopening a statement that's already applied/dismissed before (see "Open" on a non-pending
+  // row in Agent statements) is specifically for recovering lines that got silently dropped last
+  // time — so instead of the portfolio-wide fuzzy duplicate check below (which is what caused a
+  // false positive to drop real lines in the first place, see OwnershipStatement34_5032026), each
+  // row is checked against exactly what THIS statement (same sourceFileName) has already posted,
+  // and ticked by default only when it's genuinely still missing.
+  const alreadyReviewedBefore = proposal.status !== "pending";
+  const postedTxForThisStatement =
+    alreadyReviewedBefore && proposal.sourceFileName
+      ? state.ledger
+          .filter((l) => l.source === "agent_statement" && l.sourceFileName === proposal.sourceFileName)
+          .map((l) => ({ amount: l.credit, date: l.date }))
+      : [];
+  const alreadyPostedTx = markAlreadyPosted(payload.transactions, postedTxForThisStatement);
   // Rows that already look like a duplicate of a ledger entry that exists at mount time start
   // unchecked, so the landlord has to actively opt back in rather than silently re-posting them.
   const [included, setIncluded] = useState<boolean[]>(() =>
-    payload.transactions.map((tx) => {
+    payload.transactions.map((tx, i) => {
+      if (alreadyReviewedBefore) return !alreadyPostedTx[i];
       const tId = defaultTenantFor(tx.tenantName);
       return tId ? !findDuplicateLedgerEntry(state.ledger, { tenantId: tId, amount: tx.amount, date: tx.date }) : true;
     }),
@@ -705,21 +721,30 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   const ledgerDuplicates = txRows.map((tx, i) =>
     txTenantIds[i] ? findDuplicateLedgerEntry(state.ledger, { tenantId: txTenantIds[i], amount: tx.amount, date: tx.date }) : null,
   );
+  // Same "already posted from THIS statement" precision as postedTxForThisStatement above,
+  // applied to the deduction lines.
+  const postedExpForThisStatement =
+    alreadyReviewedBefore && proposal.sourceFileName
+      ? state.expenses
+          .filter((e) => e.source === "agent_statement" && e.sourceFileName === proposal.sourceFileName && e.propertyId === propertyId)
+          .map((e) => ({ amount: e.cost, date: e.date }))
+      : [];
+  const alreadyPostedExp = markAlreadyPosted(expenseLines, postedExpForThisStatement);
   // Rows that already look like a duplicate of a Bill/Expense that exists at mount time start
   // unchecked too — same guardrail as the rent-income rows above (findDuplicateLedgerEntry),
   // just against Bills/Expenses via findDuplicateRecord since a deduction posts as an Expense,
   // not a ledger entry. Previously this array always defaulted to true with no check at all,
   // so re-approving the same statement (or an overlapping one) silently double-booked agent fees.
   const [expensesIncluded, setExpensesIncluded] = useState<boolean[]>(() =>
-    expenseLines.map(
-      (e) =>
-        !findDuplicateRecord(state.bills, state.expenses, {
-          propertyId: propertyId || undefined,
-          vendorOrDescription: e.vendor,
-          amount: e.amount,
-          date: e.date,
-        }),
-    ),
+    expenseLines.map((e, i) => {
+      if (alreadyReviewedBefore) return !alreadyPostedExp[i];
+      return !findDuplicateRecord(state.bills, state.expenses, {
+        propertyId: propertyId || undefined,
+        vendorOrDescription: e.vendor,
+        amount: e.amount,
+        date: e.date,
+      });
+    }),
   );
   const expenseDuplicates = expRows.map((e) =>
     findDuplicateRecord(state.bills, state.expenses, {
@@ -968,6 +993,11 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           <span className="text-xs text-muted-foreground">
             {payload.periodStart || "—"} → {payload.periodEnd || "—"}
           </span>
+          {alreadyReviewedBefore && (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              Reopened ({proposal.status}) — only lines missing from the ledger are ticked below
+            </Badge>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -7358,11 +7388,11 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
       )}
 
       <div className="border-t pt-4">
-        <AgentStatementsSection statements={statements} onReview={setReviewProposalId} tenantOptions={tenantsAtPropertyOptions} />
+        <AgentStatementsSection propertyId={propertyId} statements={statements} onReview={setReviewProposalId} tenantOptions={tenantsAtPropertyOptions} />
       </div>
 
       <div className="border-t pt-4">
-        <OwnerLedgerSection propertyId={propertyId} tenantOptions={tenantsAtPropertyOptions} />
+        <OwnerLedgerSection propertyId={propertyId} tenantOptions={tenantsAtPropertyOptions} statements={statements} />
       </div>
 
       <div className="border-t pt-4">
@@ -7380,6 +7410,89 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
   );
 }
 
+/** Money in/out as itemised on a statement itself (rent transactions vs. expense/deduction
+ * lines) — the "should be" figures a statement's own extracted numbers claim, independent of
+ * whatever actually made it into the ledger once reviewed. Net falls back to that same
+ * difference when the statement's own extracted netToOwner is missing. */
+function statementTotalsOf(p: AiIntakeProposal): { totalIn: number; totalOut: number; net: number } {
+  const payload = p.payload as RentLedgerProposalPayload;
+  const totalIn = payload.transactions?.reduce((s, t) => s + t.amount, 0) ?? 0;
+  const totalOut = payload.expenseLines?.reduce((s, e) => s + e.amount, 0) ?? 0;
+  const net = payload.netToOwner ?? totalIn - totalOut;
+  return { totalIn, totalOut, net };
+}
+
+/** Money actually posted to this property FROM each agent statement, keyed by that statement's
+ * sourceFileName — ledger entries whose tenant belongs to this property plus expenses whose
+ * propertyId matches, both source: "agent_statement" only (the same scope OwnerLedgerSection
+ * rebuilds its own rows from). Compared against statementTotalsOf, this is what catches a
+ * statement whose review silently left something unticked: the two totals stop matching. */
+function buildPostedTotalsByStatement(
+  ledger: LedgerEntry[],
+  expenses: Expense[],
+  tenants: Tenant[],
+  propertyId: string,
+): Map<string, { in: number; out: number }> {
+  const tenantIdsAtProperty = new Set(tenants.filter((t) => t.propertyId === propertyId).map((t) => t.id));
+  const map = new Map<string, { in: number; out: number }>();
+  const bump = (name: string | null | undefined, moneyIn: number, moneyOut: number) => {
+    if (!name) return;
+    const cur = map.get(name) ?? { in: 0, out: 0 };
+    cur.in += moneyIn;
+    cur.out += moneyOut;
+    map.set(name, cur);
+  };
+  for (const l of ledger) {
+    if (l.source !== "agent_statement" || !tenantIdsAtProperty.has(l.tenantId)) continue;
+    bump(l.sourceFileName, l.credit, l.debit);
+  }
+  for (const e of expenses) {
+    if (e.source !== "agent_statement" || e.propertyId !== propertyId) continue;
+    bump(e.sourceFileName, 0, e.cost);
+  }
+  return map;
+}
+
+/** A statement is only worth flagging once it's actually been marked applied — a still-pending
+ * one legitimately has nothing posted yet, and a dismissed one was deliberately declined, so
+ * neither is a real discrepancy. Returns null when there's nothing to flag (not applied, no
+ * source file, or the posted totals already match within a cent). */
+function statementDiscrepancy(
+  statement: AiIntakeProposal,
+  posted: { in: number; out: number } | undefined,
+): { statedIn: number; statedOut: number; postedIn: number; postedOut: number } | null {
+  if (statement.status !== "applied" || !statement.sourceFileName) return null;
+  const { totalIn, totalOut } = statementTotalsOf(statement);
+  const postedIn = posted?.in ?? 0;
+  const postedOut = posted?.out ?? 0;
+  if (Math.abs(totalIn - postedIn) <= 0.01 && Math.abs(totalOut - postedOut) <= 0.01) return null;
+  return { statedIn: totalIn, statedOut: totalOut, postedIn, postedOut };
+}
+
+/** Consumes one already-posted match (same date, same amount) for each of a statement's own
+ * lines in order, so a statement with more than one identical-looking line (same date, same
+ * amount — the exact shape of the OwnershipStatement34_5032026 incident: two identical
+ * management fees where only one had actually made it into the ledger) only marks as many of
+ * them "already posted" as there really are matching posted records, leaving the rest correctly
+ * flagged as still missing. Returns a boolean array parallel to `lines`: true = already posted. */
+function markAlreadyPosted<T extends { amount: number; date: string }>(
+  lines: T[],
+  posted: { amount: number; date: string }[],
+): boolean[] {
+  const remaining = new Map<string, number>();
+  for (const p of posted) {
+    const key = `${p.date}|${p.amount.toFixed(2)}`;
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  return lines.map((line) => {
+    const key = `${line.date}|${line.amount.toFixed(2)}`;
+    const n = remaining.get(key) ?? 0;
+    if (n <= 0) return false;
+    remaining.set(key, n - 1);
+    return true;
+  });
+}
+
 /**
  * Every rent statement ("agent statement") uploaded/emailed for this property, with the same
  * search/FY/group-by filters as the portfolio-wide Documents page — kept here too since a
@@ -7388,14 +7501,21 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
 type StatementSortField = "period" | "added" | "file";
 
 function AgentStatementsSection({
+  propertyId,
   statements,
   onReview,
   tenantOptions,
 }: {
+  propertyId: string;
   statements: AiIntakeProposal[];
   onReview: (proposalId: string) => void;
   tenantOptions?: { id: string; name: string }[];
 }) {
+  const { state } = useStore();
+  const posted = useMemo(
+    () => buildPostedTotalsByStatement(state.ledger, state.expenses, state.tenants, propertyId),
+    [state.ledger, state.expenses, state.tenants, propertyId],
+  );
   const [query, setQuery] = useState("");
   const [fy, setFy] = useState("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("none");
@@ -7472,18 +7592,10 @@ function AgentStatementsSection({
     });
   }, [filtered, sort]);
 
-  // Money in/out as actually itemised on the statement (rent transactions vs. expense/deduction
-  // lines) — net falls back to that same difference when the statement's own extracted
-  // netToOwner is missing, rather than showing nothing.
-  const totalsOf = (p: AiIntakeProposal) => {
-    const payload = p.payload as RentLedgerProposalPayload;
-    const totalIn = payload.transactions?.reduce((s, t) => s + t.amount, 0) ?? 0;
-    const totalOut = payload.expenseLines?.reduce((s, e) => s + e.amount, 0) ?? 0;
-    const net = payload.netToOwner ?? totalIn - totalOut;
-    return { totalIn, totalOut, net };
-  };
+  const totalsOf = statementTotalsOf;
   const grandTotalIn = sorted.reduce((s, p) => s + totalsOf(p).totalIn, 0);
   const grandTotalOut = sorted.reduce((s, p) => s + totalsOf(p).totalOut, 0);
+  const discrepantCount = sorted.filter((p) => statementDiscrepancy(p, p.sourceFileName ? posted.get(p.sourceFileName) : undefined)).length;
 
   // Grouping still orders newest-period-group-first regardless of the row-level sort above —
   // `sorted`'s order is preserved *within* each group either way.
@@ -7500,8 +7612,9 @@ function AgentStatementsSection({
     const payload = p.payload as RentLedgerProposalPayload;
     const names = tenantNamesOf(payload);
     const { totalIn, totalOut, net } = totalsOf(p);
+    const discrepancy = statementDiscrepancy(p, p.sourceFileName ? posted.get(p.sourceFileName) : undefined);
     return (
-      <tr key={p.id} className="border-b text-xs last:border-b-0">
+      <tr key={p.id} className={`border-b text-xs last:border-b-0 ${discrepancy ? "bg-destructive/5" : ""}`}>
         <td className="px-3 py-2 whitespace-nowrap font-medium">
           {payload.periodStart || "—"} → {payload.periodEnd || "—"}
         </td>
@@ -7514,9 +7627,23 @@ function AgentStatementsSection({
         <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{totalOut > 0 ? `−${fmtCurrency(totalOut)}` : "—"}</td>
         <td className="px-3 py-2 whitespace-nowrap text-right font-medium">{fmtCurrency(net)}</td>
         <td className="px-3 py-2">
-          <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="text-[10px]">
-            {p.status}
-          </Badge>
+          <div className="flex items-center gap-1">
+            <Badge variant={p.status === "pending" ? "outline" : p.status === "dismissed" ? "secondary" : "default"} className="text-[10px]">
+              {p.status}
+            </Badge>
+            {discrepancy && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <TriangleAlert className="h-3.5 w-3.5 shrink-0 cursor-help text-destructive" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  Statement says In {fmtCurrency(discrepancy.statedIn)} · Out {fmtCurrency(discrepancy.statedOut)}, but only In{" "}
+                  {fmtCurrency(discrepancy.postedIn)} · Out {fmtCurrency(discrepancy.postedOut)} made it to the ledger — click Open to
+                  find and add what's missing.
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </td>
         <td className="px-3 py-2">
           <div className="flex items-center justify-end gap-1">
@@ -7560,6 +7687,14 @@ function AgentStatementsSection({
   return (
     <div>
       <div className="mb-2 text-sm font-medium">Agent statements</div>
+      {discrepantCount > 0 && (
+        <div className="mb-2 flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
+          <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+          {discrepantCount === 1
+            ? "1 statement's posted total doesn't match what it says — see the highlighted row below."
+            : `${discrepantCount} statements' posted totals don't match what they say — see the highlighted rows below.`}
+        </div>
+      )}
       {statements.length === 0 ? (
         <div className="text-xs text-muted-foreground">
           No rent statements uploaded for this property yet — forward or upload one and it'll show up here.
@@ -7700,7 +7835,15 @@ interface OwnerLedgerRow {
  */
 type OwnerLedgerSortField = "date" | "in" | "out" | "balance";
 
-function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string; tenantOptions?: { id: string; name: string }[] }) {
+function OwnerLedgerSection({
+  propertyId,
+  tenantOptions,
+  statements,
+}: {
+  propertyId: string;
+  tenantOptions?: { id: string; name: string }[];
+  statements: AiIntakeProposal[];
+}) {
   const { state } = useStore();
   const [query, setQuery] = useState("");
   const [fy, setFy] = useState("all");
@@ -7771,6 +7914,28 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
     const names = new Set(rows.map((r) => r.sourceFileName).filter((n): n is string => !!n));
     return [...names].sort();
   }, [rows]);
+
+  // What's actually posted here, per statement — built from these same rows (so it can never
+  // disagree with what's on screen), compared against each statement's own extracted totals to
+  // catch one whose review silently left something unticked (see statementDiscrepancy).
+  const postedByStatement = useMemo(() => {
+    const map = new Map<string, { in: number; out: number }>();
+    for (const r of rows) {
+      if (!r.sourceFileName) continue;
+      const cur = map.get(r.sourceFileName) ?? { in: 0, out: 0 };
+      cur.in += r.moneyIn;
+      cur.out += r.moneyOut;
+      map.set(r.sourceFileName, cur);
+    }
+    return map;
+  }, [rows]);
+  const discrepantStatements = useMemo(
+    () =>
+      statements
+        .map((s) => ({ statement: s, discrepancy: statementDiscrepancy(s, s.sourceFileName ? postedByStatement.get(s.sourceFileName) : undefined) }))
+        .filter((x): x is { statement: AiIntakeProposal; discrepancy: NonNullable<ReturnType<typeof statementDiscrepancy>> } => !!x.discrepancy),
+    [statements, postedByStatement],
+  );
 
   const { start, end } = fy === "all" ? { start: "", end: "" } : fyRange(fy);
   const filtered = rows.filter((r) => {
@@ -7893,6 +8058,29 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
           </Button>
         )}
       </div>
+      {discrepantStatements.length > 0 && (
+        <div className="mb-2 space-y-1 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
+          <div className="flex items-center gap-1.5 font-medium">
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+            {discrepantStatements.length === 1 ? "1 statement doesn't match what's posted here:" : `${discrepantStatements.length} statements don't match what's posted here:`}
+          </div>
+          {discrepantStatements.map(({ statement: s, discrepancy: d }) => (
+            <button
+              key={s.id}
+              type="button"
+              className="block w-full truncate text-left underline decoration-dotted underline-offset-2 hover:text-destructive/80"
+              title={s.sourceFileName ?? undefined}
+              onClick={() => {
+                setStatementFilter(s.sourceFileName ?? "__all__");
+                setGroupBy("statement");
+              }}
+            >
+              {s.sourceFileName} — says In {fmtCurrency(d.statedIn)} · Out {fmtCurrency(d.statedOut)}, only In {fmtCurrency(d.postedIn)} ·
+              Out {fmtCurrency(d.postedOut)} posted
+            </button>
+          ))}
+        </div>
+      )}
       {rows.length === 0 ? (
         <div className="text-xs text-muted-foreground">
           Nothing posted from an agent statement yet — apply a reviewed rent statement above and it'll show up here.
@@ -7981,10 +8169,12 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
                         const groupOut = groupRows.reduce((s, r) => s + r.moneyOut, 0);
                         const groupKey = `${groupBy}:${key}`;
                         const isExpanded = expandedGroups.has(groupKey);
+                        const matchedStatement = groupBy === "statement" ? statements.find((s) => s.sourceFileName === key) : undefined;
+                        const groupDiscrepancy = matchedStatement ? statementDiscrepancy(matchedStatement, postedByStatement.get(key)) : null;
                         const header = (
                           <tr
                             key={`${key}-hdr`}
-                            className="cursor-pointer select-none border-b bg-muted/40 hover:bg-muted/60"
+                            className={`cursor-pointer select-none border-b hover:bg-muted/60 ${groupDiscrepancy ? "bg-destructive/10" : "bg-muted/40"}`}
                             onClick={() => toggleGroup(groupKey)}
                           >
                             <td colSpan={8} className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
@@ -7993,6 +8183,20 @@ function OwnerLedgerSection({ propertyId, tenantOptions }: { propertyId: string;
                                   {isExpanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
                                   <span className="truncate">{label}</span>
                                   <span className="shrink-0 normal-case text-muted-foreground/70">({groupRows.length})</span>
+                                  {groupDiscrepancy && (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <TriangleAlert
+                                          className="h-3.5 w-3.5 shrink-0 cursor-help text-destructive"
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                      </TooltipTrigger>
+                                      <TooltipContent className="max-w-xs text-xs">
+                                        Statement says In {fmtCurrency(groupDiscrepancy.statedIn)} · Out {fmtCurrency(groupDiscrepancy.statedOut)}
+                                        , only In {fmtCurrency(groupDiscrepancy.postedIn)} · Out {fmtCurrency(groupDiscrepancy.postedOut)} posted.
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  )}
                                 </span>
                                 <span className="shrink-0 normal-case tracking-normal">
                                   In {fmtCurrency(groupIn)} · Out {fmtCurrency(groupOut)} · Net {fmtCurrency(groupIn - groupOut)}
