@@ -7952,8 +7952,15 @@ interface OwnerLedgerRow {
   moneyIn: number;
   moneyOut: number;
   balance: number;
+  /** The statement this line was posted from (the agent's own PDF) — always set, since every row
+   * here is agent-statement-sourced by definition. */
   sourceFileName?: string | null;
   sourceFileData?: string | null;
+  /** The expense's own separately-attached invoice, when it has one — distinct from the statement
+   * above (a repairs deduction posted from the statement can also carry its own tradesperson
+   * invoice). Undefined for ledger/income rows, which have no invoice of their own. */
+  invoiceFileName?: string | null;
+  invoiceFileData?: string | null;
 }
 
 /**
@@ -8030,6 +8037,8 @@ function OwnerLedgerSection({
         balance: 0,
         sourceFileName: e.sourceFileName,
         sourceFileData: e.sourceFileData,
+        invoiceFileName: e.invoiceFileName,
+        invoiceFileData: e.invoiceFileData,
       }));
     // Running balance is computed chronologically (oldest first) over the FULL unfiltered set —
     // it reflects this property's true cumulative position, same as a bank statement still shows
@@ -8127,8 +8136,8 @@ function OwnerLedgerSection({
   const exportCsv = () => {
     downloadCsv(
       `owner-ledger-${propertyId}.csv`,
-      ["Date", "Description", "Tenant", "Money in", "Money out", "Balance", "Statement"],
-      filtered.map((r) => [r.date, r.description, r.tenantName ?? "", r.moneyIn, -r.moneyOut, r.balance, r.sourceFileName ?? ""]),
+      ["Date", "Description", "Tenant", "Money in", "Money out", "Balance", "Invoice", "Statement"],
+      filtered.map((r) => [r.date, r.description, r.tenantName ?? "", r.moneyIn, -r.moneyOut, r.balance, r.invoiceFileName ?? "", r.sourceFileName ?? ""]),
     );
   };
 
@@ -8151,6 +8160,21 @@ function OwnerLedgerSection({
       <td className="px-3 py-2 whitespace-nowrap text-right text-emerald-700">{r.moneyIn > 0 ? `+${fmtCurrency(r.moneyIn)}` : "—"}</td>
       <td className="px-3 py-2 whitespace-nowrap text-right text-destructive">{r.moneyOut > 0 ? `−${fmtCurrency(r.moneyOut)}` : "—"}</td>
       <td className="px-3 py-2 whitespace-nowrap text-right font-medium">{fmtCurrency(r.balance)}</td>
+      <td className="min-w-0 max-w-[180px] px-3 py-2">
+        {r.invoiceFileData ? (
+          <button
+            type="button"
+            className="flex w-full min-w-0 items-center gap-1 truncate text-left text-primary underline decoration-dotted underline-offset-2 hover:text-primary/80"
+            title={r.invoiceFileName ?? undefined}
+            onClick={() => openBillDocument(r.invoiceFileName ?? undefined, r.invoiceFileData ?? undefined)}
+          >
+            <Eye className="h-3 w-3 shrink-0" />
+            <span className="truncate">{r.invoiceFileName ?? "View"}</span>
+          </button>
+        ) : (
+          "—"
+        )}
+      </td>
       <td className="min-w-0 max-w-[200px] px-3 py-2">
         {r.sourceFileName ? (
           r.sourceFileData ? (
@@ -8207,6 +8231,7 @@ function OwnerLedgerSection({
         <SortableTh field="in" label="Money in" align="right" sort={sort} onSort={onSort} />
         <SortableTh field="out" label="Money out" align="right" sort={sort} onSort={onSort} />
         <SortableTh field="balance" label="Balance" align="right" sort={sort} onSort={onSort} />
+        <th className="px-3 py-2 text-left font-medium">Invoice</th>
         <th className="px-3 py-2 text-left font-medium">Statement</th>
         <th className="w-8 px-2 py-2" />
       </tr>

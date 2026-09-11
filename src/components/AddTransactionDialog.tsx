@@ -241,7 +241,10 @@ export function AddTransactionDialog({
   /** Fills the form from extracted fields — shared by a fresh "Upload & extract" and by
    * pre-filling from an already-staged proposal below, so the two never drift apart. */
   const applyExtracted = (
-    data: Pick<ExtractBillResult, "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence">,
+    data: Pick<
+      ExtractBillResult,
+      "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence" | "bpay_reference" | "bpay_biller_code"
+    >,
     invoiceFileName?: string,
     invoiceFileData?: string,
   ) => {
@@ -254,18 +257,38 @@ export function AddTransactionDialog({
       propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
       payee: data.vendor ?? f.payee,
       date: data.due_date ?? f.date,
+      // The reference-number field is generic (any invoice/account reference, not only BPAY), but
+      // extract-bill only ever reads a BPAY reference off the document — the best it can offer.
+      // Previously extracted but silently discarded: this field never got filled from an upload at
+      // all, on a new transaction or an edit.
+      referenceNumber: data.bpay_reference ?? f.referenceNumber,
     }));
-    setLineItems([
-      {
-        ...blankLineItem(),
-        description: data.vendor ?? "",
-        amount: data.amount ? String(data.amount) : "",
-        // Previously always left at blankLineItem's hardcoded "Sundry Rental Expenses" default —
-        // extract-bill's expense_category field exists specifically so a general receipt/invoice
-        // (not just a utility bill) gets a real category guess instead of the generic fallback.
-        category: data.expense_category ? mapExpenseCategory(data.expense_category, data.vendor) : blankLineItem().category,
-      },
-    ]);
+    // Editing an existing transaction: merge onto its one line item instead of replacing it
+    // wholesale — re-reading a newly attached invoice shouldn't silently wipe the tenant/recharge/
+    // warranty state already on this row, or blank out the amount/category just because this
+    // particular document didn't have a clean figure to read.
+    setLineItems((rows) =>
+      expense && rows.length === 1
+        ? [
+            {
+              ...rows[0],
+              description: data.vendor ?? rows[0].description,
+              amount: data.amount ? String(data.amount) : rows[0].amount,
+              category: data.expense_category ? mapExpenseCategory(data.expense_category, data.vendor) : rows[0].category,
+            },
+          ]
+        : [
+            {
+              ...blankLineItem(),
+              description: data.vendor ?? "",
+              amount: data.amount ? String(data.amount) : "",
+              // Previously always left at blankLineItem's hardcoded "Sundry Rental Expenses" default —
+              // extract-bill's expense_category field exists specifically so a general receipt/invoice
+              // (not just a utility bill) gets a real category guess instead of the generic fallback.
+              category: data.expense_category ? mapExpenseCategory(data.expense_category, data.vendor) : blankLineItem().category,
+            },
+          ],
+    );
     setConfidence(data.confidence ?? null);
 
     if (!data.vendor && !data.amount) {
