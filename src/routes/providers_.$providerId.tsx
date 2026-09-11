@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -239,14 +239,36 @@ function ProviderProfilePage() {
   const { providerId } = Route.useParams();
   const { state, deleteProvider } = useStore();
   const navigate = useNavigate();
+  const router = useRouter();
   const provider = state.providers.find((p) => p.id === providerId);
+  // Providers are opened from all over the app (a property's Tenancy tab, a bill/transaction's
+  // provider link, the portfolio-wide Providers list, ...) — a hardcoded "back to /providers"
+  // always dropped whatever page (and its own side nav, e.g. a property's) the landlord actually
+  // came from. Going back in browser history instead returns to exactly that, same as a normal
+  // "back" button; falls back to the Providers list when there's nothing in history to go back to
+  // (e.g. this page was opened directly, a bookmark or new tab).
+  const canGoBack = typeof window !== "undefined" && window.history.length > 1;
+  const BackLink = ({ children }: { children: React.ReactNode }) =>
+    canGoBack ? (
+      <button
+        type="button"
+        onClick={() => router.history.back()}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        {children}
+      </button>
+    ) : (
+      <Link to="/providers" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        {children}
+      </Link>
+    );
 
   if (!provider) {
     return (
       <div className="space-y-4 p-4 sm:p-6">
-        <Link to="/providers" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back to Providers
-        </Link>
+        <BackLink>
+          <ArrowLeft className="h-4 w-4" /> Back
+        </BackLink>
         <div className="text-sm text-muted-foreground">This provider no longer exists.</div>
       </div>
     );
@@ -296,9 +318,9 @@ function ProviderProfilePage() {
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      <Link to="/providers" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Back to Providers
-      </Link>
+      <BackLink>
+        <ArrowLeft className="h-4 w-4" /> Back
+      </BackLink>
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

@@ -16,10 +16,12 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Users2, Plus, ChevronRight, GitMerge } from "lucide-react";
+import { Users2, Plus, ChevronRight, GitMerge, Receipt, FileText, Eye } from "lucide-react";
 import { ProviderDialog } from "@/components/PropertyShared";
 import type { AppState, Provider } from "@/lib/types";
 import { PROVIDER_ROLE_LABELS } from "@/lib/types";
+import { matchProviderByName } from "@/lib/providerMatch";
+import { openBillDocument } from "@/lib/files";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/providers")({
@@ -50,6 +52,32 @@ export function linkedPropertyIds(state: AppState, providerId: string): string[]
   return Array.from(ids);
 }
 
+/** Most recent invoice (an expense's own attached invoice, or a bill's own source document — bills
+ * have no separate invoiceFileName field, sourceFileName doubles as the bill's own document) and
+ * most recent agent statement this provider appears on, each with the date it's dated. Matches the
+ * same providerId-FK-or-fuzzy-name logic the provider's own profile page uses for its payment
+ * history, so what's summarized here always agrees with what that page shows in full. */
+function latestInvoiceAndStatement(state: AppState, provider: Provider) {
+  const belongs = (row: { providerId?: string; providerName?: string }): boolean =>
+    row.providerId === provider.id || (!!row.providerName && !!matchProviderByName([provider], row.providerName));
+
+  const invoice = [
+    ...state.expenses
+      .filter((e) => belongs(e) && e.invoiceFileData)
+      .map((e) => ({ date: e.date, fileName: e.invoiceFileName ?? undefined, fileData: e.invoiceFileData ?? undefined })),
+    ...state.bills
+      .filter((b) => belongs(b) && b.sourceFileData)
+      .map((b) => ({ date: b.issueDate || b.dueDate, fileName: b.sourceFileName, fileData: b.sourceFileData })),
+  ].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+
+  const statement = state.expenses
+    .filter((e) => belongs(e) && e.source === "agent_statement" && e.sourceFileData)
+    .map((e) => ({ date: e.date, fileName: e.sourceFileName ?? undefined, fileData: e.sourceFileData ?? undefined }))
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+
+  return { invoice, statement };
+}
+
 function ProviderListRow({ provider }: { provider: Provider }) {
   const { state } = useStore();
   const addresses = linkedPropertyIds(state, provider.id)
@@ -57,14 +85,11 @@ function ProviderListRow({ provider }: { provider: Provider }) {
     .filter((p): p is NonNullable<typeof p> => Boolean(p))
     .map((p) => p.alias || p.address);
   const details = [provider.phone, provider.email].filter(Boolean).join(" · ");
+  const { invoice, statement } = latestInvoiceAndStatement(state, provider);
 
   return (
-    <Link
-      to="/providers/$providerId"
-      params={{ providerId: provider.id }}
-      className="flex items-center justify-between gap-3 rounded border p-3 text-sm hover:bg-muted/50"
-    >
-      <div className="min-w-0">
+    <div className="flex items-center justify-between gap-3 rounded border p-3 text-sm hover:bg-muted/50">
+      <Link to="/providers/$providerId" params={{ providerId: provider.id }} className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{provider.name}</span>
           <Badge variant="secondary" className="text-[10px]">
@@ -78,9 +103,44 @@ function ProviderListRow({ provider }: { provider: Provider }) {
         <div className="mt-0.5 text-xs text-muted-foreground">
           {addresses.length === 0 ? "No linked properties yet" : addresses.join(", ")}
         </div>
+      </Link>
+      <div className="flex shrink-0 flex-col items-end gap-1 text-xs">
+        {invoice?.fileData && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              openBillDocument(invoice.fileName, invoice.fileData);
+            }}
+            className="flex items-center gap-1 text-primary underline decoration-dotted underline-offset-2 hover:text-primary/80"
+            title="Most recent invoice"
+          >
+            <Receipt className="h-3 w-3" /> Invoice · {invoice.date || "—"}
+          </button>
+        )}
+        {statement?.fileData && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              openBillDocument(statement.fileName, statement.fileData);
+            }}
+            className="flex items-center gap-1 text-primary underline decoration-dotted underline-offset-2 hover:text-primary/80"
+            title="Most recent statement"
+          >
+            <FileText className="h-3 w-3" /> Statement · {statement.date || "—"}
+          </button>
+        )}
+        {!invoice?.fileData && !statement?.fileData && (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <Eye className="h-3 w-3" /> No documents
+          </span>
+        )}
       </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-    </Link>
+      <Link to="/providers/$providerId" params={{ providerId: provider.id }}>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </Link>
+    </div>
   );
 }
 
