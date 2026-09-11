@@ -9,7 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { FileUp } from "lucide-react";
+import { FileUp, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useStore } from "@/lib/store";
 import { ProposalReviewDialog } from "@/components/PropertyShared";
@@ -243,10 +243,29 @@ export function UploadDocumentDialog({
               </div>
             </div>
             {files.length > 0 && !busy && (
-              <p className="text-xs text-muted-foreground">
-                {files.length} file{files.length === 1 ? "" : "s"} selected
-                {files.length > 1 ? " — each is read and matched individually, one after another." : "."}
-              </p>
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground">
+                  {files.length} file{files.length === 1 ? "" : "s"} selected
+                  {files.length > 1 ? " — each is read and matched individually, one after another." : "."}
+                </p>
+                <ul className="space-y-1">
+                  {files.map((f, i) => (
+                    <li key={`${f.name}-${i}`} className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1 text-xs">
+                      <span className="min-w-0 truncate" title={f.name}>
+                        {f.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setFiles((fs) => fs.filter((_, idx) => idx !== i))}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        title="Remove"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
             {busy && (
               <p className="text-xs text-muted-foreground">
