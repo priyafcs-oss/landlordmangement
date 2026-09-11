@@ -322,8 +322,14 @@ interface StoreCtx {
   updateBill: (id: string, b: Partial<PropertyBill>) => void;
   deleteBill: (id: string) => void;
   /** paidDate defaults to today — Phase 2 accrual-matching passes the payment evidence's own
-   * date (a statement/bank-transaction date) so P&L lands in the right period. */
-  markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
+   * date (a statement/bank-transaction date) so P&L lands in the right period. amount lets a bill
+   * be recorded paid for something other than its billed amount (partial payment, rounding,
+   * discount) — the linked Expense is posted at that amount instead of bill.amount. */
+  markBillPaid: (id: string, opts?: { paidDate?: string; paymentMethod?: PropertyBill["paymentMethod"]; amount?: number }) => void;
+  /** Undoes a mistaken Mark Paid: reverts status to Unpaid, clears the paid fields, and deletes the
+   * Expense that markBillPaid created (never one from any other source, since linkedExpenseId is
+   * only ever set by markBillPaid). */
+  unmarkBillPaid: (id: string) => void;
 
   dismissProposal: (id: string) => void;
   /** `patch` lets a caller correct the proposal's own propertyId (or other fields) at the same
@@ -1458,6 +1464,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const bill = s.bills.find((b) => b.id === id);
         if (!bill) return s;
         const paidDate = opts?.paidDate ?? new Date().toISOString().slice(0, 10);
+        const paidAmount = opts?.amount;
+        const paymentMethod = opts?.paymentMethod;
 
         // Paying a bill posts it to Transactions/P&L too — this is the ONLY place a bill's
         // Expense ever gets created, for every bill regardless of source (bills never post at
@@ -1468,7 +1476,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           newExpense = {
             id: uid("ex"),
             itemName: bill.providerName || bill.billType,
-            cost: bill.amount,
+            cost: paidAmount ?? bill.amount,
             date: paidDate,
             propertyId: bill.propertyId,
             assetId: bill.assetId,
@@ -1482,6 +1490,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             source: billSourceToExpenseSource(bill.source),
             bpayBillerCode: bill.bpayBillerCode,
             bpayReference: bill.bpayReference,
+            paidDate,
+            paymentMethod,
             // Previously dropped on conversion, which silently un-linked the provider directory
             // entry and the actual bill PDF the moment a bill was marked paid — the Transactions
             // row then showed neither a provider nor a working invoice link even though both were
@@ -1498,9 +1508,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        void updateRow(TABLES.bills, id, { status: "Paid", paidDate, linkedExpenseId });
+        void updateRow(TABLES.bills, id, { status: "Paid", paidDate, linkedExpenseId, paymentMethod, paidAmount });
         const updated = s.bills.map((b) =>
-          b.id === id ? { ...b, status: "Paid" as const, paidDate, linkedExpenseId } : b,
+          b.id === id ? { ...b, status: "Paid" as const, paidDate, linkedExpenseId, paymentMethod, paidAmount } : b,
         );
         // Auto-create next cycle
         if (bill.recurrenceMonths && bill.recurrenceMonths > 0) {
@@ -1511,11 +1521,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             status: "Unpaid",
             paidDate: undefined,
             linkedExpenseId: undefined,
+            paymentMethod: undefined,
+            paidAmount: undefined,
           };
           void upsertRow(TABLES.bills, { ...next, paidDate: null } as unknown as Record<string, unknown>);
           updated.push(next);
         }
         return { ...s, bills: updated, expenses: newExpense ? [...s.expenses, newExpense] : s.expenses };
+      }),
+    unmarkBillPaid: (id) =>
+      set((s) => {
+        const bill = s.bills.find((b) => b.id === id);
+        if (!bill || bill.status !== "Paid") return s;
+        const expenseId = bill.linkedExpenseId;
+
+        void updateRow(TABLES.bills, id, {
+          status: "Unpaid",
+          paidDate: null,
+          linkedExpenseId: null,
+          paymentMethod: null,
+          paidAmount: null,
+        });
+        if (expenseId) void deleteRow(TABLES.expenses, expenseId);
+
+        return {
+          ...s,
+          bills: s.bills.map((b) =>
+            b.id === id
+              ? { ...b, status: "Unpaid" as const, paidDate: undefined, linkedExpenseId: undefined, paymentMethod: undefined, paidAmount: undefined }
+              : b,
+          ),
+          expenses: expenseId ? s.expenses.filter((e) => e.id !== expenseId) : s.expenses,
+        };
       }),
 
     dismissProposal: (id) => {

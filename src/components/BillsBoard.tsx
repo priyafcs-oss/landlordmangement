@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
-import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search, Undo2 } from "lucide-react";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
@@ -34,6 +34,7 @@ interface RowHelpers {
   propertyLabelOf: (b: PropertyBill) => string | undefined;
   tenantLabelOf: (b: PropertyBill) => string | undefined;
   markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
+  unmarkBillPaid: (id: string) => void;
   deleteBill: (id: string) => void;
 }
 
@@ -47,7 +48,7 @@ export function BillsBoard({
   propertyId: lockedPropertyId,
   propertyIds: scopedPropertyIds,
 }: { propertyId?: string; propertyIds?: string[] } = {}) {
-  const { state, markBillPaid, deleteBill } = useStore();
+  const { state, markBillPaid, unmarkBillPaid, deleteBill } = useStore();
   const showPropertyFilter = !lockedPropertyId;
   const scopedBills = lockedPropertyId
     ? state.bills.filter((b) => b.propertyId === lockedPropertyId)
@@ -154,7 +155,7 @@ export function BillsBoard({
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered, groupBy]);
 
-  const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf, markBillPaid, deleteBill };
+  const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf, markBillPaid, unmarkBillPaid, deleteBill };
   const handleSort = (f: SortField) => setSort((s) => toggleSort(s, f));
 
   const outstanding = scopedBills.filter((b) => b.status !== "Paid");
@@ -444,6 +445,7 @@ function BillsTableBody({
   propertyLabelOf,
   tenantLabelOf,
   markBillPaid,
+  unmarkBillPaid,
   deleteBill,
 }: RowHelpers & {
   rows: PropertyBill[];
@@ -514,6 +516,7 @@ function BillsTableBody({
                   propertyLabelOf={propertyLabelOf}
                   tenantLabelOf={tenantLabelOf}
                   markBillPaid={markBillPaid}
+                  unmarkBillPaid={unmarkBillPaid}
                   deleteBill={deleteBill}
                 />
               );
@@ -566,6 +569,7 @@ function BillsTableBody({
                       propertyLabelOf={propertyLabelOf}
                       tenantLabelOf={tenantLabelOf}
                       markBillPaid={markBillPaid}
+                      unmarkBillPaid={unmarkBillPaid}
                       deleteBill={deleteBill}
                     />
                   ))}
@@ -586,6 +590,7 @@ function BillTableRow({
   propertyLabelOf,
   tenantLabelOf,
   markBillPaid,
+  unmarkBillPaid,
   deleteBill,
 }: {
   b: PropertyBill;
@@ -595,6 +600,7 @@ function BillTableRow({
   propertyLabelOf: (b: PropertyBill) => string | undefined;
   tenantLabelOf: (b: PropertyBill) => string | undefined;
   markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
+  unmarkBillPaid: (id: string) => void;
   deleteBill: (id: string) => void;
 }) {
   const overdue = isOverdue(b);
@@ -632,7 +638,7 @@ function BillTableRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {b.status !== "Paid" && (
+            {b.status !== "Paid" ? (
               <DropdownMenuItem
                 onClick={() => {
                   markBillPaid(b.id);
@@ -640,6 +646,17 @@ function BillTableRow({
                 }}
               >
                 <CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Mark paid
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                onClick={() => {
+                  if (confirm("Undo this payment? The linked transaction will be removed.")) {
+                    unmarkBillPaid(b.id);
+                    toast.success("Payment undone");
+                  }
+                }}
+              >
+                <Undo2 className="mr-2 h-3.5 w-3.5" /> Unpay
               </DropdownMenuItem>
             )}
             <DropdownMenuItem

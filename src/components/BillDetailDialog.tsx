@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CheckCircle2, Trash2, Plus, Pencil, Mail } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, Pencil, Mail, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
@@ -25,6 +25,7 @@ import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/li
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { base64ToBlob, mimeForFileName } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
+import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 
 const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
@@ -66,6 +67,45 @@ const toLineItemRows = (items?: BillLineItem[]): LineItemRow[] =>
     : [{ key: uid("li"), description: "", category: "Other", amount: "", gst: "", rechargeToTenant: false, tenantId: "", recharged: false }];
 
 /**
+ * Pay/unpay control for one bill row — a "Mark paid" trigger when Unpaid/Overdue, or the paid
+ * details (date, method, amount if it differed) plus an "Unpay" undo when Paid. Shown unconditionally
+ * during review (not hidden while editing the payment schedule) so it's always evident how to
+ * record or undo a payment.
+ */
+function PayStatusControl({ bill }: { bill: PropertyBill }) {
+  const { unmarkBillPaid } = useStore();
+  if (bill.status !== "Paid") {
+    return <MarkBillPaidDialog bill={bill} trigger={<Button size="sm" className="gap-1"><CheckCircle2 className="h-3 w-3" /> Mark paid</Button>} />;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <div className="text-right text-xs text-emerald-700">
+        <div className="flex items-center gap-1 font-medium">
+          <CheckCircle2 className="h-3 w-3" /> Paid {bill.paidDate}
+        </div>
+        <div className="text-muted-foreground">
+          {bill.paymentMethod ?? "—"}
+          {bill.paidAmount !== undefined && bill.paidAmount !== bill.amount ? ` · ${fmtCurrency(bill.paidAmount)}` : ""}
+        </div>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1"
+        onClick={() => {
+          if (confirm("Undo this payment? The linked transaction will be removed.")) {
+            unmarkBillPaid(bill.id);
+            toast.success("Payment undone");
+          }
+        }}
+      >
+        <Undo2 className="h-3 w-3" /> Unpay
+      </Button>
+    </div>
+  );
+}
+
+/**
  * Click-through detail view for a single bill (or, when it's part of a scheduled-payment group,
  * the whole group) — the source document side-by-side with editable details, the payment schedule,
  * and per-instalment "record paid". Shared/denormalized fields (provider, reference, BPAY, period,
@@ -81,7 +121,7 @@ export function BillDetailDialog({
   propertyLabel?: string;
   trigger: React.ReactNode;
 }) {
-  const { state, updateBill, deleteBill, addBill, markBillPaid, addInvoice } = useStore();
+  const { state, updateBill, deleteBill, addBill, unmarkBillPaid, addInvoice } = useStore();
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(bill.id);
   const [editingSchedule, setEditingSchedule] = useState(false);
@@ -360,24 +400,22 @@ export function BillDetailDialog({
                   </div>
                 )}
 
-                {!editingSchedule && (
-                  <div className="flex items-center justify-between border-t pt-2">
-                    <div className="text-xs text-muted-foreground">
-                      Selected: {selected.label ?? selected.billType} — {fmtCurrency(selected.amount)}
-                    </div>
-                    <Button
-                      size="sm"
-                      className="gap-1"
-                      disabled={selected.status === "Paid"}
-                      onClick={() => {
-                        markBillPaid(selected.id);
-                        toast.success("Marked paid — posted to Transactions");
-                      }}
-                    >
-                      <CheckCircle2 className="h-3 w-3" /> Record selected paid
-                    </Button>
+                <div className="flex items-center justify-between border-t pt-2">
+                  <div className="text-xs text-muted-foreground">
+                    Selected: {selected.label ?? selected.billType} — {fmtCurrency(selected.amount)}
                   </div>
-                )}
+                  <PayStatusControl bill={selected} />
+                </div>
+              </div>
+            )}
+
+            {/* Single-instalment bills have no "Payment instalments" block above (there's only one
+                due date to track) — the pay/unpay control still needs to be evident during review,
+                not tucked away only in the Bills board's row menu. */}
+            {siblings.length <= 1 && (
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="text-xs font-medium">Payment</div>
+                <PayStatusControl bill={selected} />
               </div>
             )}
 

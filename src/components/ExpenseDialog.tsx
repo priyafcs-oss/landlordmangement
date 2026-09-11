@@ -18,6 +18,7 @@ import {
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus } from "lucide-react";
 import { todayISO, CATEGORY_GROUPS, expenseCategoryToTaxCategory } from "@/lib/calculations";
+import { matchProviderByName } from "@/lib/providerMatch";
 import { toast } from "sonner";
 import type { Expense, ExpenseCategory } from "@/lib/types";
 
@@ -178,6 +179,11 @@ export function ExpenseDialog({
           </Field>
           <Field label="Provider / payee">
             <Input value={form.providerName} onChange={(e) => setForm({ ...form, providerName: e.target.value })} />
+            {form.providerName.trim() && !matchProviderByName(state.providers, form.providerName) && (
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium">{form.providerName.trim()}</span> is not in your providers yet — saving adds them.
+              </div>
+            )}
           </Field>
           <Field label="Cost (AUD)">
             <Input type="number" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />

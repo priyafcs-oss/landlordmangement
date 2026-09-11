@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, ExternalLink, Paperclip, Receipt, Trash2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Paperclip, Receipt, Trash2, Undo2 } from "lucide-react";
 import { fmtCurrency, todayISO, fmtModified } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
@@ -9,11 +9,14 @@ import { openBillDocument } from "@/lib/files";
 export function BillRow({
   bill,
   onPaid,
+  onUnpaid,
   onDelete,
   propertyLabel,
 }: {
   bill: PropertyBill;
   onPaid: () => void;
+  /** Omit to hide the "Unpay" action (e.g. a caller not yet wired for undo). */
+  onUnpaid?: () => void;
   onDelete: () => void;
   /** When set (e.g. on a portfolio-wide list), shown alongside the due date so bills aren't ambiguous. */
   propertyLabel?: string;
@@ -54,10 +57,16 @@ export function BillRow({
           }
         />
         <div className="flex gap-1">
-          {bill.status !== "Paid" && (
+          {bill.status !== "Paid" ? (
             <Button size="sm" variant="outline" className="gap-1" onClick={onPaid}>
               <CheckCircle2 className="h-3 w-3" /> Mark Paid
             </Button>
+          ) : (
+            onUnpaid && (
+              <Button size="sm" variant="outline" className="gap-1" onClick={onUnpaid}>
+                <Undo2 className="h-3 w-3" /> Unpay
+              </Button>
+            )
           )}
           <Button size="icon" variant="ghost" onClick={onDelete}>
             <Trash2 className="h-4 w-4" />

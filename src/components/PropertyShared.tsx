@@ -2992,7 +2992,7 @@ export function PropertySummaryTab({
   const ytdIncome = state.ledger
     .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
     .reduce((s, e) => s + e.credit, 0);
-  const activeTenant = tenants[0];
+  const activeTenant = tenants.find((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
   const nextBill = state.bills
     .filter((b) => b.propertyId === prop.id && b.status !== "Paid")
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))[0];
@@ -4497,7 +4497,11 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
     const cat = e.category ?? "Other";
     expenseByCategory[cat] = (expenseByCategory[cat] ?? 0) + e.cost;
   }
-  const loanInterest = loan ? (((loan.totalBalance * loan.interestRate) / 100) * daysInclusive(start, end)) / 365 : 0;
+  // Only estimate interest when no actual "Interest on Loan" expenses were posted for the period —
+  // otherwise this double-counts against the real, statement-derived expense already in the list.
+  const hasActualLoanInterest = (expenseByCategory["Interest on Loan"] ?? 0) !== 0;
+  const loanInterest =
+    !hasActualLoanInterest && loan ? (((loan.totalBalance * loan.interestRate) / 100) * daysInclusive(start, end)) / 365 : 0;
   if (loanInterest > 0) expenseByCategory["Loan Interest (est.)"] = loanInterest;
   const expenseLines = Object.entries(expenseByCategory).sort((a, b) => b[1] - a[1]);
   const totalExpenses = expenseLines.reduce((s, [, amount]) => s + amount, 0);
@@ -4505,6 +4509,10 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
 
   const netCashflow = totalIncome - totalExpenses;
   const transactionCount = rentEntries.length + outgoing.length + extraIncome.length;
+
+  const periodDepreciationItems = state.depreciationItems.filter((d) => d.assetId === prop.assetId);
+  const periodDepreciation = buildDepreciationSchedule(periodDepreciationItems).find((s) => s.fy === fy)?.total ?? 0;
+  const netTaxPosition = netCashflow - periodDepreciation;
 
   // Annual Forecast — a separate, full-year projection from known fixed costs (Property's own
   // annual-cost fields, the current loan, the current tenant's rent), not the YTD actuals above.
@@ -4578,6 +4586,16 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
               </div>
             </div>
 
+            {periodDepreciationItems.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium">Depreciation</div>
+                <div className="flex justify-between">
+                  <span>Total depreciation</span>
+                  <span>{fmtCurrency(periodDepreciation)}</span>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-0.5 border-t pt-2">
               <div className="flex items-center justify-between text-base font-semibold">
                 <span>Net Cashflow</span>
@@ -4587,6 +4605,20 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
                 </span>
               </div>
               <div className="text-xs text-muted-foreground">Income − cash expenses; depreciation excluded</div>
+            </div>
+
+            <div className="space-y-0.5 border-t pt-2">
+              <div className="flex items-center justify-between text-base font-semibold">
+                <span>Net Tax Position</span>
+                <span className={netTaxPosition < 0 ? "text-destructive" : "text-emerald-600"}>
+                  {netTaxPosition < 0 ? "−" : ""}
+                  {fmtCurrency(Math.abs(netTaxPosition))}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Net cashflow − depreciation. The dollar tax impact depends on your other income and rate — your accountant
+                applies this to your return.
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -4616,9 +4648,15 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
                   <span className="text-muted-foreground">Expenses</span>
                   <span className="font-medium text-destructive">{fmtCurrency(totalExpenses)}</span>
                 </div>
+                {periodDepreciationItems.length > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Depreciation</span>
+                    <span className="font-medium">{fmtCurrency(periodDepreciation)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t pt-1">
-                  <span className="text-muted-foreground">Taxable position</span>
-                  <span className="font-medium">{fmtCurrency(netCashflow)}</span>
+                  <span className="text-muted-foreground">Net tax position</span>
+                  <span className="font-medium">{fmtCurrency(netTaxPosition)}</span>
                 </div>
               </div>
             </CardContent>

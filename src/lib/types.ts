@@ -548,6 +548,9 @@ export interface Expense {
   periodEnd?: string;
   notes?: string;
   paidDate?: string;
+  /** How this was paid — set when this Expense was created by markBillPaid from the Mark Paid
+   * dialog; absent for expenses entered any other way. */
+  paymentMethod?: "Bank Transfer" | "BPAY" | "Direct Debit" | "Credit Card" | "Cash" | "Other";
   rawPropertyAddress?: string;
   emailMessageId?: string;
   reviewReason?: string | null;
@@ -1047,6 +1050,12 @@ export interface PropertyBill {
    * recharge decision) — cleared to "resolved" once the landlord has looked at it via
    * BillDetailDialog. Absent for every other bill type. */
   tenantRebillStatus?: "pending" | "resolved";
+  /** How this bill was actually paid — set by the Mark Paid dialog, shown alongside paidDate. */
+  paymentMethod?: "Bank Transfer" | "BPAY" | "Direct Debit" | "Credit Card" | "Cash" | "Other";
+  /** The amount actually paid, when it differs from `amount` (e.g. a rounding difference, partial
+   * payment, or discount) — set by the Mark Paid dialog. The linked Expense is posted at this
+   * amount when set, `amount` otherwise. */
+  paidAmount?: number;
 }
 
 /** Extracted-but-unconfirmed lease details from an inbound rent/lease agreement. */

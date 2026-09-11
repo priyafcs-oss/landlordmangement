@@ -38,7 +38,10 @@ import {
   Inbox as InboxIcon,
   Users2,
   Banknote,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
 import { PropertyDialog, AiProposalsSection } from "@/components/PropertyShared";
@@ -295,7 +298,7 @@ function AddAssetTransactionDialog({ assetId }: { assetId: string }) {
 }
 
 function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClose: () => void }) {
-  const { state, markBillPaid, deleteBill } = useStore();
+  const { state, markBillPaid, unmarkBillPaid, deleteBill } = useStore();
   const asset = state.assets.find((a) => a.id === assetId);
   const gold = asset ? state.goldDetails.find((g) => g.assetId === asset.id) : undefined;
   const etf = asset ? state.etfDetails.find((e) => e.assetId === asset.id) : undefined;
@@ -369,6 +372,12 @@ function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClos
                   onPaid={() => {
                     markBillPaid(b.id);
                     toast.success("Marked paid");
+                  }}
+                  onUnpaid={() => {
+                    if (confirm("Undo this payment? The linked transaction will be removed.")) {
+                      unmarkBillPaid(b.id);
+                      toast.success("Payment undone");
+                    }
                   }}
                   onDelete={() => {
                     if (confirm(`Delete this ${b.billType} bill?`)) {
@@ -581,6 +590,12 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
 function AssetsPage() {
   const { state } = useStore();
   const [section, setSection] = useState<Section>("all");
+  // Same hover-to-open/auto-hide behaviour as AppSidebar and the per-property nav: collapsed to
+  // icons until hovered, and a group (e.g. Finance) reveals its items only while hovered.
+  const isMobile = useIsMobile();
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
+  const sidebarCollapsed = !isMobile && !sidebarHovered;
 
   const groups: { group: string | null; items: typeof NAV }[] = [];
   for (const item of NAV) {
@@ -592,36 +607,58 @@ function AssetsPage() {
 
   return (
     <div className="flex min-h-[calc(100vh-1px)] flex-col sm:flex-row">
-      <div className="w-full shrink-0 border-b p-3 sm:w-56 sm:border-b-0 sm:border-r sm:p-4">
-        <div className="mb-3">
-          <div className="font-semibold leading-tight">Assets</div>
-          <div className="text-xs text-muted-foreground">Property, gold, ETFs — one register.</div>
-        </div>
+      <div
+        className={`shrink-0 border-b p-3 sm:border-b-0 sm:border-r sm:p-4 ${sidebarCollapsed ? "sm:w-14" : "w-full sm:w-56"}`}
+        onMouseEnter={() => !isMobile && setSidebarHovered(true)}
+        onMouseLeave={() => {
+          if (!isMobile) {
+            setSidebarHovered(false);
+            setHoveredGroup(null);
+          }
+        }}
+      >
+        {!sidebarCollapsed && (
+          <div className="mb-3">
+            <div className="font-semibold leading-tight">Assets</div>
+            <div className="text-xs text-muted-foreground">Property, gold, ETFs — one register.</div>
+          </div>
+        )}
         <nav className="space-y-3">
-          {groups.map((g, i) => (
-            <div key={i}>
-              {g.group && (
-                <div className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {g.group}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {g.items.map((item) => (
-                  <button
-                    key={item.section}
-                    type="button"
-                    onClick={() => setSection(item.section)}
-                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
-                      section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
-                    }`}
-                  >
-                    <item.icon className="h-3.5 w-3.5 shrink-0" />
-                    {item.label}
-                  </button>
-                ))}
+          {groups.map((g, i) => {
+            const collapsed = g.group ? hoveredGroup !== g.group : false;
+            return (
+              <div
+                key={i}
+                onMouseEnter={() => g.group && setHoveredGroup(g.group)}
+                onMouseLeave={() => g.group && setHoveredGroup((prev) => (prev === g.group ? null : prev))}
+              >
+                {g.group && !sidebarCollapsed && (
+                  <div className="mb-1 flex items-center gap-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {collapsed ? <ChevronRight className="h-3 w-3 shrink-0" /> : <ChevronDown className="h-3 w-3 shrink-0" />}
+                    {g.group}
+                  </div>
+                )}
+                {(sidebarCollapsed || !collapsed) && (
+                  <div className="space-y-0.5">
+                    {g.items.map((item) => (
+                      <button
+                        key={item.section}
+                        type="button"
+                        onClick={() => setSection(item.section)}
+                        title={sidebarCollapsed ? item.label : undefined}
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${sidebarCollapsed ? "justify-center" : ""} ${
+                          section === item.section ? "bg-primary/10 font-medium text-primary" : "hover:bg-muted"
+                        }`}
+                      >
+                        <item.icon className="h-3.5 w-3.5 shrink-0" />
+                        {!sidebarCollapsed && item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
       </div>
 

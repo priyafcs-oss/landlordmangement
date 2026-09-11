@@ -893,6 +893,11 @@ export function AddBillDialog({
                         <option key={p.id} value={p.name} />
                       ))}
                     </datalist>
+                    {form.providerName.trim() && !matchProviderByName(providersForProperty, form.providerName) && (
+                      <div className="text-xs text-muted-foreground">
+                        <span className="font-medium">{form.providerName.trim()}</span> is not in your providers yet — saving adds them.
+                      </div>
+                    )}
                   </Field>
                 </div>
                 <Field label="Portal URL">

@@ -24,14 +24,12 @@ import {
   StickyNote,
   ChevronDown,
   ChevronRight,
-  PanelLeftClose,
-  PanelLeftOpen,
   FileUp,
   SlidersHorizontal,
   TrendingUp,
   Activity,
 } from "lucide-react";
-import { usePersistedToggle } from "@/lib/hooks";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   PropertySummaryTab,
   PropertyPerformanceTab,
@@ -130,12 +128,6 @@ const NAV: {
   { section: "notes", label: "Notes", icon: StickyNote, group: "Property" },
 ];
 
-/** Every distinct group name in NAV (currently "Finance" and "Property") — used to default the
- * sidebar to fully collapsed on first load and to drive the accordion behaviour below. */
-const ALL_NAV_GROUPS = Array.from(
-  new Set(NAV.map((item) => item.group).filter((g): g is string => !!g)),
-);
-
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
   const loans = state.loans.filter((l) => l.propertyId === propertyId);
@@ -206,16 +198,15 @@ function PropertyAssetPage() {
   const { state, loading } = useStore();
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>("overview");
-  // All groups start collapsed on first landing; toggling one open auto-collapses every other
-  // group (accordion behaviour) rather than letting several stack open at once.
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(ALL_NAV_GROUPS));
-  const [sidebarCollapsed, toggleSidebar] = usePersistedToggle("assetSidebarCollapsed");
-  const toggleGroup = (group: string) =>
-    setCollapsedGroups((prev) =>
-      prev.has(group)
-        ? new Set(ALL_NAV_GROUPS.filter((g) => g !== group))
-        : new Set(ALL_NAV_GROUPS),
-    );
+  // Mirrors AppSidebar's hover-to-open/auto-hide behaviour: collapsed to icons until the pointer
+  // enters, then expands, and collapses again on mouse-leave. No effect on touch/mobile, which
+  // stays permanently expanded (there's no hover there).
+  const isMobile = useIsMobile();
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const sidebarCollapsed = !isMobile && !sidebarHovered;
+  // Within the expanded panel, a group (Finance/Property) reveals its items only while hovered —
+  // same auto-open/auto-hide behaviour, one level down.
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
 
   const asset = state.assets.find((a) => a.id === assetId);
   // Looked up both directions (Asset.linkedPropertyId -> Property.id, and Property.assetId ->
@@ -293,29 +284,22 @@ function PropertyAssetPage() {
     <div className="flex min-h-[calc(100vh-1px)] flex-col sm:flex-row">
       <div
         className={`shrink-0 border-b p-3 sm:border-b-0 sm:border-r sm:p-4 ${sidebarCollapsed ? "sm:w-14" : "w-full sm:w-56"}`}
+        onMouseEnter={() => !isMobile && setSidebarHovered(true)}
+        onMouseLeave={() => {
+          if (!isMobile) {
+            setSidebarHovered(false);
+            setHoveredGroup(null);
+          }
+        }}
       >
-        <div className="mb-3 flex items-center justify-between gap-1">
-          {!sidebarCollapsed && (
-            <Link
-              to="/assets"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="h-3 w-3" /> All assets
-            </Link>
-          )}
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-6 w-6 shrink-0"
-            onClick={toggleSidebar}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        <div className="mb-3 flex items-center gap-1">
+          <Link
+            to="/assets"
+            title={sidebarCollapsed ? "All assets" : undefined}
+            className={`inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground ${sidebarCollapsed ? "justify-center" : ""}`}
           >
-            {sidebarCollapsed ? (
-              <PanelLeftOpen className="h-3.5 w-3.5" />
-            ) : (
-              <PanelLeftClose className="h-3.5 w-3.5" />
-            )}
-          </Button>
+            <ArrowLeft className="h-3 w-3" /> {!sidebarCollapsed && "All assets"}
+          </Link>
         </div>
         {!sidebarCollapsed && (
           <div className="mb-3 flex items-start justify-between gap-1">
@@ -345,22 +329,22 @@ function PropertyAssetPage() {
         )}
         <nav className="space-y-3">
           {groups.map((g, i) => {
-            const collapsed = g.group ? collapsedGroups.has(g.group) : false;
+            const collapsed = g.group ? hoveredGroup !== g.group : false;
             return (
-              <div key={i}>
+              <div
+                key={i}
+                onMouseEnter={() => g.group && setHoveredGroup(g.group)}
+                onMouseLeave={() => g.group && setHoveredGroup((prev) => (prev === g.group ? null : prev))}
+              >
                 {g.group && !sidebarCollapsed ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(g.group!)}
-                    className="mb-1 flex w-full items-center gap-1 rounded px-2 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                  >
+                  <div className="mb-1 flex w-full items-center gap-1 rounded px-2 py-1 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                     {collapsed ? (
                       <ChevronRight className="h-3 w-3 shrink-0" />
                     ) : (
                       <ChevronDown className="h-3 w-3 shrink-0" />
                     )}
                     {g.group}
-                  </button>
+                  </div>
                 ) : null}
                 {(sidebarCollapsed || !collapsed) && (
                   <div className="space-y-0.5">
