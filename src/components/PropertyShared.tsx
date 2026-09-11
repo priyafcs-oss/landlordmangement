@@ -118,7 +118,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64 } from "@/lib/files";
+import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
@@ -979,7 +979,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       if (data.billId) await refreshOne("bills", data.billId);
       toast.success("Re-parsed — check the review queue for the fresh version");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Re-parse failed");
+      toast.error(await edgeFunctionErrorMessage(e));
     } finally {
       setReparsing(false);
     }
@@ -1616,7 +1616,7 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
         `Re-parsed as ${REPARSE_DOCUMENT_TYPES.find((t) => t.value === reclassifyAs)?.label ?? reclassifyAs} — check the review queue`,
       );
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Re-parse failed");
+      toast.error(await edgeFunctionErrorMessage(e));
     } finally {
       setReparsing(false);
     }
@@ -6720,7 +6720,7 @@ async function extractAgreementFile(
       toast.success("Extracted — review the fee terms before saving");
     }
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "Extraction failed");
+    toast.error(await edgeFunctionErrorMessage(e));
   } finally {
     setBusy(false);
   }

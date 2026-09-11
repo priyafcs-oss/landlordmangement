@@ -14,6 +14,29 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * `supabase.functions.invoke()` throws a generic "Edge Function returned a non-2xx status code"
+ * error on any handled server-side failure (file too large, unreadable document, AI extraction
+ * error, ...) — the SDK never reads the response body for you, so that specific, actually useful
+ * message the function itself returned (every AI-extraction function here always responds with
+ * `{ error: "..." }` on failure) gets silently discarded in favour of the generic wrapper text.
+ * This recovers it — see the SDK's own documented pattern (`error.context.json()`, since
+ * `FunctionsHttpError.context` is the raw unconsumed Response). Falls back to the generic error's
+ * own message when there's no readable/JSON body (a network failure, a relay error, ...).
+ */
+export async function edgeFunctionErrorMessage(error: unknown): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    try {
+      const body = await context.clone().json();
+      if (body && typeof body.error === "string" && body.error.trim()) return body.error;
+    } catch {
+      // Body wasn't JSON (or already consumed) — fall through to the generic message below.
+    }
+  }
+  return error instanceof Error ? error.message : "Something went wrong — try again.";
+}
+
 const IMAGE_EXT_MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",

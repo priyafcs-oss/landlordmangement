@@ -31,6 +31,7 @@ import {
   isSupportedDocumentFile,
   ACCEPTED_DOCUMENT_TYPES_LABEL,
   ACCEPTED_DOCUMENT_TYPES_ACCEPT,
+  edgeFunctionErrorMessage,
 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { DepreciationItem } from "@/lib/types";
@@ -290,7 +291,7 @@ export function AddDepreciationReportDialog({
         toast.warning("Couldn't find asset line items in this file — add them manually below");
       }
     } catch (e) {
-      if (generationRef.current === generation) toast.error(e instanceof Error ? e.message : "Extraction failed");
+      if (generationRef.current === generation) toast.error(await edgeFunctionErrorMessage(e));
     } finally {
       if (generationRef.current === generation) setBusy(false);
     }

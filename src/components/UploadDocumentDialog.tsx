@@ -20,6 +20,7 @@ import {
   isSupportedDocumentFile,
   ACCEPTED_DOCUMENT_TYPES_LABEL,
   ACCEPTED_DOCUMENT_TYPES_ACCEPT,
+  edgeFunctionErrorMessage,
 } from "@/lib/files";
 import { toast } from "sonner";
 
@@ -93,7 +94,7 @@ export function UploadDocumentDialog({
     const { data, error } = await supabase.functions.invoke<UploadResult>("upload-document", {
       body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf", loanId, bankAccountId },
     });
-    if (error) throw error;
+    if (error) return { ok: false, error: await edgeFunctionErrorMessage(error) };
     return data ?? { ok: false, error: "Couldn't process this document" };
   };
 

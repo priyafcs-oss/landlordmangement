@@ -39,6 +39,7 @@ import {
   isSupportedDocumentFile,
   ACCEPTED_DOCUMENT_TYPES_LABEL,
   ACCEPTED_DOCUMENT_TYPES_ACCEPT,
+  edgeFunctionErrorMessage,
 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
@@ -413,7 +414,7 @@ export function AddTransactionDialog({
         toast.success("Extracted — review the fields before saving");
       }
     } catch (e) {
-      if (generationRef.current === generation) toast.error(e instanceof Error ? e.message : "Extraction failed");
+      if (generationRef.current === generation) toast.error(await edgeFunctionErrorMessage(e));
     } finally {
       if (generationRef.current === generation) setBusy(false);
     }

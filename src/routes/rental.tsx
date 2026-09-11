@@ -66,7 +66,7 @@ import { bucketBy } from "@/lib/group";
 import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
-import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64 } from "@/lib/files";
+import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
@@ -1203,7 +1203,7 @@ function BankFeedDialog() {
       }
       setMatches(found);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't process this statement");
+      toast.error(await edgeFunctionErrorMessage(e));
     } finally {
       setExtracting(false);
     }
