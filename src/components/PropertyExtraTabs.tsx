@@ -21,8 +21,9 @@ import { Plus, Pencil, Trash2, Eye, ShieldCheck, Wrench, HardHat, FileText, X } 
 import { fmtCurrency, daysUntil } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
 import { toast } from "sonner";
-import { buildDocumentEntries } from "@/lib/documents";
+import { buildDocumentEntries, type DocumentEntry } from "@/lib/documents";
 import { DocumentsPanel } from "@/components/DocumentEntryRow";
+import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import type {
   Property,
   InsurancePolicy,
@@ -713,6 +714,11 @@ export function PropertyMaintenanceTab({ prop }: { prop: Property }) {
     .filter((m) => m.propertyId === prop.id)
     .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
   const warrantyDocuments = buildDocumentEntries(state).filter((d) => d.kind === "Maintenance" && d.propertyId === prop.id);
+  // "Warranties & receipts" entries are always Expense-backed (see buildDocumentEntries) — Edit
+  // opens the real transaction (AddTransactionDialog), which also lets the invoice/receipt itself
+  // be attached or replaced right there, not just viewed.
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const editingExpense = editingExpenseId ? state.expenses.find((e) => e.id === editingExpenseId) : undefined;
 
   return (
     <div className="space-y-5 text-sm">
@@ -762,8 +768,14 @@ export function PropertyMaintenanceTab({ prop }: { prop: Property }) {
           title="Warranties & receipts"
           entries={warrantyDocuments}
           emptyMessage="No warranties or maintenance receipts on file yet."
+          onEdit={(d: DocumentEntry) => setEditingExpenseId(d.id)}
         />
       </div>
+      <AddTransactionDialog
+        expense={editingExpense}
+        open={!!editingExpenseId}
+        onOpenChange={(o) => !o && setEditingExpenseId(null)}
+      />
     </div>
   );
 }

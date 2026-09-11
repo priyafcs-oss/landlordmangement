@@ -111,6 +111,7 @@ import { BillsBoard } from "@/components/BillsBoard";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
+import { EditLedgerRowDialog } from "@/components/EditLedgerRowDialog";
 import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportDialog";
 import { DocumentReviewCard, ReviewLaterContext, ReparseContext } from "@/components/DocumentReviewCard";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -7938,6 +7939,12 @@ function AgentStatementsSection({
 
 interface OwnerLedgerRow {
   id: string;
+  /** Which underlying record this row edits — a ledger_entries row (a rent/income payment) or an
+   * expenses row (an agent-statement deduction) — and its raw id, since the two need different
+   * edit dialogs (EditLedgerRowDialog vs AddTransactionDialog, the latter also offering invoice
+   * upload/attach, which a ledger row has no equivalent concept of). */
+  kind: "ledger" | "expense";
+  entryId: string;
   date: string;
   description: string;
   category?: string;
@@ -7997,6 +8004,8 @@ function OwnerLedgerSection({
       .filter((l) => l.source === "agent_statement" && tenantNameById.has(l.tenantId))
       .map((l) => ({
         id: `l_${l.id}`,
+        kind: "ledger" as const,
+        entryId: l.id,
         date: l.date,
         description: l.description || l.type,
         tenantName: tenantNameById.get(l.tenantId),
@@ -8010,6 +8019,8 @@ function OwnerLedgerSection({
       .filter((e) => e.source === "agent_statement" && e.propertyId === propertyId)
       .map((e) => ({
         id: `e_${e.id}`,
+        kind: "expense" as const,
+        entryId: e.id,
         date: e.date,
         description: e.itemName,
         category: e.category,
@@ -8161,6 +8172,27 @@ function OwnerLedgerSection({
           "—"
         )}
       </td>
+      <td className="px-2 py-2">
+        {r.kind === "expense" ? (
+          <AddTransactionDialog
+            expense={state.expenses.find((e) => e.id === r.entryId)}
+            trigger={
+              <Button size="icon" variant="ghost" className="h-6 w-6" title="Edit — attach or replace the invoice here too">
+                <Pencil className="h-3 w-3" />
+              </Button>
+            }
+          />
+        ) : (
+          <EditLedgerRowDialog
+            ledgerEntryId={r.entryId}
+            trigger={
+              <Button size="icon" variant="ghost" className="h-6 w-6">
+                <Pencil className="h-3 w-3" />
+              </Button>
+            }
+          />
+        )}
+      </td>
     </tr>
   );
 
@@ -8176,6 +8208,7 @@ function OwnerLedgerSection({
         <SortableTh field="out" label="Money out" align="right" sort={sort} onSort={onSort} />
         <SortableTh field="balance" label="Balance" align="right" sort={sort} onSort={onSort} />
         <th className="px-3 py-2 text-left font-medium">Statement</th>
+        <th className="w-8 px-2 py-2" />
       </tr>
     </thead>
   );

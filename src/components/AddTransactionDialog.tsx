@@ -158,7 +158,8 @@ export function AddTransactionDialog({
   const { state, addExpense, updateExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal, findOrCreateProvider } =
     useStore();
   const [internalOpen, setInternalOpen] = useState(false);
-  const open = openProp ?? internalOpen;
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : internalOpen;
   const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [busy, setBusy] = useState(false);
@@ -608,7 +609,7 @@ export function AddTransactionDialog({
         if (!o) reset();
       }}
     >
-      {!initialProposal && (
+      {!initialProposal && !controlled && (
         <DialogTrigger asChild>
           {trigger ?? (
             <Button size="sm" className="gap-1">

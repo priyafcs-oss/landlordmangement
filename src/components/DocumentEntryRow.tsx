@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, FileText, FolderOpen, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, FileText, FolderOpen, Pencil, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -147,7 +147,17 @@ export function formatDocMonthLabel(key: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
-export function DocTable({ rows, showProperty = true }: { rows: DocumentEntry[]; showProperty?: boolean }) {
+export function DocTable({
+  rows,
+  showProperty = true,
+  onEdit,
+}: {
+  rows: DocumentEntry[];
+  showProperty?: boolean;
+  /** Shows an Edit (pencil) action per row when set — for a document backed by an editable
+   * record (e.g. a maintenance expense's invoice), not every DocumentEntry has one. */
+  onEdit?: (d: DocumentEntry) => void;
+}) {
   const { state } = useStore();
   if (rows.length === 0) {
     return (
@@ -167,6 +177,7 @@ export function DocTable({ rows, showProperty = true }: { rows: DocumentEntry[];
             <th className="px-3 py-2 font-medium">Period</th>
             <th className="px-3 py-2 font-medium">Date added</th>
             <th className="px-3 py-2 font-medium">Size</th>
+            {onEdit && <th className="w-8 px-2 py-2" />}
           </tr>
         </thead>
         <tbody>
@@ -181,6 +192,13 @@ export function DocTable({ rows, showProperty = true }: { rows: DocumentEntry[];
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.period ?? d.date ?? "—"}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.dateAdded?.slice(0, 10) ?? "—"}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{estimateFileSize(d.fileData)}</td>
+                {onEdit && (
+                  <td className="px-2 py-2">
+                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onEdit(d)}>
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -190,7 +208,7 @@ export function DocTable({ rows, showProperty = true }: { rows: DocumentEntry[];
   );
 }
 
-export function DocGroupSection({ label, rows, showProperty }: { label: string; rows: DocumentEntry[]; showProperty?: boolean }) {
+export function DocGroupSection({ label, rows, showProperty, onEdit }: { label: string; rows: DocumentEntry[]; showProperty?: boolean; onEdit?: (d: DocumentEntry) => void }) {
   return (
     <CollapsibleGroupSection
       label={label}
@@ -200,7 +218,7 @@ export function DocGroupSection({ label, rows, showProperty }: { label: string; 
         </Badge>
       }
     >
-      <DocTable rows={rows} showProperty={showProperty} />
+      <DocTable rows={rows} showProperty={showProperty} onEdit={onEdit} />
     </CollapsibleGroupSection>
   );
 }
@@ -328,12 +346,15 @@ export function DocumentsPanel({
   tenantOptions,
   searchPlaceholder = "Search documents…",
   emptyMessage = "No documents on file yet.",
+  onEdit,
 }: {
   title: string;
   entries: DocumentEntry[];
   tenantOptions?: { id: string; name: string }[];
   searchPlaceholder?: string;
   emptyMessage?: string;
+  /** Shows an Edit (pencil) action per row when set — for entries backed by an editable record. */
+  onEdit?: (d: DocumentEntry) => void;
 }) {
   const {
     query, setQuery,
@@ -450,7 +471,7 @@ export function DocumentsPanel({
 
           <div className="rounded-md border">
             {groupBy === "none" || !groups ? (
-              <DocTable rows={filtered} showProperty={false} />
+              <DocTable rows={filtered} showProperty={false} onEdit={onEdit} />
             ) : (
               <div className="space-y-2 p-2">
                 {groups.length === 0 && (
@@ -462,6 +483,7 @@ export function DocumentsPanel({
                     label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatDocMonthLabel(key) : `FY ${key}`}
                     rows={groupRows}
                     showProperty={false}
+                    onEdit={onEdit}
                   />
                 ))}
               </div>
