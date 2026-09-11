@@ -24,45 +24,6 @@ function escapeIlike(s: string): string {
 }
 
 /**
- * Looks for an existing Expense that this uploaded bill is actual evidence for, rather than a
- * separate new charge — the common case being a water/agent-fee deduction already posted from a
- * rent statement (vendor + amount + date) with the real bill PDF only forwarded or uploaded
- * afterwards. Same vendor + amount tolerance + date window as the client-side findDuplicateRecord
- * check (src/lib/billMatch.ts). Only attaches over a row that either has no invoice file yet, or
- * whose file is the whole rent statement it was posted from (source "email_auto") rather than a
- * dedicated per-vendor invoice — the real bill just uploaded is strictly more specific evidence
- * for that one charge, so it's worth attaching on top. A row that already carries its own
- * dedicated invoice is a genuine potential duplicate instead, left to runGuardrails below.
- */
-async function findAttachableExpense(
-  supabase: SupabaseClient,
-  parsed: ParsedBillFields,
-  matchedPropertyId: string | null,
-  matchedProviderId: string | undefined,
-): Promise<{ id: string } | null> {
-  if (!matchedPropertyId) return null;
-  const dueDate = new Date(parsed.due_date);
-  const from = new Date(dueDate.getTime() - DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
-  const to = new Date(dueDate.getTime() + DUPLICATE_WINDOW_DAYS * DAY_MS).toISOString().slice(0, 10);
-
-  // Matching by the resolved directory provider, when there is one, instead of an exact vendor
-  // string is what lets this survive extraction wording drift (e.g. "Sydney Water" one time,
-  // "Sydney Water (ABN 49 776 225 038)" the next) that would otherwise silently defeat an
-  // itemName-equals-vendor comparison and post the same real bill twice.
-  let query = supabase.from("expenses").select("id, cost, invoiceFileData, source").eq("propertyId", matchedPropertyId).gte("date", from).lte("date", to);
-  query = matchedProviderId ? query.eq("providerId", matchedProviderId) : query.ilike("itemName", escapeIlike(parsed.vendor));
-  const { data } = await query;
-  if (!data || data.length === 0) return null;
-
-  const tolerance = Math.max(2, parsed.amount * 0.02);
-  const match = data.find(
-    (e: { cost: number; invoiceFileData: string | null; source: string | null }) =>
-      Math.abs(Number(e.cost) - parsed.amount) <= tolerance && (!e.invoiceFileData || e.source === "email_auto"),
-  );
-  return match ? { id: match.id } : null;
-}
-
-/**
  * Decides whether this bill can post straight to expenses (clean, confident, matched, no
  * duplicate/price-spike) or needs a human decision first. Water bills always need review
  * regardless of how clean everything else looks, since they almost always carry a
@@ -271,21 +232,13 @@ export async function parseInboundBill(
   const matchedPropertyId = await matchProperty(supabase, parsed.property_address ?? "", parsed.bpay_reference);
   const matchedProviderId = await matchProvider(supabase, parsed.vendor, parsed.vendor_abn);
 
-  const attachable = await findAttachableExpense(supabase, parsed, matchedPropertyId, matchedProviderId);
-  if (attachable) {
-    const { error } = await supabase
-      .from("expenses")
-      .update({
-        invoiceFileName: input.pdfFileName,
-        invoiceFileData: input.pdfBase64,
-        sourceSubject: input.subject,
-        sourceEmailBody: input.textBody,
-      })
-      .eq("id", attachable.id);
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, linkedExpenseId: attachable.id, status: "approved", reviewReason: null, matchedPropertyId };
-  }
-
+  // Previously auto-attached this file straight onto a matching existing Expense (same
+  // vendor+amount+date window this function's own duplicate check below uses) with a direct DB
+  // write and no review — the exact "no human ever saw it" problem stageBillProposal's own doc
+  // comment describes fixing for the plain-duplicate case. Now every bill stages the same way, so
+  // the landlord's client-side duplicate check (src/lib/billMatch.ts, run when they review/save
+  // the staged proposal) is what offers "Attach to this transaction instead", with a chance to say
+  // no.
   let defaultCategory: string | undefined;
   if (matchedProviderId) {
     const { data: providerRow } = await supabase

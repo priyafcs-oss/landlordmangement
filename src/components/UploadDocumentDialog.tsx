@@ -28,10 +28,6 @@ interface UploadResult {
   ok: boolean;
   skipped?: boolean;
   billId?: string;
-  /** Set instead of billId when this file matched an existing Expense (e.g. a water bill line
-   * already posted from an agent statement, with no invoice on file yet) — the file was attached
-   * to that Expense instead of creating a second, disconnected Bill for the same charge. */
-  linkedExpenseId?: string;
   proposalId?: string;
   status?: string;
   error?: string;
@@ -139,9 +135,6 @@ export function UploadDocumentDialog({
           continue;
         }
         if ("billId" in data && data.billId) billedCount++;
-        if ("linkedExpenseId" in data && data.linkedExpenseId) {
-          toast.success(`${file.name}: matched an existing expense — invoice attached instead of creating a duplicate`);
-        }
 
         // The edge function writes rows server-side, so the client store's cached state doesn't
         // know about this file's result yet — needed now (not batched at the end) since the next
@@ -150,7 +143,6 @@ export function UploadDocumentDialog({
         // avoids re-downloading every stored file blob in the portfolio once per uploaded file.
         if ("proposalId" in data && data.proposalId) await refreshOne("aiProposals", data.proposalId);
         if ("billId" in data && data.billId) await refreshOne("bills", data.billId);
-        if ("linkedExpenseId" in data && data.linkedExpenseId) await refreshOne("expenses", data.linkedExpenseId);
 
         if ("proposalId" in data && data.proposalId) {
           setReviewQueue((q) => [...q, data.proposalId!]);

@@ -1,4 +1,5 @@
 import type { DepreciationItem, Expense, LedgerEntry, PropertyBill } from "./types";
+import { namesLooselyMatch } from "./providerMatch";
 
 export interface BillMatchCandidate {
   propertyId?: string;
@@ -15,12 +16,13 @@ const DAY_MS = 86_400_000;
 const DUE_DATE_LOOKBACK_DAYS = 7;
 const DUE_DATE_LOOKAHEAD_DAYS = 60;
 
+/** Word-boundary token match (same logic as matchProviderByName) instead of a plain substring
+ * check — catches a vendor name reordered or interrupted by other text (e.g. an itemName like
+ * "ABC Pty Ltd (Inv: 123) Repairs" still recognizes "ABC" as a whole token) that a pure
+ * `a.includes(b)` would miss whenever anything comes between the significant words. */
 function vendorMatches(providerName: string | undefined, candidate: string): boolean {
   if (!providerName) return false;
-  const a = providerName.trim().toLowerCase();
-  const b = candidate.trim().toLowerCase();
-  if (!a || !b) return false;
-  return a.includes(b) || b.includes(a);
+  return namesLooselyMatch(providerName, candidate);
 }
 
 function amountMatches(billAmount: number, candidateAmount: number): boolean {

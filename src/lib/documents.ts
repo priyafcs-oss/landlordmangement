@@ -1,5 +1,10 @@
 import type { AiIntakeProposal, AppState } from "@/lib/types";
 
+/** Expense categories that represent hands-on property-upkeep work — the Maintenance tab's
+ * "Warranties & receipts" panel surfaces an invoice/receipt for any of these, not just literal
+ * "Repairs & Maintenance" (a pest control or gardening invoice is the same kind of record). */
+const MAINTENANCE_ADJACENT_CATEGORIES = new Set(["Repairs & Maintenance", "Pest Control", "Gardening / Lawn Mowing", "Cleaning"]);
+
 export interface DocumentEntry {
   id: string;
   kind:
@@ -201,16 +206,18 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
           fileData: h.leaseDocumentFileData,
         };
       }),
-    // Only expenses that are themselves reusable reference material — a maintenance job's
+    // Only expenses that are themselves reusable reference material — a maintenance-type job's
     // invoice, or anything carrying a warranty — not every routine one-off transaction. Falls
     // back to sourceFileData (the statement a line was extracted from, e.g. an agent-statement
     // tradesperson deduction) when there's no separate invoice file — since the Source/Invoice
-    // split, a statement-derived Repairs & Maintenance expense often has only that.
+    // split, a statement-derived expense in one of these categories often has only that. Not just
+    // "Repairs & Maintenance" — pest control, gardening and cleaning invoices are the same kind of
+    // hands-on property-upkeep record a landlord wants on file here too.
     ...state.expenses
       .filter(
         (e) =>
           (e.invoiceFileData || e.sourceFileData || e.sourceEmailBody) &&
-          (e.category === "Repairs & Maintenance" || e.hasWarranty || e.warrantyExpiry),
+          (MAINTENANCE_ADJACENT_CATEGORIES.has(e.category ?? "") || e.hasWarranty || e.warrantyExpiry),
       )
       .map((e) => ({
         id: e.id,
