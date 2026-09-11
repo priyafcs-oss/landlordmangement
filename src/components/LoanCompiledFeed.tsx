@@ -49,6 +49,12 @@ interface FeedRow {
   sourceFileData?: string;
   recorded: boolean;
   expenseId?: string;
+  /** Set only when `recorded` came from matching the older per-period loan_statements record
+   * (rather than a direct feedProposalId+feedKey Expense match) — unrecording that case has to
+   * delete this statement row too, not just its expenseId, or the row would immediately read as
+   * "recorded" again next render (the legacy match only looks at proposalId+date, not whether the
+   * expense it names still exists). */
+  legacyStatementId?: string;
 }
 
 const CATEGORY_BY_KIND: Record<Exclude<RowKind, "reference">, ExpenseCategory> = {
@@ -202,6 +208,7 @@ function buildFeedRows(
       for (const c of componentsFor(li, i)) {
         let recorded = false;
         let expenseId: string | undefined;
+        let legacyStatementId: string | undefined;
         if (c.feedKey !== undefined) {
           const match = expenses.find(
             (e) => e.feedProposalId === p.id && e.feedLineIndex === c.feedKey,
@@ -215,9 +222,18 @@ function buildFeedRows(
             // mistake from a second statement upload), and this line must still read as "already
             // recorded" wherever it's viewed from, or it double-posts the same real-world interest
             // charge as a second deductible expense under the other loan.
-            recorded = loanStatements.some(
+            const stmt = loanStatements.find(
               (s) => s.proposalId === p.id && s.periodStart === li.date && s.periodEnd === li.date,
             );
+            if (stmt) {
+              recorded = true;
+              // expenseId (and legacyStatementId, so Unrecord can clean up this whole statement
+              // row too) are only set when the statement actually names one — an older statement
+              // row predating that link still reads as "recorded" here, just with no Unrecord
+              // offered, since there's nothing on record to delete.
+              expenseId = stmt.expenseId;
+              if (stmt.expenseId) legacyStatementId = stmt.id;
+            }
           }
         }
         rows.push({
@@ -234,6 +250,7 @@ function buildFeedRows(
           sourceFileData: p.sourceFileData,
           recorded,
           expenseId,
+          legacyStatementId,
         });
       }
     });
@@ -246,7 +263,7 @@ function buildFeedRows(
  * asking for it just for that one line, pre-filled with the sensible per-kind default. Renders
  * nothing when a loan has never had a statement uploaded/emailed for it. */
 export function LoanCompiledFeed({ loan }: { loan: Loan }) {
-  const { state, addExpense, deleteExpense, findOrCreateProvider, markProposalApplied } =
+  const { state, addExpense, deleteExpense, deleteLoanStatement, findOrCreateProvider, markProposalApplied } =
     useStore();
   const rows = buildFeedRows(loan, state.aiProposals, state.expenses, state.loanStatements);
   const [recording, setRecording] = useState<FeedRow | null>(null);
@@ -295,6 +312,10 @@ export function LoanCompiledFeed({ loan }: { loan: Loan }) {
     if (!r.expenseId) return;
     if (!confirm("Revert this line back to the feed? This deletes the recorded expense.")) return;
     deleteExpense(r.expenseId);
+    // A row recorded via the older per-period loan_statements match would otherwise still read as
+    // "recorded" next render (that lookup only checks proposalId+date, not whether its named
+    // expense still exists) — deleting the statement row too is what actually reverts it.
+    if (r.legacyStatementId) deleteLoanStatement(r.legacyStatementId);
     toast.success("Reverted to feed");
   };
 
