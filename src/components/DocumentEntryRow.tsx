@@ -167,6 +167,10 @@ export function DocTable({
       </div>
     );
   }
+  // Only shown when at least one row actually has one — e.g. Maintenance's own invoices posted
+  // alongside an agent statement — so every other document list (leases, condition reports, ...)
+  // that never has this distinction doesn't grow an always-empty column.
+  const showStatementColumn = rows.some((d) => d.statementFileName || d.statementFileData);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -177,6 +181,7 @@ export function DocTable({
             <th className="px-3 py-2 font-medium">Period</th>
             <th className="px-3 py-2 font-medium">Date added</th>
             <th className="px-3 py-2 font-medium">Size</th>
+            {showStatementColumn && <th className="px-3 py-2 font-medium">Statement</th>}
             {onEdit && <th className="w-8 px-2 py-2" />}
           </tr>
         </thead>
@@ -192,6 +197,17 @@ export function DocTable({
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.period ?? d.date ?? "—"}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{d.dateAdded?.slice(0, 10) ?? "—"}</td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">{estimateFileSize(d.fileData)}</td>
+                {showStatementColumn && (
+                  <td className="min-w-0 max-w-[180px] px-3 py-2">
+                    {d.statementFileData ? (
+                      <DocumentLink fileName={d.statementFileName} fileData={d.statementFileData} className="flex min-w-0 items-center gap-1 truncate text-primary underline">
+                        <span className="truncate">{d.statementFileName ?? "View"}</span>
+                      </DocumentLink>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                )}
                 {onEdit && (
                   <td className="px-2 py-2">
                     <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => onEdit(d)}>

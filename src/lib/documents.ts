@@ -36,6 +36,12 @@ export interface DocumentEntry {
   status?: string;
   fileName?: string;
   fileData?: string;
+  /** The statement this document's own line was extracted from/posted alongside, when it's a
+   * different file from the document itself — e.g. a maintenance invoice deducted on an agent
+   * statement carries both its own invoice PDF and a link to that statement. Undefined for a kind
+   * with no such distinction, or when there's nothing beyond the primary document to show. */
+  statementFileName?: string;
+  statementFileData?: string;
   subject?: string;
   emailBody?: string;
   /** Warranty expiry date (ISO), when this "Maintenance" document is a warranted item — drives the
@@ -219,6 +225,11 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         status: e.status,
         fileName: e.invoiceFileName ?? e.sourceFileName ?? undefined,
         fileData: e.invoiceFileData ?? e.sourceFileData ?? undefined,
+        // Only distinct from the primary document when there's a real invoice AND a separate
+        // statement it was posted alongside — when there's no invoice, the primary document above
+        // already IS the statement, so showing it again here would just be the same file twice.
+        statementFileName: e.invoiceFileData ? (e.sourceFileName ?? undefined) : undefined,
+        statementFileData: e.invoiceFileData ? (e.sourceFileData ?? undefined) : undefined,
         subject: e.sourceSubject,
         emailBody: e.sourceEmailBody,
         warrantyExpiry: e.hasWarranty ? e.warrantyExpiry : undefined,
