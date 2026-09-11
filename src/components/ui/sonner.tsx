@@ -6,6 +6,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       className="toaster group"
+      // Stay on screen until the landlord dismisses them (via the close button) rather than
+      // auto-vanishing after a few seconds — a duplicate/error warning is easy to miss entirely
+      // at the default ~4s duration.
+      duration={Infinity}
+      closeButton
       toastOptions={{
         classNames: {
           toast:

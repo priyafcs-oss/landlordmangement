@@ -7386,7 +7386,7 @@ export function ProviderRow({
  * contact list, which a landlord adding a managing agent had no obvious reason to go looking in.
  */
 export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
-  const { state } = useStore();
+  const { state, loading } = useStore();
   // A property's "agents" are Agent-role providers tagged to it via provider_properties — not
   // every one of those necessarily has an agreement on file yet (see the "no fee terms" message
   // below), so this deliberately isn't filtered down to providers with a provider_agreements row.
@@ -7435,7 +7435,10 @@ export function PropertyTenancyTab({ propertyId }: { propertyId: string }) {
         </div>
         {agents.length === 0 ? (
           <div className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-            No managing agent on file for this property yet.
+            {/* The initial data fetch hasn't landed yet — showing "no agent on file" as if that
+                were confirmed (rather than just not-loaded-yet) reads as data loss on a fresh
+                page load, when it's really just still loading. */}
+            {loading ? "Loading…" : "No managing agent on file for this property yet."}
           </div>
         ) : (
           <div className="space-y-2">
@@ -7596,7 +7599,7 @@ function AgentStatementsSection({
   onReview: (proposalId: string) => void;
   tenantOptions?: { id: string; name: string }[];
 }) {
-  const { state } = useStore();
+  const { state, loading } = useStore();
   const posted = useMemo(
     () => buildPostedTotalsByStatement(state.ledger, state.expenses, state.tenants, propertyId),
     [state.ledger, state.expenses, state.tenants, propertyId],
@@ -7798,7 +7801,9 @@ function AgentStatementsSection({
       )}
       {statements.length === 0 ? (
         <div className="text-xs text-muted-foreground">
-          No rent statements uploaded for this property yet — forward or upload one and it'll show up here.
+          {loading
+            ? "Loading…"
+            : "No rent statements uploaded for this property yet — forward or upload one and it'll show up here."}
         </div>
       ) : (
         <>
