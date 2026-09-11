@@ -294,6 +294,8 @@ function EntityOverviewTab({
         loanBalanceSnapshots={state.loanBalanceSnapshots}
         aiProposals={aiProposals}
         tenants={tenants}
+        assets={state.assets}
+        entities={state.entities}
         headerRight={<Badge variant="secondary">{entity.type}</Badge>}
       />
       {entity.owners.length > 0 && (

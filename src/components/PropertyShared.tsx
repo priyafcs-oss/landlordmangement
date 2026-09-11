@@ -3630,7 +3630,11 @@ function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?
           </div>
 
           <div className="rounded-md border p-3">
-            <div className="mb-2 text-sm font-medium">Bank loan (optional)</div>
+            <div className="mb-2 text-sm font-medium">Original bank loan (at purchase)</div>
+            <div className="mb-2 text-xs text-muted-foreground">
+              A one-time snapshot of the loan taken out to buy this property — kept as its own record even after refinancing
+              or paying it down. The live, current loan (balance, EMI, offset) is tracked separately on the Loans tab.
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Lender name">
                 <Input value={form.lender} onChange={(e) => setForm({ ...form, lender: e.target.value })} />
@@ -3638,10 +3642,10 @@ function PurchaseAcquisitionDialog({ prop, trigger }: { prop: Property; trigger?
               <Field label="Loan account / reference">
                 <Input value={form.loanAccountRef} onChange={(e) => setForm({ ...form, loanAccountRef: e.target.value })} />
               </Field>
-              <Field label="Current loan balance (AUD)">
+              <Field label="Loan balance at purchase (AUD)">
                 <Input type="number" value={form.loanBalance} onChange={(e) => setForm({ ...form, loanBalance: e.target.value })} />
               </Field>
-              <Field label="Interest rate (%)">
+              <Field label="Interest rate at purchase (%)">
                 <Input type="number" step="0.01" value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
               </Field>
               <Field label="Repayment frequency">
@@ -3684,12 +3688,34 @@ export function PropertyPurchaseTab({ prop, loan }: { prop: Property; loan?: Loa
         <Stat label="Deposit" value={prop.deposit ? fmtCurrency(prop.deposit) : "—"} />
         <Stat label="Lot size" value={prop.lotSize || "—"} />
         <Stat label="Physical attributes" value={prop.physicalAttributes || "—"} />
-        <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
-        <Stat label="Loan balance" value={fmtCurrency(prop.loanBalance ?? loan?.totalBalance ?? 0)} />
-        <Stat label="Interest rate" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
-        <Stat label="Monthly EMI" value={fmtCurrency(loan?.monthlyEmi ?? 0)} />
-        <Stat label="Offset balance" value={loan?.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
       </div>
+
+      <div>
+        <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+          Original bank loan — as at purchase, kept as its own record even if the loan is later refinanced or paid down
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label="Lender" value={prop.lender || loan?.bankName || "—"} />
+          <Stat label="Loan account / reference" value={prop.loanAccountRef || "—"} />
+          {/* Deliberately no live-loan fallback here — showing today's balance/rate under an "as at
+              purchase" label would silently overwrite the historical figure every time the loan
+              moves, defeating the point of keeping an original record. See the Loans tab for the
+              current, live figures. */}
+          <Stat label="Loan balance (at purchase)" value={prop.loanBalance !== undefined ? fmtCurrency(prop.loanBalance) : "—"} />
+          <Stat label="Interest rate (at purchase)" value={prop.interestRate ? `${prop.interestRate}%` : "—"} />
+        </div>
+      </div>
+
+      {loan && (
+        <div>
+          <div className="mb-1.5 text-xs font-medium text-muted-foreground">Current loan — live figures, see the Loans tab for history</div>
+          <div className="grid grid-cols-2 gap-3">
+            <Stat label="Current balance" value={fmtCurrency(loan.totalBalance)} />
+            <Stat label="Monthly EMI" value={fmtCurrency(loan.monthlyEmi ?? 0)} />
+            <Stat label="Offset balance" value={loan.offsetBalance ? fmtCurrency(loan.offsetBalance) : "—"} />
+          </div>
+        </div>
+      )}
       <DocumentsPanel title="Documents" entries={documents} />
     </div>
   );

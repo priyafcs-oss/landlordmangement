@@ -64,11 +64,17 @@ interface ExtractResult {
  */
 export function AddLoanDialog({
   loan,
+  refinanceFrom,
   propertyId: lockedPropertyId,
   trigger,
 }: {
   /** Edits an existing Loan in place instead of creating a new one. */
   loan?: Loan;
+  /** Refinance instead of a plain edit or a from-scratch add: creates a brand-new Loan for the
+   * same property (pre-filled from this one, so only the changed terms need retyping) and, on
+   * save, marks this loan "Paid Off" instead of overwriting it — so the original lender/rate/
+   * balance stay on record as history rather than being silently replaced in place. */
+  refinanceFrom?: Loan;
   /** Pre-fills and locks the property when adding from a property-scoped page (e.g. the
    * property's own Loans tab) — omit for the portfolio-wide Loans summary, where the landlord
    * picks the property themselves. */
@@ -78,6 +84,10 @@ export function AddLoanDialog({
   const { state, addLoan, updateLoan, deleteLoan } = useStore();
   const [open, setOpen] = useState(false);
   const isEdit = !!loan;
+  const isRefinance = !isEdit && !!refinanceFrom;
+  // What to prefill the form from — the loan being edited, or (for a refinance) the loan being
+  // replaced, since its terms are the sensible starting point for the new one.
+  const prefill = loan ?? refinanceFrom;
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [extractOk, setExtractOk] = useState(false);
@@ -89,30 +99,33 @@ export function AddLoanDialog({
   const generationRef = useRef(0);
 
   const blankForm = () => ({
-    propertyId: loan?.propertyId ?? lockedPropertyId ?? state.properties[0]?.id ?? "",
-    bankName: loan?.bankName ?? "",
-    bsb: loan?.bsb ?? "",
-    accountNumber: loan?.accountNumber ?? "",
-    productType: loan?.productType ?? "",
-    loanType: (loan?.loanType ?? "Principal & Interest") as Loan["loanType"],
-    purpose: (loan?.purpose ?? "Investment") as Loan["purpose"],
-    originalAmount: loan?.originalAmount !== undefined ? String(loan.originalAmount) : "",
-    totalBalance: loan ? String(loan.totalBalance) : "",
-    creditLimit: loan?.creditLimit !== undefined ? String(loan.creditLimit) : "",
-    interestRate: loan ? String(loan.interestRate) : "",
-    rateType: (loan?.rateType ?? "Variable") as Loan["rateType"],
-    monthlyEmi: loan ? String(loan.monthlyEmi) : "",
-    repaymentFrequency: (loan?.repaymentFrequency ?? "Monthly") as Loan["repaymentFrequency"],
-    nextRepaymentDate: loan?.nextRepaymentDate ?? "",
-    dueDayOfMonth: loan?.dueDayOfMonth !== undefined ? String(loan.dueDayOfMonth) : "",
-    isDirectDebit: loan?.isDirectDebit ?? true,
-    linkedBankAccount: loan?.linkedBankAccount ?? "",
-    startDate: loan?.startDate ?? "",
-    maturityDate: loan?.maturityDate ?? "",
-    hasOffsetAccount: loan?.hasOffsetAccount ?? false,
-    offsetBalance: loan?.offsetBalance !== undefined ? String(loan.offsetBalance) : "",
-    status: (loan?.status ?? "Active") as Loan["status"],
-    notes: loan?.notes ?? "",
+    propertyId: prefill?.propertyId ?? lockedPropertyId ?? state.properties[0]?.id ?? "",
+    // A refinance is a new lender/product by definition — leave these blank to type in, rather
+    // than prefilling the old bank's own details onto what's meant to replace them.
+    bankName: isRefinance ? "" : (prefill?.bankName ?? ""),
+    bsb: isRefinance ? "" : (prefill?.bsb ?? ""),
+    accountNumber: isRefinance ? "" : (prefill?.accountNumber ?? ""),
+    productType: isRefinance ? "" : (prefill?.productType ?? ""),
+    loanType: (prefill?.loanType ?? "Principal & Interest") as Loan["loanType"],
+    purpose: (prefill?.purpose ?? "Investment") as Loan["purpose"],
+    originalAmount: prefill?.originalAmount !== undefined ? String(prefill.originalAmount) : "",
+    totalBalance: prefill ? String(prefill.totalBalance) : "",
+    creditLimit: prefill?.creditLimit !== undefined ? String(prefill.creditLimit) : "",
+    interestRate: isRefinance ? "" : prefill ? String(prefill.interestRate) : "",
+    rateType: (prefill?.rateType ?? "Variable") as Loan["rateType"],
+    monthlyEmi: isRefinance ? "" : prefill ? String(prefill.monthlyEmi) : "",
+    repaymentFrequency: (prefill?.repaymentFrequency ?? "Monthly") as Loan["repaymentFrequency"],
+    nextRepaymentDate: isRefinance ? "" : (prefill?.nextRepaymentDate ?? ""),
+    dueDayOfMonth: isRefinance ? "" : prefill?.dueDayOfMonth !== undefined ? String(prefill.dueDayOfMonth) : "",
+    isDirectDebit: prefill?.isDirectDebit ?? true,
+    linkedBankAccount: isRefinance ? "" : (prefill?.linkedBankAccount ?? ""),
+    startDate: isRefinance ? "" : (prefill?.startDate ?? ""),
+    maturityDate: isRefinance ? "" : (prefill?.maturityDate ?? ""),
+    hasOffsetAccount: isRefinance ? false : (prefill?.hasOffsetAccount ?? false),
+    offsetBalance: isRefinance ? "" : prefill?.offsetBalance !== undefined ? String(prefill.offsetBalance) : "",
+    // A refinance always starts life Active, regardless of the old loan's own status.
+    status: (isRefinance ? "Active" : (prefill?.status ?? "Active")) as Loan["status"],
+    notes: isRefinance ? "" : (prefill?.notes ?? ""),
     sourceFileName: undefined as string | undefined,
     sourceFileData: undefined as string | undefined,
   });
@@ -242,6 +255,10 @@ export function AddLoanDialog({
     if (isEdit && loan) {
       updateLoan(loan.id, payload);
       toast.success("Loan updated");
+    } else if (isRefinance && refinanceFrom) {
+      addLoan(payload);
+      updateLoan(refinanceFrom.id, { status: "Paid Off" });
+      toast.success(`Refinanced — new loan added, ${refinanceFrom.bankName} kept on record as history`);
     } else {
       addLoan(payload);
       toast.success("Loan added");
@@ -268,9 +285,13 @@ export function AddLoanDialog({
         }
       >
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit loan" : "Add loan"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit loan" : isRefinance ? `Refinance ${refinanceFrom!.bankName} loan` : "Add loan"}</DialogTitle>
           <div className="text-xs text-muted-foreground">
-            {isEdit ? "Update this loan's details." : "Upload the loan offer/contract for AI extraction, or enter the details manually."}
+            {isEdit
+              ? "Update this loan's details."
+              : isRefinance
+                ? `Pre-filled from the ${refinanceFrom!.bankName} loan — enter the new lender's details below. Saving keeps the old loan on record as history instead of overwriting it.`
+                : "Upload the loan offer/contract for AI extraction, or enter the details manually."}
           </div>
         </DialogHeader>
 

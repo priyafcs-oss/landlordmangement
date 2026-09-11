@@ -145,6 +145,8 @@ function DashboardPage() {
         loanBalanceSnapshots={state.loanBalanceSnapshots}
         aiProposals={scopedAiProposals}
         tenants={scopedTenants}
+        assets={state.assets}
+        entities={state.entities}
         extraAssetsValue={extraAssetsValue}
         headerRight={
           state.entities.length > 0 ? (

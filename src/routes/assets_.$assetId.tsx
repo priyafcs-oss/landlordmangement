@@ -3,7 +3,9 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { fmtCurrency } from "@/lib/calculations";
+import type { Loan } from "@/lib/types";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -28,6 +30,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
   Activity,
+  Repeat,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -128,9 +131,73 @@ const NAV: {
   { section: "notes", label: "Notes", icon: StickyNote, group: "Property" },
 ];
 
+function LoanCard({ l, propertyId, historic }: { l: Loan; propertyId: string; historic?: boolean }) {
+  return (
+    <div className={`rounded border p-3 text-xs ${historic ? "bg-muted/20" : ""}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 font-medium">
+          {l.bankName}
+          {historic && (
+            <Badge variant="outline" className="text-[10px] font-normal">
+              Paid off
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <UploadDocumentDialog
+            loanId={l.id}
+            trigger={
+              <Button size="icon" variant="ghost" className="h-6 w-6" title="Upload statement">
+                <FileUp className="h-3 w-3" />
+              </Button>
+            }
+          />
+          <AddLoanStatementDialog loan={l} />
+          {!historic && (
+            <AddLoanDialog
+              refinanceFrom={l}
+              propertyId={propertyId}
+              trigger={
+                <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-xs">
+                  <Repeat className="h-3 w-3" /> Refinance
+                </Button>
+              }
+            />
+          )}
+          <AddLoanDialog
+            loan={l}
+            propertyId={propertyId}
+            trigger={
+              <Button size="icon" variant="ghost" className="h-6 w-6">
+                <Pencil className="h-3 w-3" />
+              </Button>
+            }
+          />
+        </div>
+      </div>
+      <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
+        <span>Balance: {fmtCurrency(l.totalBalance)}</span>
+        <span>Rate: {l.interestRate}%</span>
+        <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
+        <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
+      </div>
+      <div className="mt-2 space-y-2">
+        <LoanStatementHistory loanId={l.id} />
+        <LoanCompiledFeed loan={l} />
+      </div>
+    </div>
+  );
+}
+
 function PropertyLoansTab({ propertyId }: { propertyId: string }) {
   const { state } = useStore();
+  const [showHistory, setShowHistory] = useState(false);
   const loans = state.loans.filter((l) => l.propertyId === propertyId);
+  // Refinancing keeps the old loan on record with status "Paid Off" instead of overwriting its
+  // terms — kept out of the main list (which is otherwise the still-live loans a landlord checks
+  // day to day) and tucked behind a collapsed "Loan history" toggle instead.
+  const activeLoans = loans.filter((l) => l.status !== "Paid Off");
+  const historicLoans = loans.filter((l) => l.status === "Paid Off");
   const documents = buildDocumentEntries(state).filter(
     (e) =>
       e.propertyId === propertyId && (e.kind === "Loan Document" || e.kind === "Loan Statement"),
@@ -142,52 +209,32 @@ function PropertyLoansTab({ propertyId }: { propertyId: string }) {
         <AddLoanDialog propertyId={propertyId} />
       </div>
       <div className="space-y-2">
-        {loans.length === 0 && (
-          <div className="text-xs text-muted-foreground">No loans on file for this property.</div>
+        {activeLoans.length === 0 && (
+          <div className="text-xs text-muted-foreground">No active loans on file for this property.</div>
         )}
-        {loans.map((l) => (
-          <div key={l.id} className="rounded border p-3 text-xs">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-medium">{l.bankName}</div>
-              <div className="flex items-center gap-1">
-                <UploadDocumentDialog
-                  loanId={l.id}
-                  trigger={
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-6 w-6"
-                      title="Upload statement"
-                    >
-                      <FileUp className="h-3 w-3" />
-                    </Button>
-                  }
-                />
-                <AddLoanStatementDialog loan={l} />
-                <AddLoanDialog
-                  loan={l}
-                  propertyId={propertyId}
-                  trigger={
-                    <Button size="icon" variant="ghost" className="h-6 w-6">
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                  }
-                />
-              </div>
-            </div>
-            <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground sm:grid-cols-4">
-              <span>Balance: {fmtCurrency(l.totalBalance)}</span>
-              <span>Rate: {l.interestRate}%</span>
-              <span>EMI: {fmtCurrency(l.monthlyEmi)}</span>
-              <span>Offset: {l.offsetBalance ? fmtCurrency(l.offsetBalance) : "—"}</span>
-            </div>
-            <div className="mt-2 space-y-2">
-              <LoanStatementHistory loanId={l.id} />
-              <LoanCompiledFeed loan={l} />
-            </div>
-          </div>
+        {activeLoans.map((l) => (
+          <LoanCard key={l.id} l={l} propertyId={propertyId} />
         ))}
       </div>
+      {historicLoans.length > 0 && (
+        <div>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            onClick={() => setShowHistory((v) => !v)}
+          >
+            {showHistory ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Loan history ({historicLoans.length})
+          </button>
+          {showHistory && (
+            <div className="mt-2 space-y-2">
+              {historicLoans.map((l) => (
+                <LoanCard key={l.id} l={l} propertyId={propertyId} historic />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <DocumentsSection title="Documents" entries={documents} />
     </div>
   );
@@ -403,6 +450,8 @@ function PropertyAssetPage() {
             loanBalanceSnapshots={state.loanBalanceSnapshots}
             aiProposals={propertyAiProposals}
             tenants={tenants}
+            assets={state.assets}
+            entities={state.entities}
           />
         )}
         {section === "summary" && (

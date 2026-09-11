@@ -8,6 +8,8 @@ import type {
   InsurancePolicy,
   ValuationSnapshot,
   LoanBalanceSnapshot,
+  Asset,
+  Entity,
 } from "./types";
 import { daysUntil, todayISO } from "./calculations";
 
@@ -105,6 +107,160 @@ export function computeBufferStatus(buffers: CashBuffer[]): BufferStatus {
     worstLabel: worst ? worst.buffer.label : null,
     fullyCovered: withTarget.every((x) => x.pct >= 100),
   };
+}
+
+export interface UpcomingRepaymentItem {
+  loanId: string;
+  bankName: string;
+  accountNumber?: string;
+  propertyLabel: string;
+  repaymentFrequency: string;
+  dueDate: string;
+  amount: number;
+  offsetBalance: number;
+  shortfall: boolean;
+}
+
+export interface UpcomingRepaymentsSummary {
+  dueTotal: number;
+  availableTotal: number;
+  shortfallTotal: number;
+  items: UpcomingRepaymentItem[];
+}
+
+/** The per-repayment amount for one loan, whatever its cadence — monthlyEmi is always a monthly
+ * figure (see computeCashflowSeries), so a weekly/fortnightly loan's own instalment is derived
+ * from it rather than stored separately. */
+function perRepaymentAmount(loan: Loan): number {
+  const monthly = loan.monthlyEmi || 0;
+  if (loan.repaymentFrequency === "Weekly") return (monthly * 12) / 52;
+  if (loan.repaymentFrequency === "Fortnightly") return (monthly * 12) / 26;
+  return monthly;
+}
+
+/** Every occurrence of a recurring date, starting from `fromISO`, that falls within
+ * [windowStart, windowEnd] — rolling forward first if `fromISO` is stale (in the past). Bounded so
+ * a malformed/very-old date can't loop indefinitely. */
+function occurrencesInWindow(fromISO: string, frequency: Loan["repaymentFrequency"], windowStart: Date, windowEnd: Date): Date[] {
+  let d = new Date(fromISO);
+  if (isNaN(d.getTime())) return [];
+  const step = (date: Date) => {
+    const next = new Date(date);
+    if (frequency === "Weekly") next.setDate(next.getDate() + 7);
+    else if (frequency === "Fortnightly") next.setDate(next.getDate() + 14);
+    else next.setMonth(next.getMonth() + 1);
+    return next;
+  };
+  for (let i = 0; d < windowStart && i < 1000; i++) d = step(d);
+  const out: Date[] = [];
+  for (let i = 0; d <= windowEnd && i < 100; i++) {
+    out.push(d);
+    d = step(d);
+  }
+  return out;
+}
+
+/** Loan repayments falling due in the next `windowDays`, with each loan's offset balance as the
+ * cash already sitting against it — flags a shortfall where the offset can't cover the instalment.
+ * A loan with no `nextRepaymentDate` on file is skipped (nothing to schedule from). */
+export function computeUpcomingRepayments(loans: Loan[], properties: Property[], windowDays: number): UpcomingRepaymentsSummary {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(end.getDate() + windowDays);
+
+  const items: UpcomingRepaymentItem[] = [];
+  for (const loan of loans) {
+    if (!loan.nextRepaymentDate || loan.status === "Paid Off") continue;
+    const dates = occurrencesInWindow(loan.nextRepaymentDate, loan.repaymentFrequency, today, end);
+    if (dates.length === 0) continue;
+    const amount = perRepaymentAmount(loan);
+    const offsetBalance = loan.offsetBalance ?? 0;
+    const property = properties.find((p) => p.id === loan.propertyId);
+    const propertyLabel = property?.alias || property?.address || "—";
+    for (const d of dates) {
+      items.push({
+        loanId: loan.id,
+        bankName: loan.bankName,
+        accountNumber: loan.accountNumber,
+        propertyLabel,
+        repaymentFrequency: loan.repaymentFrequency ?? "Monthly",
+        dueDate: d.toISOString().slice(0, 10),
+        amount,
+        offsetBalance,
+        shortfall: offsetBalance < amount,
+      });
+    }
+  }
+  items.sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
+
+  const dueTotal = items.reduce((s, i) => s + i.amount, 0);
+  // Each loan's offset balance counts once toward "available", not once per occurrence — a
+  // fortnightly loan due twice in a 30-day window still only has one offset account behind it.
+  const loanIdsInWindow = new Set(items.map((i) => i.loanId));
+  const availableTotal = loans.filter((l) => loanIdsInWindow.has(l.id)).reduce((s, l) => s + (l.offsetBalance ?? 0), 0);
+  const shortfallTotal = Math.max(0, dueTotal - availableTotal);
+
+  return { dueTotal, availableTotal, shortfallTotal, items };
+}
+
+export interface BufferDetailItem {
+  id: string;
+  label: string;
+  scopeLabel: string;
+  currentBalance: number;
+  target?: number;
+  targetMonths?: number;
+  monthsCovered?: number;
+  coveredPercent?: number;
+}
+
+export interface BufferDetailsSummary {
+  totalRequired: number;
+  totalAvailable: number;
+  totalShortfall: number;
+  items: BufferDetailItem[];
+}
+
+/** Per-buffer detail (target, current balance, months/percent covered) plus portfolio-wide
+ * required/available/shortfall totals across every buffer — the expanded view behind the single
+ * rolled-up percentage computeBufferStatus shows. Same "avg of the trailing 3 months' expenses in
+ * scope" estimate as the dedicated Buffers page (see buffers.tsx's monthlyExpenseEstimate). */
+export function computeBufferDetails(buffers: CashBuffer[], expenses: Expense[], assets: Asset[], entities: Entity[]): BufferDetailsSummary {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 3);
+  const cutoffIso = cutoff.toISOString().slice(0, 10);
+
+  const monthlyExpenseEstimate = (scopeType: CashBuffer["scopeType"], scopeId?: string) => {
+    const relevant = expenses.filter((e) => {
+      if (e.date < cutoffIso) return false;
+      if (scopeType === "Portfolio") return true;
+      if (scopeType === "Asset") return e.assetId === scopeId;
+      if (scopeType === "Entity") return assets.find((a) => a.id === e.assetId)?.ownerEntityId === scopeId;
+      return true;
+    });
+    return relevant.reduce((s, e) => s + e.cost, 0) / 3;
+  };
+
+  const items: BufferDetailItem[] = buffers.map((b) => {
+    const monthlyExpense = monthlyExpenseEstimate(b.scopeType, b.scopeId);
+    const monthsCovered = monthlyExpense > 0 ? b.currentBalance / monthlyExpense : undefined;
+    const target = b.targetAmount ?? (b.targetMonths ? b.targetMonths * monthlyExpense : undefined);
+    const coveredPercent = target && target > 0 ? Math.min(100, Math.round((b.currentBalance / target) * 100)) : undefined;
+    const scopeLabel =
+      b.scopeType === "Portfolio"
+        ? "Whole portfolio"
+        : b.scopeType === "Entity"
+          ? (entities.find((e) => e.id === b.scopeId)?.name ?? "Entity")
+          : (assets.find((a) => a.id === b.scopeId)?.name ?? "Asset");
+    return { id: b.id, label: b.label, scopeLabel, currentBalance: b.currentBalance, target, targetMonths: b.targetMonths, monthsCovered, coveredPercent };
+  });
+
+  const totalRequired = items.reduce((s, i) => s + (i.target ?? 0), 0);
+  const totalAvailable = items.reduce((s, i) => s + i.currentBalance, 0);
+  const totalShortfall = Math.max(0, totalRequired - totalAvailable);
+
+  return { totalRequired, totalAvailable, totalShortfall, items };
 }
 
 export interface OverviewAlert {

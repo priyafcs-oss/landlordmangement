@@ -33,6 +33,8 @@ import {
   computeOverviewMetrics,
   computeCashflowSeries,
   computeBufferStatus,
+  computeUpcomingRepayments,
+  computeBufferDetails,
   computeInsuranceAlerts,
   computeRentHeatmap,
   computeValueDebtTrend,
@@ -49,6 +51,8 @@ import type {
   LoanBalanceSnapshot,
   AiIntakeProposal,
   Tenant,
+  Asset,
+  Entity,
 } from "@/lib/types";
 
 export interface OverviewSectionProps {
@@ -65,6 +69,8 @@ export interface OverviewSectionProps {
   loanBalanceSnapshots: LoanBalanceSnapshot[];
   aiProposals: AiIntakeProposal[];
   tenants: Tenant[];
+  assets: Asset[];
+  entities: Entity[];
   extraAssetsValue?: number;
   headerRight?: ReactNode;
 }
@@ -93,15 +99,20 @@ export function OverviewSection({
   loanBalanceSnapshots,
   aiProposals,
   tenants,
+  assets,
+  entities,
   extraAssetsValue = 0,
   headerRight,
 }: OverviewSectionProps) {
   const [cashflowMonths, setCashflowMonths] = useState<6 | 12>(6);
   const [valueDebtRange, setValueDebtRange] = useState<"12M" | "5Y" | "10Y">("12M");
+  const [repayWindow, setRepayWindow] = useState<7 | 14 | 30>(30);
 
   const metrics = computeOverviewMetrics(properties, loans, extraAssetsValue);
   const cashflow = computeCashflowSeries(ledger, expenses, loans, cashflowMonths);
   const bufferStatus = computeBufferStatus(buffers);
+  const repayments = computeUpcomingRepayments(loans, properties, repayWindow);
+  const bufferDetails = computeBufferDetails(buffers, expenses, assets, entities);
   const insuranceAlerts = computeInsuranceAlerts(properties, insurancePolicies);
   const heatmap = computeRentHeatmap(ledger);
   const valueDebtPoints = computeValueDebtTrend(
@@ -279,6 +290,7 @@ export function OverviewSection({
             <div className="rounded-md border p-3">
               <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
                 <span>Debt {metrics.lvrPercent}%</span>
+                <span>LVR {metrics.lvrPercent}%</span>
                 <span>Equity {100 - metrics.lvrPercent}%</span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-emerald-200">
@@ -379,9 +391,77 @@ export function OverviewSection({
                   </div>
                 </div>
               </div>
+              <div className="space-y-2 border-t pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Landmark className="h-3 w-3" /> Upcoming repayments
+                  </span>
+                  <div className="flex gap-1">
+                    {([7, 14, 30] as const).map((d) => (
+                      <Button
+                        key={d}
+                        size="sm"
+                        variant={repayWindow === d ? "secondary" : "ghost"}
+                        className="h-6 px-2 text-[11px]"
+                        onClick={() => setRepayWindow(d)}
+                      >
+                        {d}d
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <div className="text-muted-foreground">Due</div>
+                    <div className="font-medium">{fmtCurrency(repayments.dueTotal)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Available</div>
+                    <div className="font-medium">{fmtCurrency(repayments.availableTotal)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Shortfall</div>
+                    <div className={`font-medium ${repayments.shortfallTotal > 0 ? "text-destructive" : "text-emerald-600"}`}>
+                      {repayments.shortfallTotal > 0 ? "−" : ""}
+                      {fmtCurrency(repayments.shortfallTotal)}
+                    </div>
+                  </div>
+                </div>
+                {repayments.items.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">No repayments due in this window.</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {repayments.items.map((r, i) => (
+                      <div
+                        key={`${r.loanId}-${r.dueDate}-${i}`}
+                        className={`rounded-md border p-2 text-xs ${r.shortfall ? "border-destructive/40 bg-destructive/5" : ""}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">
+                            {r.bankName}
+                            {r.accountNumber ? ` ····${r.accountNumber.slice(-4)}` : ""}
+                          </span>
+                          {r.shortfall && (
+                            <span className="flex items-center gap-1 text-destructive">
+                              <AlertTriangle className="h-3 w-3" /> Shortfall
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between text-muted-foreground">
+                          <span>
+                            {r.propertyLabel} · {r.repaymentFrequency} · {r.dueDate}
+                          </span>
+                          <span className="font-medium text-foreground">{fmtCurrency(r.amount)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {buffers.length > 0 && (
-                <div className="border-t pt-3">
-                  <div className="mb-1 flex items-center justify-between text-xs">
+                <div className="space-y-2 border-t pt-3">
+                  <div className="flex items-center justify-between text-xs">
                     <span className="flex items-center gap-1 text-muted-foreground">
                       <ShieldCheck className="h-3 w-3" /> Cash buffer
                     </span>
@@ -398,6 +478,49 @@ export function OverviewSection({
                       className={`h-full ${bufferStatus.fullyCovered ? "bg-emerald-500" : "bg-amber-500"}`}
                       style={{ width: `${Math.min(100, bufferStatus.worstPct ?? 100)}%` }}
                     />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <div className="text-muted-foreground">Required</div>
+                      <div className="font-medium">{fmtCurrency(bufferDetails.totalRequired)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Available</div>
+                      <div className="font-medium">{fmtCurrency(bufferDetails.totalAvailable)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Shortfall</div>
+                      <div className={`font-medium ${bufferDetails.totalShortfall > 0 ? "text-destructive" : "text-emerald-600"}`}>
+                        {bufferDetails.totalShortfall > 0 ? "−" : ""}
+                        {fmtCurrency(bufferDetails.totalShortfall)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {bufferDetails.items.map((b) => (
+                      <div key={b.id} className="rounded-md border p-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1 font-medium">
+                            <ShieldCheck className="h-3 w-3" /> {b.label}
+                          </span>
+                          <span className="text-muted-foreground">{b.target ? `${fmtCurrency(b.target)} required` : "—"}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className={`h-full ${
+                              (b.coveredPercent ?? 0) >= 100 ? "bg-emerald-500" : (b.coveredPercent ?? 0) >= 50 ? "bg-amber-500" : "bg-destructive"
+                            }`}
+                            style={{ width: `${Math.min(100, b.coveredPercent ?? 0)}%` }}
+                          />
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between text-muted-foreground">
+                          <span>
+                            {b.monthsCovered !== undefined ? `${b.monthsCovered.toFixed(1)} of ${b.targetMonths ?? "?"} mo` : "—"}
+                          </span>
+                          <span>{b.coveredPercent !== undefined ? `${b.coveredPercent}%` : ""}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
