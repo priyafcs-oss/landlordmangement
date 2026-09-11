@@ -2992,7 +2992,7 @@ export function PropertySummaryTab({
   const ytdIncome = state.ledger
     .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
     .reduce((s, e) => s + e.credit, 0);
-  const activeTenant = tenants.find((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
+  const activeTenant = currentTenantsByUnit(tenants)[0];
   const nextBill = state.bills
     .filter((b) => b.propertyId === prop.id && b.status !== "Paid")
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))[0];
@@ -4325,7 +4325,7 @@ export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; t
   const currentFY = ausFinancialYear(todayISO());
   const { start: fyStart, end: fyEnd } = fyRange(currentFY);
 
-  const activeTenant = tenants.find((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
+  const activeTenant = currentTenantsByUnit(tenants)[0];
   const weeklyRent =
     activeTenant &&
     (activeTenant.rentFrequency === "Weekly"
@@ -4451,13 +4451,34 @@ export function PropertyCurrentFiguresTab({ prop, tenants }: { prop: Property; t
 }
 
 /**
+ * The tenant currently occupying each dwelling — at most one per distinct `unitId` (a
+ * single-dwelling property, where every tenant row has unitId unset, counts as one dwelling
+ * overall), picking whichever has the most recent leaseStart when more than one "still open" (no
+ * leaseExpiry, or a future one) row shares a unit. A tenancy's leaseExpiry is easy to forget to
+ * backfill when the next tenant moves in, which otherwise leaves every past tenant reading as
+ * still "active" — summing rent across all of them (rather than taking just the current one)
+ * multiplies the true rent by however many past tenants that unit has ever had.
+ */
+function currentTenantsByUnit(tenants: Tenant[]): Tenant[] {
+  const today = todayISO();
+  const open = tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= today);
+  const byUnit = new Map<string, Tenant>();
+  for (const t of open) {
+    const key = t.unitId ?? "__shared__";
+    const existing = byUnit.get(key);
+    if (!existing || (t.leaseStart ?? "") > (existing.leaseStart ?? "")) byUnit.set(key, t);
+  }
+  return [...byUnit.values()];
+}
+
+/**
  * Current-year baseline figures from known fixed costs (Property's own annual-cost fields, the
  * current loan, current tenants' rent) — not YTD actuals, not a prediction of rent changes,
  * vacancies or rate rises. Shared by the P&L tab's "Annual Forecast" card and the Forecasts tab's
  * year-0 starting point, so the two always agree on today's numbers.
  */
 function computeAnnualBaseline(prop: Property, loan: Loan | undefined, tenants: Tenant[]) {
-  const activeTenants = tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
+  const activeTenants = currentTenantsByUnit(tenants);
   const annualRent = activeTenants.reduce(
     (s, t) => s + (t.rentFrequency === "Weekly" ? t.rentAmount * 52 : t.rentFrequency === "Fortnightly" ? t.rentAmount * 26 : t.rentAmount * 12),
     0,
