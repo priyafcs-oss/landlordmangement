@@ -623,6 +623,25 @@ export function AddTransactionDialog({
     }
   };
 
+  /** Offered on the duplicate-warning dialog when the match is an Expense — the invoice being
+   * saved is very plausibly the actual document for a charge already posted from an agent
+   * statement (no invoice attached yet), not a genuinely separate second transaction. Attaches it
+   * there instead of creating a duplicate; if this came from Universal Upload, still marks the
+   * proposal applied so it doesn't linger in the review queue. Same pattern as AddBillDialog's own
+   * attachToExisting. */
+  const attachToExisting = () => {
+    if (!duplicateMatch || duplicateMatch.kind !== "expense") return;
+    updateExpense(duplicateMatch.id, {
+      invoiceFileName: form.invoiceFileName || undefined,
+      invoiceFileData: form.invoiceFileData || undefined,
+    });
+    if (initialProposal) markProposalApplied(initialProposal.id, { propertyId: form.propertyId });
+    setDuplicateMatch(null);
+    setOpen(false);
+    reset();
+    toast.success("Invoice attached to the existing transaction");
+  };
+
   return (
     <>
     <Dialog
@@ -1078,7 +1097,12 @@ export function AddTransactionDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <DuplicateWarningDialog match={duplicateMatch} onCancel={() => setDuplicateMatch(null)} onSaveAnyway={commitSave} />
+    <DuplicateWarningDialog
+      match={duplicateMatch}
+      onCancel={() => setDuplicateMatch(null)}
+      onSaveAnyway={commitSave}
+      onAttachInstead={duplicateMatch?.kind === "expense" && form.invoiceFileData ? attachToExisting : undefined}
+    />
     <AssessDepreciationDialog expense={assessingDepreciation ? (expense ?? null) : null} onClose={() => setAssessingDepreciation(false)} />
     </>
   );
