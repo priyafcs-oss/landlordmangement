@@ -628,6 +628,19 @@ export function AddTransactionDialog({
           </div>
         </DialogHeader>
 
+        {expense && (
+          <div className="sticky top-0 z-10 -mx-6 flex items-center justify-end gap-2 border-b bg-background px-6 py-2">
+            {expense.direction !== "Income" && (
+              <Button size="sm" variant="outline" onClick={() => setAssessingDepreciation(true)}>
+                Assess depreciation
+              </Button>
+            )}
+            <Button size="sm" onClick={attemptSave} disabled={busy}>
+              Save
+            </Button>
+          </div>
+        )}
+
         <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")}>
           <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
             {sourceDoc && (
@@ -1017,14 +1030,14 @@ export function AddTransactionDialog({
               </Button>
             </>
           )}
-          {expense && expense.direction !== "Income" && (
-            <Button variant="outline" onClick={() => setAssessingDepreciation(true)}>
-              Assess depreciation
+          {/* Editing an existing transaction shows Assess depreciation/Save in the sticky banner
+              above instead — both are duplicated here otherwise, and that one stays visible
+              without scrolling to the bottom of a long form. */}
+          {!expense && (
+            <Button onClick={attemptSave} disabled={busy}>
+              Save
             </Button>
           )}
-          <Button onClick={attemptSave} disabled={busy}>
-            Save
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

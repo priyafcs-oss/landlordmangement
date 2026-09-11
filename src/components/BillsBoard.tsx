@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
+import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search, Undo2 } from "lucide-react";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
@@ -33,7 +34,6 @@ interface RowHelpers {
   isOverdue: (b: PropertyBill) => boolean;
   propertyLabelOf: (b: PropertyBill) => string | undefined;
   tenantLabelOf: (b: PropertyBill) => string | undefined;
-  markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
   unmarkBillPaid: (id: string) => void;
   deleteBill: (id: string) => void;
 }
@@ -48,7 +48,7 @@ export function BillsBoard({
   propertyId: lockedPropertyId,
   propertyIds: scopedPropertyIds,
 }: { propertyId?: string; propertyIds?: string[] } = {}) {
-  const { state, markBillPaid, unmarkBillPaid, deleteBill } = useStore();
+  const { state, unmarkBillPaid, deleteBill } = useStore();
   const showPropertyFilter = !lockedPropertyId;
   const scopedBills = lockedPropertyId
     ? state.bills.filter((b) => b.propertyId === lockedPropertyId)
@@ -155,7 +155,7 @@ export function BillsBoard({
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered, groupBy]);
 
-  const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf, markBillPaid, unmarkBillPaid, deleteBill };
+  const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf, unmarkBillPaid, deleteBill };
   const handleSort = (f: SortField) => setSort((s) => toggleSort(s, f));
 
   const outstanding = scopedBills.filter((b) => b.status !== "Paid");
@@ -444,7 +444,6 @@ function BillsTableBody({
   isOverdue,
   propertyLabelOf,
   tenantLabelOf,
-  markBillPaid,
   unmarkBillPaid,
   deleteBill,
 }: RowHelpers & {
@@ -515,7 +514,6 @@ function BillsTableBody({
                   isOverdue={isOverdue}
                   propertyLabelOf={propertyLabelOf}
                   tenantLabelOf={tenantLabelOf}
-                  markBillPaid={markBillPaid}
                   unmarkBillPaid={unmarkBillPaid}
                   deleteBill={deleteBill}
                 />
@@ -568,8 +566,7 @@ function BillsTableBody({
                       isOverdue={isOverdue}
                       propertyLabelOf={propertyLabelOf}
                       tenantLabelOf={tenantLabelOf}
-                      markBillPaid={markBillPaid}
-                      unmarkBillPaid={unmarkBillPaid}
+                          unmarkBillPaid={unmarkBillPaid}
                       deleteBill={deleteBill}
                     />
                   ))}
@@ -589,7 +586,6 @@ function BillTableRow({
   isOverdue,
   propertyLabelOf,
   tenantLabelOf,
-  markBillPaid,
   unmarkBillPaid,
   deleteBill,
 }: {
@@ -599,11 +595,14 @@ function BillTableRow({
   isOverdue: (b: PropertyBill) => boolean;
   propertyLabelOf: (b: PropertyBill) => string | undefined;
   tenantLabelOf: (b: PropertyBill) => string | undefined;
-  markBillPaid: (id: string, opts?: { paidDate?: string }) => void;
   unmarkBillPaid: (id: string) => void;
   deleteBill: (id: string) => void;
 }) {
   const overdue = isOverdue(b);
+  // Controlled instead of the dialog's own trigger — a DropdownMenuItem closes its menu (and
+  // would unmount a nested DialogTrigger) the instant it's clicked, so "Mark paid" here opens
+  // this via state instead of embedding a trigger inside the dropdown.
+  const [payOpen, setPayOpen] = useState(false);
   return (
     <tr className={"border-b last:border-0 hover:bg-muted/30" + (indent ? " bg-muted/5" : "")}>
       <td className="whitespace-nowrap px-3 py-2 text-xs">{b.dueDate}</td>
@@ -639,12 +638,7 @@ function BillTableRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {b.status !== "Paid" ? (
-              <DropdownMenuItem
-                onClick={() => {
-                  markBillPaid(b.id);
-                  toast.success("Marked paid — posted to Transactions" + (b.recurrenceMonths ? " · next cycle scheduled" : ""));
-                }}
-              >
+              <DropdownMenuItem onClick={() => setPayOpen(true)}>
                 <CheckCircle2 className="mr-2 h-3.5 w-3.5" /> Mark paid
               </DropdownMenuItem>
             ) : (
@@ -673,6 +667,7 @@ function BillTableRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </td>
+      <MarkBillPaidDialog bill={b} open={payOpen} onOpenChange={setPayOpen} />
     </tr>
   );
 }
