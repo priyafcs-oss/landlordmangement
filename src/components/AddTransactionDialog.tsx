@@ -94,6 +94,12 @@ interface LineItemRow {
   gst: string;
   rechargeToTenant: boolean;
   tenantId: string;
+  /** Whether tenantId (if any) got there via the recharge flow, as opposed to some other reason a
+   * tenant ends up tied to an expense (e.g. an agent-statement deduction posted against a specific
+   * tenancy) — set once at load and never by the recharge checkbox itself, so commitEdit can tell
+   * "recharge was cancelled, clear it" apart from "this tenant link was never about recharging in
+   * the first place, leave it alone" instead of wiping either kind whenever the box is unchecked. */
+  tenantIdIsRecharge: boolean;
   hasWarranty: boolean;
   warrantyExpiry: string;
 }
@@ -107,6 +113,7 @@ const blankLineItem = (): LineItemRow => ({
   gst: "",
   rechargeToTenant: false,
   tenantId: "",
+  tenantIdIsRecharge: false,
   hasWarranty: false,
   warrantyExpiry: "",
 });
@@ -292,6 +299,7 @@ export function AddTransactionDialog({
         amount: payload.cost ? String(payload.cost) : "",
         rechargeToTenant: !!payload.rechargeToTenant,
         tenantId: payload.tenantId ?? "",
+        tenantIdIsRecharge: !!payload.rechargeToTenant,
         hasWarranty: !!payload.hasWarranty,
         warrantyExpiry: payload.warrantyExpiry ?? "",
       },
@@ -330,6 +338,7 @@ export function AddTransactionDialog({
         gst: expense.gst !== undefined ? String(expense.gst) : "",
         rechargeToTenant: !!expense.rechargeToTenant,
         tenantId: expense.tenantId ?? "",
+        tenantIdIsRecharge: !!expense.rechargeToTenant,
         hasWarranty: !!expense.hasWarranty,
         warrantyExpiry: expense.warrantyExpiry ?? "",
       },
@@ -471,7 +480,11 @@ export function AddTransactionDialog({
       hasWarranty: li.hasWarranty,
       warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
       rechargeToTenant: !!(li.rechargeToTenant && li.tenantId),
-      tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+      // Only clear tenantId when an existing recharge was just cancelled (unchecked). A tenantId
+      // that got here some other way (e.g. an agent-statement deduction posted against a specific
+      // tenancy) has nothing to do with the recharge checkbox and shouldn't disappear just because
+      // this dialog doesn't expose that reason with its own field.
+      tenantId: !li.rechargeToTenant && li.tenantIdIsRecharge ? undefined : li.tenantId || undefined,
       recharged: li.rechargeToTenant && li.tenantId ? true : expense.recharged,
       referenceNumber: form.referenceNumber || undefined,
       periodStart: form.periodStart || undefined,

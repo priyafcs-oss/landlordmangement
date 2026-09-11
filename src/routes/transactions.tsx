@@ -749,11 +749,15 @@ function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string
       description,
       ...(sourceDocRemoved ? { sourceFileName: null, sourceFileData: null } : {}),
     });
-    toast.success("Rent payment updated");
+    toast.success(entry?.type === "Rent Payment" ? "Rent payment updated" : "Transaction updated");
     setOpen(false);
   };
 
   if (!entry) return null;
+  // A ledger row isn't always literally rent — Water Invoice/Maintenance Charge/Manual Credit/
+  // Adjustment/Rent Due all show under the "Other Rental Income" category too (see
+  // ledgerTypeToIncomeCategory) but aren't rent payments, so the title shouldn't call them one.
+  const isRent = entry.type === "Rent Payment";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
@@ -765,7 +769,7 @@ function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId: string
         }
       >
         <DialogHeader>
-          <DialogTitle>Edit rent payment</DialogTitle>
+          <DialogTitle>{isRent ? "Edit rent payment" : `Edit ${entry.type.toLowerCase()}`}</DialogTitle>
         </DialogHeader>
         <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden sm:grid-cols-[minmax(0,1fr)_320px]" : "sm:grid-cols-[240px_1fr]")}>
           <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
@@ -1036,7 +1040,7 @@ function TxTable({
                         onClick={() => {
                           if (confirm(`Delete "${r.description}"?`)) {
                             deleteLedger(r.ledgerEntryId!);
-                            toast.success("Rent payment removed");
+                            toast.success(r.category === "Gross Rent" ? "Rent payment removed" : "Transaction removed");
                           }
                         }}
                       >
