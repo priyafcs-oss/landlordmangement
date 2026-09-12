@@ -33,6 +33,9 @@ export interface ParsedBillFields {
   property_address: string;
   bpay_biller_code: string | null;
   bpay_reference: string | null;
+  /** Invoice/receipt/job/account number, distinct from bpay_reference above — most tradesperson
+   * invoices carry one of these but no BPAY details at all. Null if nothing of the kind is printed. */
+  reference_number: string | null;
   ato_category: string;
   /** Free-text category Gemini assigns, mapped onto the app's BillType union for scheduling
    * (Water/Council Rates/Strata/Insurance/Electricity/Gas/Other) — deliberately narrow, only for

@@ -244,7 +244,15 @@ export function AddTransactionDialog({
   const applyExtracted = (
     data: Pick<
       ExtractBillResult,
-      "vendor" | "amount" | "due_date" | "property_address" | "expense_category" | "confidence" | "bpay_reference" | "bpay_biller_code"
+      | "vendor"
+      | "amount"
+      | "due_date"
+      | "property_address"
+      | "expense_category"
+      | "confidence"
+      | "bpay_reference"
+      | "bpay_biller_code"
+      | "reference_number"
     >,
     invoiceFileName?: string,
     invoiceFileData?: string,
@@ -268,11 +276,11 @@ export function AddTransactionDialog({
       propertyId: isEdit ? f.propertyId : (lockedPropertyId ?? matchedProperty?.id ?? f.propertyId),
       payee: fillIfBlank(f.payee, data.vendor),
       date: fillIfBlank(f.date, data.due_date),
-      // The reference-number field is generic (any invoice/account reference, not only BPAY), but
-      // extract-bill only ever reads a BPAY reference off the document — the best it can offer.
-      // Previously extracted but silently discarded: this field never got filled from an upload at
-      // all, on a new transaction or an edit.
-      referenceNumber: fillIfBlank(f.referenceNumber, data.bpay_reference),
+      // reference_number is the invoice/receipt/job number most tradesperson documents carry —
+      // bpay_reference only ever applies to a BPAY-payable bill (utilities, council, agencies),
+      // so it's the fallback here, not the primary source. Previously neither was ever applied at
+      // all — this field never got filled from an upload, on a new transaction or an edit.
+      referenceNumber: fillIfBlank(f.referenceNumber, data.reference_number ?? data.bpay_reference),
     }));
     // Editing an existing transaction: merge onto its one line item instead of replacing it
     // wholesale — re-reading a newly attached invoice shouldn't silently wipe the tenant/recharge/

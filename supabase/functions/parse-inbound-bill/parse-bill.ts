@@ -163,6 +163,7 @@ async function stageBillProposal(
       dueDate: parsed.due_date,
       bpayBillerCode: parsed.bpay_biller_code ?? undefined,
       bpayReference: parsed.bpay_reference ?? undefined,
+      referenceNumber: parsed.reference_number ?? undefined,
       atoCategory: mapAtoCategory(parsed.ato_category),
       billCategory: mapBillType(parsed.bill_category, parsed.vendor),
       futureInstalments: parsed.future_instalments?.map((i) => ({ dueDate: i.due_date, amount: i.amount })),

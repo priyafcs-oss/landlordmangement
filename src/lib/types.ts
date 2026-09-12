@@ -964,6 +964,9 @@ export interface ExtractBillResult {
   property_address?: string;
   bpay_biller_code?: string | null;
   bpay_reference?: string | null;
+  /** Invoice/receipt/job/account number, distinct from bpay_reference — most tradesperson
+   * invoices carry one of these but no BPAY details at all. */
+  reference_number?: string | null;
   bill_category?: string;
   expense_category?: string;
   future_instalments?: { due_date: string; amount: number }[];
@@ -1252,6 +1255,7 @@ export interface BillProposalPayload {
   dueDate: string;
   bpayBillerCode?: string;
   bpayReference?: string;
+  referenceNumber?: string;
   atoCategory: "Immediate Deduction" | "Capital Works";
   billCategory: BillType;
   futureInstalments?: { dueDate: string; amount: number }[];

@@ -224,6 +224,7 @@ export function AddBillDialog({
       | "property_address"
       | "bpay_biller_code"
       | "bpay_reference"
+      | "reference_number"
       | "bill_category"
       | "expense_category"
       | "future_instalments"
@@ -250,7 +251,10 @@ export function AddBillDialog({
       dueDate: data.due_date ?? f.dueDate,
       bpayBillerCode: data.bpay_biller_code ?? f.bpayBillerCode,
       bpayReference: data.bpay_reference ?? f.bpayReference,
-      referenceNumber: data.bpay_reference ?? f.referenceNumber,
+      // reference_number is the invoice/receipt/job number most tradesperson bills carry —
+      // bpay_reference only ever applies to a BPAY-payable bill, so it's the fallback, not the
+      // primary source.
+      referenceNumber: data.reference_number ?? data.bpay_reference ?? f.referenceNumber,
       hasInstalments: (data.future_instalments?.length ?? 0) > 0,
     }));
     const category = mapBillType(data.bill_category);
@@ -297,6 +301,7 @@ export function AddBillDialog({
         property_address: initialProposal.rawPropertyAddress,
         bpay_biller_code: payload.bpayBillerCode,
         bpay_reference: payload.bpayReference,
+        reference_number: payload.referenceNumber,
         bill_category: payload.billCategory,
         future_instalments: payload.futureInstalments?.map((i) => ({ due_date: i.dueDate, amount: i.amount })),
         line_items: payload.lineItems,

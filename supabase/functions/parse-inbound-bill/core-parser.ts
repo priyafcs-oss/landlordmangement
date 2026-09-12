@@ -5,6 +5,12 @@ const BILL_PROMPT = `You are extracting structured invoice data from an Australi
 Extract the fields defined in the response schema as strict JSON.
 - due_date must be formatted YYYY-MM-DD, and is the instalment that is CURRENTLY due / due soonest.
 - bpay_biller_code and bpay_reference must be null if the bill has no BPAY details.
+- reference_number is a SEPARATE field from the BPAY reference above — whatever invoice number,
+  receipt number, job number, or account/customer reference is printed on the document (e.g.
+  "Invoice #INV-1042", "Receipt No. 5521", "Job Ref: J-8834", "Account: 12345"). Most tradesperson
+  invoices/receipts (a plumber, gardener, pest controller, ...) have one of these but no BPAY
+  details at all — extract it whenever printed, regardless of whether bpay_reference is also
+  present. Null only if genuinely nothing of this kind appears anywhere on the document.
 - bill_category must be one of: Water, Council Rates, Land Tax, Strata, Insurance, Electricity, Gas, Other.
   A land tax assessment notice (from a state/territory revenue office, e.g. Revenue NSW, State
   Revenue Office Vic) is "Land Tax", not "Council Rates" — the two are separate taxing authorities
@@ -82,6 +88,7 @@ const BILL_SCHEMA = {
     property_address: { type: "STRING" },
     bpay_biller_code: { type: "STRING", nullable: true },
     bpay_reference: { type: "STRING", nullable: true },
+    reference_number: { type: "STRING", nullable: true },
     ato_category: { type: "STRING" },
     bill_category: { type: "STRING" },
     expense_category: { type: "STRING" },
