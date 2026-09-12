@@ -74,6 +74,15 @@ export function AppHeader() {
         <UploadDocumentDialog />
         <AiBudgetBadge />
         <CreatorMasterPanel />
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Sign out"
+          className="h-8 w-8"
+          onClick={() => void supabase.auth.signOut()}
+        >
+          <LogOut className="h-4 w-4" />
+        </Button>
 
         {state.tenants.length > 0 && (
           <>
