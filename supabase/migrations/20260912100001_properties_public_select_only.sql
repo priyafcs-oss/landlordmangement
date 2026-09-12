@@ -1,0 +1,11 @@
+-- Discovered while verifying 20260912100000: properties_public carried anon grants for INSERT,
+-- UPDATE, DELETE, TRUNCATE, REFERENCES and TRIGGER, not just the SELECT the original migration
+-- explicitly granted (20260814180000_require_auth.sql only ever ran `GRANT SELECT ... TO anon` —
+-- the extra privileges came from a project-level default-privileges rule applied automatically
+-- when the view was created, and were never noticed or revoked since). Combined with this view now
+-- being definer-security again (20260912100000, needed so anon can still read it once `properties`
+-- itself is locked to `authenticated`), an auto-updatable simple view like this one would let anon
+-- INSERT/UPDATE/DELETE rows in the underlying `properties` table THROUGH the view — via the
+-- owner's elevated privileges — bypassing the RLS lockdown entirely. Reducing anon to SELECT-only,
+-- which is all the public maintenance-request form (src/routes/maintenance.tsx) actually needs.
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON public.properties_public FROM anon;
