@@ -250,32 +250,47 @@ export function AddTransactionDialog({
     invoiceFileData?: string,
   ) => {
     const matchedProperty = data.property_address ? matchPropertyByAddress(state.properties, data.property_address) : undefined;
+    const isEdit = !!expense;
+    // Editing an existing transaction: this upload is just attaching supporting evidence (an
+    // invoice, its reference number, ...) to a transaction whose amount/date/property/category
+    // may already correctly differ from what the document itself says — a partial payment, a
+    // payment date that isn't the invoice's own due date, a category the landlord deliberately
+    // picked. Overwriting any of those from the new document would silently corrupt real data, so
+    // when editing, a field already filled in is left alone; only a field that's still blank gets
+    // filled from what was read off the document.
+    const fillIfBlank = (current: string, extracted: string | null | undefined) =>
+      isEdit && current.trim() ? current : (extracted ?? current);
 
     setForm((f) => ({
       ...f,
       invoiceFileName: invoiceFileName ?? f.invoiceFileName,
       invoiceFileData: invoiceFileData ?? f.invoiceFileData,
-      propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
-      payee: data.vendor ?? f.payee,
-      date: data.due_date ?? f.date,
+      propertyId: isEdit ? f.propertyId : (lockedPropertyId ?? matchedProperty?.id ?? f.propertyId),
+      payee: fillIfBlank(f.payee, data.vendor),
+      date: fillIfBlank(f.date, data.due_date),
       // The reference-number field is generic (any invoice/account reference, not only BPAY), but
       // extract-bill only ever reads a BPAY reference off the document — the best it can offer.
       // Previously extracted but silently discarded: this field never got filled from an upload at
       // all, on a new transaction or an edit.
-      referenceNumber: data.bpay_reference ?? f.referenceNumber,
+      referenceNumber: fillIfBlank(f.referenceNumber, data.bpay_reference),
     }));
     // Editing an existing transaction: merge onto its one line item instead of replacing it
     // wholesale — re-reading a newly attached invoice shouldn't silently wipe the tenant/recharge/
-    // warranty state already on this row, or blank out the amount/category just because this
-    // particular document didn't have a clean figure to read.
+    // warranty state already on this row, or overwrite the amount/category already recorded (see
+    // fillIfBlank above — category is never actually blank once a transaction has one, so this
+    // leaves it untouched when editing, same as amount/date).
     setLineItems((rows) =>
       expense && rows.length === 1
         ? [
             {
               ...rows[0],
-              description: data.vendor ?? rows[0].description,
-              amount: data.amount ? String(data.amount) : rows[0].amount,
-              category: data.expense_category ? mapExpenseCategory(data.expense_category, data.vendor) : rows[0].category,
+              description: fillIfBlank(rows[0].description, data.vendor),
+              amount: fillIfBlank(rows[0].amount, data.amount ? String(data.amount) : undefined),
+              category: isEdit
+                ? rows[0].category
+                : data.expense_category
+                  ? mapExpenseCategory(data.expense_category, data.vendor)
+                  : rows[0].category,
             },
           ]
         : [
@@ -759,7 +774,11 @@ export function AddTransactionDialog({
                     {extractSummary.date ? ` on ${extractSummary.date}` : ""}
                   </div>
                   <div className="text-emerald-800">
-                    {extractSummary.propertyMatched ? "Property matched automatically." : "Couldn't match a property — select one to the right."}
+                    {expense
+                      ? "Only blank fields were filled in from this — your existing amount, date and category weren't changed (they can legitimately differ, e.g. a partial payment or a payment date different from the invoice's own due date)."
+                      : extractSummary.propertyMatched
+                        ? "Property matched automatically."
+                        : "Couldn't match a property — select one to the right."}
                   </div>
                 </div>
               )}
