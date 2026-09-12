@@ -161,7 +161,19 @@ export function AddTransactionDialog({
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : internalOpen;
-  const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
+  // Closing always resets internal state here, regardless of which path triggered it — Radix's
+  // own onOpenChange (ESC, overlay click, its built-in close button) isn't the only way this
+  // closes; commitEdit/commitSave/attachToExisting all call setOpen(false) directly, which used to
+  // skip the JSX-level "if (!o) reset()" handler entirely (that only fires for Radix-initiated
+  // closes). For the controlled instance shared across every row in a list (Owner Ledger,
+  // Maintenance tab), that left the previous row's extraction result — an invoice's vendor/amount/
+  // date, and even the closed-over `expense` from a stale render — visibly showing under the next
+  // row's own edit, before any new upload for it had even happened.
+  const setOpen = (o: boolean) => {
+    if (!o) reset();
+    if (onOpenChangeProp) onOpenChangeProp(o);
+    else setInternalOpen(o);
+  };
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -639,7 +651,6 @@ export function AddTransactionDialog({
 
     if (initialProposal) markProposalApplied(initialProposal.id, { propertyId: form.propertyId });
     setOpen(false);
-    reset();
     if (flaggedCount > 0) {
       toast.success(`Transaction added — ${flaggedCount} line item(s) sent for review (possible duplicate or price spike)`);
     } else {
@@ -662,19 +673,12 @@ export function AddTransactionDialog({
     if (initialProposal) markProposalApplied(initialProposal.id, { propertyId: form.propertyId });
     setDuplicateMatch(null);
     setOpen(false);
-    reset();
     toast.success("Invoice attached to the existing transaction");
   };
 
   return (
     <>
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) reset();
-      }}
-    >
+    <Dialog open={open} onOpenChange={setOpen}>
       {!initialProposal && !controlled && (
         <DialogTrigger asChild>
           {trigger ?? (
