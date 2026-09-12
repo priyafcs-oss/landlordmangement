@@ -1,4 +1,8 @@
 import { Toaster as Sonner } from "sonner";
+// Patches toast.error to stay on screen until dismissed (see lib/toast.ts) — imported for its
+// side effect, not any export used directly here. Must run before any toast fires; importing it
+// wherever the Toaster itself is set up guarantees that.
+import "@/lib/toast";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
@@ -6,10 +10,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       className="toaster group"
-      // Stay on screen until the landlord dismisses them (via the close button) rather than
-      // auto-vanishing after a few seconds — a duplicate/error warning is easy to miss entirely
-      // at the default ~4s duration.
-      duration={Infinity}
+      // A plain confirmation ("Transaction updated") auto-dismisses after 5s — long enough to
+      // read, short enough not to pile up. An error stays until dismissed (lib/toast.ts patches
+      // toast.error specifically for that) since it's easy to miss entirely at 5s, especially a
+      // duplicate warning with something to actually read and decide on.
+      duration={5000}
       closeButton
       toastOptions={{
         classNames: {

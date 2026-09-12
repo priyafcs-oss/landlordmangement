@@ -5,8 +5,25 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { dismissOpenErrorToasts } from "@/lib/toast";
 
-const Dialog = DialogPrimitive.Root;
+/** Every dialog in the app renders through this one wrapper, so hooking its `open` prop here
+ * (rather than each dialog's own onOpenChange) catches every close uniformly — including a close
+ * triggered by calling the consumer's own setOpen(false) directly (e.g. after a successful save),
+ * which never goes through Radix's onOpenChange at all. Sweeps away any error toast still on
+ * screen (a validation/extraction error from an attempt the landlord has now abandoned or
+ * completed) — success/info/warning toasts are left alone since they already auto-dismiss on
+ * their own and are often created in this same instant to confirm the very action that closed the
+ * dialog. Only fires for a controlled dialog (an `open` prop is actually passed) — an uncontrolled
+ * one has no prop transition to observe. */
+function Dialog({ open, ...props }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>) {
+  const wasOpen = React.useRef(open);
+  React.useEffect(() => {
+    if (wasOpen.current && !open) dismissOpenErrorToasts();
+    wasOpen.current = open;
+  }, [open]);
+  return <DialogPrimitive.Root open={open} {...props} />;
+}
 
 const DialogTrigger = DialogPrimitive.Trigger;
 
