@@ -109,7 +109,11 @@ function RootComponent() {
           <main className="min-h-screen bg-background">
             <Outlet />
           </main>
-          <Toaster richColors position="top-right" />
+          {/* Bottom, not top — toasts stay on screen until dismissed (see sonner.tsx), and a wide/
+              expanded dialog's own close button sits top-right too; stacking toasts there would
+              grow to sit on top of it. Bottom-right avoids that entirely regardless of how many
+              stack up. */}
+          <Toaster richColors position="bottom-right" />
         </StoreProvider>
       </QueryClientProvider>
     );
