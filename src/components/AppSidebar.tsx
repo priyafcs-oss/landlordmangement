@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -11,7 +12,8 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, Wallet, Sparkles, Home, Settings, ClipboardCheck, Users2, Coins } from "lucide-react";
+import { LayoutDashboard, Wallet, Sparkles, Home, Settings, ClipboardCheck, Users2, Coins, ShieldCheck } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 // Bills, Transactions, Forecasts, Buffers and Documents are all reachable from the Assets
 // left-nav now (assets.tsx) — same reasoning as Portfolio Manager's removal: one way in, not a
@@ -26,9 +28,27 @@ const items = [
   { title: "Settings", url: "/settings", icon: Settings },
 ] as const;
 
+/** Loosely typed handle for the same reason as db.ts's — the generated Database types won't know
+ * about is_platform_admin() until they're regenerated against the live schema. */
+const rpc = supabase as unknown as {
+  rpc: (fn: string) => Promise<{ data: unknown; error: unknown }>;
+};
+
+function useIsPlatformAdmin() {
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    rpc.rpc("is_platform_admin").then(({ data, error }) => {
+      if (!error) setIsAdmin(!!data);
+    });
+  }, []);
+  return isAdmin;
+}
+
 export function AppSidebar() {
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { setOpen, isMobile } = useSidebar();
+  const isAdmin = useIsPlatformAdmin();
+  const menuItems = isAdmin ? [...items, { title: "Admin", url: "/admin", icon: ShieldCheck }] : items;
   return (
     <Sidebar
       collapsible="icon"
@@ -51,7 +71,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => (
+              {menuItems.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={pathname === item.url}>
                     <Link to={item.url}>
