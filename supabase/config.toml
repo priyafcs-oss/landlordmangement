@@ -1,5 +1,12 @@
 project_id = "jnlcjotkhfyttewdegac"
 
+[auth]
+# Was false — accounts were previously created only by the project owner via the dashboard
+# (see AuthGate.tsx's doc comment history). Multi-tenant self-service sign-up
+# (20260913100000_multi_tenant_owner_scoping.sql) needs this on, since a new account can no
+# longer see anyone else's data anyway.
+enable_signup = true
+
 [functions.parse-inbound-bill]
 # Called by Resend's webhook, not by an authenticated app user — Svix signature
 # verification inside the function is the real auth boundary, not a Supabase JWT.

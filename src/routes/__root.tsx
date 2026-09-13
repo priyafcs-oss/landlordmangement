@@ -123,7 +123,10 @@ function RootComponent() {
       {/* StoreProvider's initial data fetch only runs once, on mount — it must sit INSIDE
           AuthGate so it mounts fresh (and actually fetches) only once a session exists, rather
           than firing once pre-login (denied by RLS, silently empty) and never retrying after
-          sign-in. */}
+          sign-in. Toaster, on the other hand, must sit OUTSIDE AuthGate: AuthGate renders the
+          sign-in screen instead of `children` when there's no session, so a Toaster nested inside
+          it never mounts pre-login — every toast on the sign-in screen (wrong password, lockout,
+          sign-up result) was silently swallowed until this was moved out here. */}
       <AuthGate>
         <StoreProvider>
           <SidebarProvider defaultOpen={false}>
@@ -135,9 +138,9 @@ function RootComponent() {
               </main>
             </SidebarInset>
           </SidebarProvider>
-          <Toaster richColors position="bottom-right" />
         </StoreProvider>
       </AuthGate>
+      <Toaster richColors position="bottom-right" />
     </QueryClientProvider>
   );
 }

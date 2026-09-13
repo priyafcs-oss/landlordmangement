@@ -108,6 +108,15 @@ function SignInScreen() {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
 
+  /** Switching modes always starts from a blank form — carrying over whatever was typed in a
+   * different mode (e.g. a sign-in attempt's email/password showing up on "Create account") is
+   * confusing and, for a password, actively unwanted. */
+  const switchMode = (next: "signin" | "signup" | "reset") => {
+    setMode(next);
+    setEmail("");
+    setPassword("");
+  };
+
   const signIn = async () => {
     if (!email || !password) return toast.error("Enter your email and password");
     setBusy(true);
@@ -125,6 +134,9 @@ function SignInScreen() {
         return;
       }
       void authRpc.rpc("clear_login_failures", { p_email: email });
+    } catch (e) {
+      console.error("[auth] sign in failed", e);
+      toast.error("Something went wrong signing in — please try again");
     } finally {
       setBusy(false);
     }
@@ -134,21 +146,33 @@ function SignInScreen() {
     if (!email || !password) return toast.error("Enter your email and password");
     if (password.length < 6) return toast.error("Password must be at least 6 characters");
     setBusy(true);
-    const { error } = await supabase.auth.signUp({ email, password });
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    toast.success("Account created — check your email to confirm, then sign in");
-    setMode("signin");
+    try {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) return toast.error(error.message);
+      toast.success("Account created — check your email to confirm, then sign in");
+      switchMode("signin");
+    } catch (e) {
+      console.error("[auth] sign up failed", e);
+      toast.error("Something went wrong creating your account — please try again");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const sendReset = async () => {
     if (!email) return toast.error("Enter your email first");
     setBusy(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    toast.success("Password reset email sent — check your inbox");
-    setMode("signin");
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      if (error) return toast.error(error.message);
+      toast.success("Password reset email sent — check your inbox");
+      switchMode("signin");
+    } catch (e) {
+      console.error("[auth] password reset failed", e);
+      toast.error("Something went wrong sending the reset email — please try again");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -183,14 +207,14 @@ function SignInScreen() {
                 <button
                   type="button"
                   className="text-muted-foreground underline"
-                  onClick={() => setMode("reset")}
+                  onClick={() => switchMode("reset")}
                 >
                   Forgot password?
                 </button>
                 <button
                   type="button"
                   className="text-muted-foreground underline"
-                  onClick={() => setMode("signup")}
+                  onClick={() => switchMode("signup")}
                 >
                   Create account
                 </button>
@@ -220,7 +244,7 @@ function SignInScreen() {
               <button
                 type="button"
                 className="w-full text-center text-xs text-muted-foreground underline"
-                onClick={() => setMode("signin")}
+                onClick={() => switchMode("signin")}
               >
                 Back to sign in
               </button>
@@ -241,7 +265,7 @@ function SignInScreen() {
               <button
                 type="button"
                 className="w-full text-center text-xs text-muted-foreground underline"
-                onClick={() => setMode("signin")}
+                onClick={() => switchMode("signin")}
               >
                 Back to sign in
               </button>
