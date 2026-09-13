@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,7 +13,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/copilot")({
   head: () => ({
     meta: [
-      { title: "AI Co-Pilot — Landlord OS" },
+      { title: "AI Assistant — Landlord OS" },
       { name: "description", content: "Ask AI about arrears, notices, yields and upcoming tasks." },
     ],
   }),
@@ -99,34 +100,29 @@ function CopilotPage() {
     setInput("");
     setLoading(true);
     const context = buildContext();
-    const systemPrompt = `You are the AI co-pilot for an Australian independent landlord. You have full context of their portfolio (below as JSON). Answer questions concisely and accurately using this data. When asked for arrears, list tenants with amounts. When asked for yields, compute gross yield = (annual rent / purchase price) * 100. When asked to draft notices, write in a professional Australian tone integrating exact data.
+    const systemPrompt = `You are the AI assistant for an Australian independent landlord. You have full context of their portfolio (below as JSON). Answer questions concisely and accurately using this data. When asked for arrears, list tenants with amounts. When asked for yields, compute gross yield = (annual rent / purchase price) * 100. When asked to draft notices, write in a professional Australian tone integrating exact data.
 
 PORTFOLIO_JSON:
 ${JSON.stringify(context, null, 2)}`;
 
     try {
-      const res = await fetch("/api/copilot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { data, error } = await supabase.functions.invoke<{ content: string }>("copilot-chat", {
+        body: {
           messages: [
             { role: "system", content: systemPrompt },
             ...newMsgs.map((m) => ({ role: m.role, content: m.content })),
           ],
-        }),
+        },
       });
-      if (res.status === 429) {
-        toast.error("Rate limit reached. Try again in a moment.");
-        setLoading(false);
-        return;
+      if (error) {
+        const status = (error as { context?: Response }).context?.status;
+        if (status === 429) {
+          toast.error("Rate limit reached. Try again in a moment.");
+          return;
+        }
+        throw error;
       }
-      if (res.status === 402) {
-        toast.error("AI credits exhausted. Add credits in workspace billing.");
-        setLoading(false);
-        return;
-      }
-      if (!res.ok) throw new Error(await res.text());
-      const data = (await res.json()) as { content: string };
+      if (!data) throw new Error("No response from AI Assistant");
       setMessages((m) => [...m, { role: "assistant", content: data.content }]);
     } catch (err) {
       toast.error("AI request failed");
@@ -141,7 +137,7 @@ ${JSON.stringify(context, null, 2)}`;
     <div className="flex h-[calc(100vh-3.5rem)] flex-col p-4 sm:p-6">
       <div className="mb-4">
         <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Sparkles className="h-6 w-6 text-primary" /> AI Co-Pilot
+          <Sparkles className="h-6 w-6 text-primary" /> AI Assistant
         </h1>
         <p className="text-sm text-muted-foreground">Portfolio-aware assistant with live data context.</p>
       </div>

@@ -40,6 +40,7 @@ import {
   Banknote,
   ChevronDown,
   ChevronRight,
+  Trash2,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
@@ -298,7 +299,7 @@ function AddAssetTransactionDialog({ assetId }: { assetId: string }) {
 }
 
 function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClose: () => void }) {
-  const { state, markBillPaid, unmarkBillPaid, deleteBill } = useStore();
+  const { state, markBillPaid, unmarkBillPaid, deleteBill, deleteAsset } = useStore();
   const asset = state.assets.find((a) => a.id === assetId);
   const gold = asset ? state.goldDetails.find((g) => g.assetId === asset.id) : undefined;
   const etf = asset ? state.etfDetails.find((e) => e.assetId === asset.id) : undefined;
@@ -337,11 +338,27 @@ function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClos
                 {etf && <Stat label="Units held" value={etf.unitsHeld ? `${etf.unitsHeld} @ ${fmtCurrency(etf.avgCostPerUnit ?? 0)}` : "—"} />}
               </div>
               {asset.notes && <div className="rounded bg-muted p-3 text-xs whitespace-pre-wrap">{asset.notes}</div>}
-              <AssetDialog asset={asset}>
-                <Button size="sm" variant="outline">
-                  Edit asset
+              <div className="flex gap-2">
+                <AssetDialog asset={asset}>
+                  <Button size="sm" variant="outline">
+                    Edit asset
+                  </Button>
+                </AssetDialog>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (confirm(`Delete "${asset.name}"? This also removes its transactions, bills and any gold/ETF details.`)) {
+                      deleteAsset(asset.id);
+                      toast.success("Asset deleted");
+                      onClose();
+                    }
+                  }}
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete asset
                 </Button>
-              </AssetDialog>
+              </div>
             </TabsContent>
 
             <TabsContent value="transactions" className="space-y-2 text-sm">

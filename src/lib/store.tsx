@@ -1282,6 +1282,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteWhere(TABLES.valuationSnapshots, "assetId", id);
       void deleteWhere(TABLES.goldDetails, "assetId", id);
       void deleteWhere(TABLES.etfDetails, "assetId", id);
+      void deleteWhere(TABLES.expenses, "assetId", id);
+      void deleteWhere(TABLES.bills, "assetId", id);
       set((s) => ({
         ...s,
         assets: s.assets.filter((a) => a.id !== id),
@@ -1289,6 +1291,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         etfDetails: s.etfDetails.filter((e) => e.assetId !== id),
         depreciationItems: s.depreciationItems.filter((d) => d.assetId !== id),
         valuationSnapshots: s.valuationSnapshots.filter((v) => v.assetId !== id),
+        expenses: s.expenses.filter((e) => e.assetId !== id),
+        bills: s.bills.filter((b) => b.assetId !== id),
       }));
     },
 
@@ -1618,7 +1622,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
     consumeAiBudget: () => {
       const today = new Date().toISOString().slice(0, 10);
-      if (!state.aiConfig.enabled) return { ok: false, reason: "AI Co-Pilot APIs are disabled by Creator Master Panel." };
+      if (!state.aiConfig.enabled) return { ok: false, reason: "AI Assistant APIs are disabled by Creator Master Panel." };
       const currentCount = state.aiConfig.countDate === today ? state.aiConfig.dailyCount : 0;
       if (currentCount >= state.aiConfig.dailyLimit) {
         return { ok: false, reason: "Daily AI Budget Limit Reached." };

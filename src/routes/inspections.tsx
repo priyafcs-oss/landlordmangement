@@ -57,6 +57,16 @@ function currentTenantOf(propertyId: string, tenants: Tenant[]): Tenant | undefi
   return tenants.find((t) => t.propertyId === propertyId);
 }
 
+/** "14:30" -> "2:30 PM". Falls back to the raw value if it's not a plain HH:MM string. */
+function formatTime12h(time: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!match) return time;
+  const hour24 = Number(match[1]);
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${match[2]} ${period}`;
+}
+
 function InspectionsPage() {
   const { state } = useStore();
 
@@ -286,6 +296,8 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
           <div className="font-medium">{property?.alias || property?.address}</div>
           <div className="text-xs text-muted-foreground">
             {tenant?.name ?? "No tenant"} • {inspection.type} • {inspection.date}
+            {inspection.time && ` at ${formatTime12h(inspection.time)}`}
+            {inspection.durationMinutes && ` (${inspection.durationMinutes} min)`}
             {overdue && " — overdue"}
           </div>
         </div>
@@ -400,7 +412,21 @@ function DeleteInspectionButton({ id }: { id: string }) {
   );
 }
 
-/** Lightweight booking only — property, tenant (auto), date, type. No checklist prompts. Supports booking several properties for one day at once. */
+interface BookingSlot {
+  date: string;
+  time: string;
+  durationMinutes: number;
+}
+
+const DEFAULT_DURATION_MINUTES = 60;
+const DEFAULT_TIME = "09:00";
+
+/**
+ * Lightweight booking only — property, tenant (auto), date/time/duration, type. No checklist
+ * prompts. Supports booking several properties at once, each with its own date, time and
+ * estimated duration — not one shared date for the whole batch — so a run of inspections across
+ * different properties can be spread across different days and times in one action.
+ */
 function BookInspectionDialog({
   defaultPropertyId,
   trigger,
@@ -410,8 +436,7 @@ function BookInspectionDialog({
 }) {
   const { state, addInspection } = useStore();
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [date, setDate] = useState(todayISO());
+  const [slots, setSlots] = useState<Map<string, BookingSlot>>(new Map());
   const [type, setType] = useState<Inspection["type"]>("Routine");
 
   const onOpenChange = (o: boolean) => {
@@ -422,27 +447,43 @@ function BookInspectionDialog({
         : state.properties
             .filter((p) => inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue)
             .map((p) => p.id);
-      setSelected(new Set(preselect));
-      setDate(todayISO());
+      setSlots(new Map(preselect.map((id) => [id, { date: todayISO(), time: DEFAULT_TIME, durationMinutes: DEFAULT_DURATION_MINUTES }])));
       setType("Routine");
     }
   };
 
   const toggle = (id: string) =>
-    setSelected((s) => {
-      const next = new Set(s);
+    setSlots((s) => {
+      const next = new Map(s);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else next.set(id, { date: todayISO(), time: DEFAULT_TIME, durationMinutes: DEFAULT_DURATION_MINUTES });
+      return next;
+    });
+
+  const updateSlot = (id: string, patch: Partial<BookingSlot>) =>
+    setSlots((s) => {
+      const current = s.get(id);
+      if (!current) return s;
+      const next = new Map(s);
+      next.set(id, { ...current, ...patch });
       return next;
     });
 
   const save = () => {
-    if (selected.size === 0) return toast.error("Select at least one property");
-    for (const propertyId of selected) {
+    if (slots.size === 0) return toast.error("Select at least one property");
+    for (const [propertyId, slot] of slots) {
       const tenant = currentTenantOf(propertyId, state.tenants);
-      addInspection({ propertyId, tenantId: tenant?.id, date, type, status: "Scheduled" });
+      addInspection({
+        propertyId,
+        tenantId: tenant?.id,
+        date: slot.date,
+        time: slot.time,
+        durationMinutes: slot.durationMinutes,
+        type,
+        status: "Scheduled",
+      });
     }
-    toast.success(`Booked ${selected.size} inspection(s) for ${date}`);
+    toast.success(`Booked ${slots.size} inspection(s)`);
     setOpen(false);
   };
 
@@ -455,52 +496,80 @@ function BookInspectionDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Book inspections</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Date">
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-          <Field label="Type">
-            <Select value={type} onValueChange={(v) => setType(v as Inspection["type"])}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Entry">Entry</SelectItem>
-                <SelectItem value="Routine">Routine</SelectItem>
-                <SelectItem value="Exit">Exit</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-        </div>
+        <Field label="Type (applies to all selected below)">
+          <Select value={type} onValueChange={(v) => setType(v as Inspection["type"])}>
+            <SelectTrigger className="max-w-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Entry">Entry</SelectItem>
+              <SelectItem value="Routine">Routine</SelectItem>
+              <SelectItem value="Exit">Exit</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         <div className="space-y-1">
           <div className="text-sm font-medium">Properties (overdue ones pre-selected)</div>
-          <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
+          <p className="text-xs text-muted-foreground">
+            Each selected property gets its own date, time and estimated duration — spread them across different days as needed.
+          </p>
+          <div className="max-h-96 space-y-1 overflow-y-auto rounded-md border p-2">
             {state.properties.map((p) => {
               const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
               const tenant = currentTenantOf(p.id, state.tenants);
+              const slot = slots.get(p.id);
               return (
-                <label key={p.id} className="flex items-center gap-2 rounded p-1.5 text-sm hover:bg-muted/50">
-                  <Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggle(p.id)} />
-                  <span className="flex-1">
-                    {p.alias || p.address}
-                    {tenant && <span className="text-muted-foreground"> — {tenant.name}</span>}
-                  </span>
-                  {status.overdue && (
-                    <Badge variant="destructive" className="text-[10px]">
-                      Overdue
-                    </Badge>
+                <div key={p.id} className="rounded p-1.5 hover:bg-muted/50">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={!!slot} onCheckedChange={() => toggle(p.id)} />
+                    <span className="flex-1">
+                      {p.alias || p.address}
+                      {tenant && <span className="text-muted-foreground"> — {tenant.name}</span>}
+                    </span>
+                    {status.overdue && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        Overdue
+                      </Badge>
+                    )}
+                  </label>
+                  {slot && (
+                    <div className="ml-6 mt-1.5 grid grid-cols-3 gap-2">
+                      <Input
+                        type="date"
+                        className="h-8 text-xs"
+                        value={slot.date}
+                        onChange={(e) => updateSlot(p.id, { date: e.target.value })}
+                      />
+                      <Input
+                        type="time"
+                        className="h-8 text-xs"
+                        value={slot.time}
+                        onChange={(e) => updateSlot(p.id, { time: e.target.value })}
+                      />
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          min={15}
+                          step={15}
+                          className="h-8 text-xs"
+                          value={slot.durationMinutes}
+                          onChange={(e) => updateSlot(p.id, { durationMinutes: Number(e.target.value) || DEFAULT_DURATION_MINUTES })}
+                        />
+                        <span className="text-xs text-muted-foreground">min</span>
+                      </div>
+                    </div>
                   )}
-                </label>
+                </div>
               );
             })}
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={save}>Book {selected.size || ""} inspection(s)</Button>
+          <Button onClick={save}>Book {slots.size || ""} inspection(s)</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

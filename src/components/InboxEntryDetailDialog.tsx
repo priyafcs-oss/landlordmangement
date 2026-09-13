@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useStore } from "@/lib/store";
 import { DOCUMENT_TYPE_LABEL } from "@/lib/inboxLabels";
 import type { EmailInboxLogEntry, PropertyBill, AiIntakeProposal } from "@/lib/types";
 
@@ -16,6 +21,31 @@ export function InboxEntryDetailDialog({
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const { refresh } = useStore();
+  const canRetry = (entry.status === "failed" || entry.status === "skipped") && entry.emailId && entry.attachmentId;
+
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      const { data, error } = await supabase.functions.invoke<{ error?: string }>("retry-inbound-email", {
+        body: { emailId: entry.emailId, attachmentId: entry.attachmentId },
+      });
+      if (error) throw error;
+      if (data?.error) {
+        toast.error(data.error);
+      } else {
+        toast.success("Reprocessed successfully");
+        setOpen(false);
+      }
+    } catch (e) {
+      console.error("[inbox] retry failed", e);
+      toast.error("Retry failed — see the error below for details");
+    } finally {
+      setRetrying(false);
+      void refresh();
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -56,6 +86,12 @@ export function InboxEntryDetailDialog({
             <div className="rounded border border-muted p-2 text-xs text-muted-foreground">
               This proposal has already been reviewed ({proposal.status}).
             </div>
+          )}
+          {canRetry && (
+            <Button size="sm" variant="outline" disabled={retrying} onClick={retry} className="gap-1.5">
+              <RefreshCw className={"h-3.5 w-3.5" + (retrying ? " animate-spin" : "")} />
+              {retrying ? "Retrying…" : "Retry"}
+            </Button>
           )}
         </div>
       </DialogContent>

@@ -227,7 +227,7 @@ function CreatorMasterPanel() {
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded border p-3">
               <div>
-                <div className="text-sm font-medium">AI Co-Pilot APIs</div>
+                <div className="text-sm font-medium">AI Assistant APIs</div>
                 <div className="text-xs text-muted-foreground">
                   Master kill switch. When disabled, no AI request will ever leave this app.
                 </div>

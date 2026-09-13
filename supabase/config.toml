@@ -49,3 +49,11 @@ verify_jwt = false
 
 [functions.domain-lookup]
 verify_jwt = false
+
+# Same reasoning as upload-document above — called via supabase.functions.invoke with a real
+# session token, verified inside the function itself.
+[functions.copilot-chat]
+verify_jwt = false
+
+[functions.retry-inbound-email]
+verify_jwt = false

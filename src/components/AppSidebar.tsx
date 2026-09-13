@@ -24,7 +24,7 @@ const items = [
   { title: "Entities", url: "/entities", icon: Users2 },
   { title: "Rental Hub", url: "/rental", icon: Wallet },
   { title: "Inspections", url: "/inspections", icon: ClipboardCheck },
-  { title: "AI Co-Pilot", url: "/copilot", icon: Sparkles },
+  { title: "AI Assistant", url: "/copilot", icon: Sparkles },
   { title: "Settings", url: "/settings", icon: Settings },
 ] as const;
 

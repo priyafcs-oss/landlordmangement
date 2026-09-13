@@ -601,6 +601,10 @@ export interface Inspection {
   /** The tenant in place at the time of this inspection — kept explicit so history stays correct across tenant changes. */
   tenantId?: string;
   date: string;
+  /** 24h "HH:MM", optional — older inspections and ones booked without a specific time have none. */
+  time?: string;
+  /** Estimated length of the inspection, in minutes. */
+  durationMinutes?: number;
   type: "Entry" | "Routine" | "Exit";
   status: "Scheduled" | "Completed";
   notes?: string;

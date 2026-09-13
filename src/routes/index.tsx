@@ -43,6 +43,16 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { AiProposalsSection } from "@/components/PropertyShared";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
+
+/** "14:30" -> "2:30 PM". Falls back to the raw value if it's not a plain HH:MM string. */
+function formatTime12h(time: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!match) return time;
+  const hour24 = Number(match[1]);
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${match[2]} ${period}`;
+}
 import { WaterRebillBanner } from "@/components/WaterRebillBanner";
 import { OverviewSection } from "@/components/OverviewSection";
 
@@ -122,6 +132,11 @@ function DashboardPage() {
   const complianceAlerts = scopedProperties.filter(
     (p) => inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue,
   );
+
+  const upcomingInspections = state.inspections
+    .filter((i) => i.status === "Scheduled" && i.date >= todayISO())
+    .sort((a, b) => (a.date + (a.time ?? "")).localeCompare(b.date + (b.time ?? "")))
+    .slice(0, 5);
 
   const pendingApprovals =
     state.aiProposals.filter((p) => p.status === "pending").length +
@@ -288,6 +303,41 @@ function DashboardPage() {
                   </Link>
                 </Button>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-violet-600" />
+                Upcoming inspections
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {upcomingInspections.length === 0 && (
+                <div className="text-muted-foreground">No inspections booked.</div>
+              )}
+              {upcomingInspections.map((i) => {
+                const property = state.properties.find((p) => p.id === i.propertyId);
+                return (
+                  <div key={i.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <div className="font-medium">{property?.alias || property?.address}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {i.type} • {i.date}
+                        {i.time && ` at ${formatTime12h(i.time)}`}
+                        {i.durationMinutes && ` (${i.durationMinutes} min)`}
+                      </div>
+                    </div>
+                    <Badge variant="outline">{daysUntil(i.date) === 0 ? "Today" : `In ${daysUntil(i.date)} days`}</Badge>
+                  </div>
+                );
+              })}
+              <Button asChild variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs">
+                <Link to="/inspections">
+                  Book inspections <ArrowRight className="h-3 w-3" />
+                </Link>
+              </Button>
             </CardContent>
           </Card>
 
