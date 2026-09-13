@@ -74,9 +74,40 @@ const toLineItemRows = (items?: BillLineItem[]): LineItemRow[] =>
  */
 function PayStatusControl({ bill }: { bill: PropertyBill }) {
   const { unmarkBillPaid } = useStore();
-  if (bill.status !== "Paid") {
+  if (bill.status !== "Paid" && bill.status !== "Partial") {
     return <MarkBillPaidDialog bill={bill} trigger={<Button size="sm" className="gap-1"><CheckCircle2 className="h-3 w-3" /> Mark paid</Button>} />;
   }
+
+  const undoButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      className="gap-1"
+      onClick={() => {
+        if (confirm("Undo this payment? The linked transaction will be removed.")) {
+          unmarkBillPaid(bill.id);
+          toast.success("Payment undone");
+        }
+      }}
+    >
+      <Undo2 className="h-3 w-3" /> Unpay
+    </Button>
+  );
+
+  if (bill.status === "Partial") {
+    const owed = bill.amount - (bill.paidAmount ?? 0);
+    return (
+      <div className="flex items-center gap-2">
+        <div className="text-right text-xs text-amber-700">
+          <div className="font-medium">Partial — {fmtCurrency(bill.paidAmount ?? 0)} of {fmtCurrency(bill.amount)}</div>
+          <div className="text-muted-foreground">{fmtCurrency(owed)} still owed</div>
+        </div>
+        <MarkBillPaidDialog bill={bill} trigger={<Button size="sm" className="gap-1"><CheckCircle2 className="h-3 w-3" /> Pay remainder</Button>} />
+        {undoButton}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2">
       <div className="text-right text-xs text-emerald-700">
@@ -88,19 +119,7 @@ function PayStatusControl({ bill }: { bill: PropertyBill }) {
           {bill.paidAmount !== undefined && bill.paidAmount !== bill.amount ? ` · ${fmtCurrency(bill.paidAmount)}` : ""}
         </div>
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        className="gap-1"
-        onClick={() => {
-          if (confirm("Undo this payment? The linked transaction will be removed.")) {
-            unmarkBillPaid(bill.id);
-            toast.success("Payment undone");
-          }
-        }}
-      >
-        <Undo2 className="h-3 w-3" /> Unpay
-      </Button>
+      {undoButton}
     </div>
   );
 }

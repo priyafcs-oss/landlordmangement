@@ -44,9 +44,12 @@ export function MarkBillPaidDialog({
   const [openState, setOpenState] = useState(false);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : openState;
+  // Already partially paid? Default to what's actually still owed, not the bill's original full
+  // amount — this dialog reopens for "pay the remainder" too, not just a fresh payment.
+  const remainingOwed = bill.status === "Partial" ? bill.amount - (bill.paidAmount ?? 0) : bill.amount;
   const [paidDate, setPaidDate] = useState(todayISO());
   const [paymentMethod, setPaymentMethod] = useState<NonNullable<PropertyBill["paymentMethod"]>>("Bank Transfer");
-  const [amount, setAmount] = useState(String(bill.amount));
+  const [amount, setAmount] = useState(String(remainingOwed));
 
   const setOpen = (o: boolean) => {
     if (controlled) onOpenChangeProp?.(o);
@@ -55,12 +58,17 @@ export function MarkBillPaidDialog({
 
   const submit = () => {
     const parsed = parseFloat(amount);
-    markBillPaid(bill.id, {
-      paidDate,
-      paymentMethod,
-      amount: parsed > 0 && parsed !== bill.amount ? parsed : undefined,
-    });
-    toast.success("Marked paid — posted to Transactions");
+    if (!(parsed > 0)) return toast.error("Enter an amount greater than zero");
+    const result = markBillPaid(bill.id, { paidDate, paymentMethod, amount: parsed });
+    if (result.overflow) {
+      toast.success(
+        `Paid in full — ${fmtCurrency(result.overflow.totalApplied)} applied to ${result.overflow.instalmentsAffected} upcoming instalment${result.overflow.instalmentsAffected === 1 ? "" : "s"}`,
+      );
+    } else if (result.status === "Partial") {
+      toast.success(`Partial payment recorded — ${fmtCurrency(result.amountApplied)} of ${fmtCurrency(result.amountOwed)}`);
+    } else {
+      toast.success("Marked paid — posted to Transactions");
+    }
     setOpen(false);
   };
 
@@ -72,7 +80,7 @@ export function MarkBillPaidDialog({
         if (o) {
           setPaidDate(todayISO());
           setPaymentMethod("Bank Transfer");
-          setAmount(String(bill.amount));
+          setAmount(String(remainingOwed));
         }
       }}
     >
@@ -90,9 +98,15 @@ export function MarkBillPaidDialog({
           <DialogTitle>Mark paid</DialogTitle>
           <div className="text-xs text-muted-foreground">
             {bill.label ?? bill.billType} — billed {fmtCurrency(bill.amount)}
+            {bill.status === "Partial" && ` — ${fmtCurrency(remainingOwed)} still owed`}
           </div>
         </DialogHeader>
         <div className="space-y-3 text-sm">
+          {bill.billGroupId && (
+            <p className="text-xs text-muted-foreground">
+              Paying more than what's owed here applies the extra to the next instalment; paying less leaves this one marked partial.
+            </p>
+          )}
           <Field label="Date paid">
             <Input type="date" value={paidDate} onChange={(e) => setPaidDate(e.target.value)} />
           </Field>

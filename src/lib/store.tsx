@@ -335,9 +335,13 @@ interface StoreCtx {
   deleteBill: (id: string) => void;
   /** paidDate defaults to today — Phase 2 accrual-matching passes the payment evidence's own
    * date (a statement/bank-transaction date) so P&L lands in the right period. amount lets a bill
-   * be recorded paid for something other than its billed amount (partial payment, rounding,
-   * discount) — the linked Expense is posted at that amount instead of bill.amount. */
-  markBillPaid: (id: string, opts?: { paidDate?: string; paymentMethod?: PropertyBill["paymentMethod"]; amount?: number }) => void;
+   * be recorded paid for something other than its billed amount: paying less than owed marks THIS
+   * bill "Partial" (the shortfall stays owed here); paying more applies the excess to the next
+   * unpaid instalment sharing the same billGroupId (cascading further if that overpays it too). */
+  markBillPaid: (
+    id: string,
+    opts?: { paidDate?: string; paymentMethod?: PropertyBill["paymentMethod"]; amount?: number },
+  ) => { status: "Paid" | "Partial"; amountApplied: number; amountOwed: number; overflow?: { totalApplied: number; instalmentsAffected: number } };
   /** Undoes a mistaken Mark Paid: reverts status to Unpaid, clears the paid fields, and deletes the
    * Expense that markBillPaid created (never one from any other source, since linkedExpenseId is
    * only ever set by markBillPaid). */
@@ -1475,29 +1479,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteRow(TABLES.bills, id);
       set((s) => ({ ...s, bills: s.bills.filter((x) => x.id !== id) }));
     },
-    markBillPaid: (id, opts) =>
-      set((s) => {
-        const bill = s.bills.find((b) => b.id === id);
-        if (!bill) return s;
-        const paidDate = opts?.paidDate ?? new Date().toISOString().slice(0, 10);
-        const paidAmount = opts?.amount;
-        const paymentMethod = opts?.paymentMethod;
+    markBillPaid: (id, opts) => {
+      const paidDate = opts?.paidDate ?? new Date().toISOString().slice(0, 10);
+      const paymentMethod = opts?.paymentMethod;
+      let result = { status: "Paid" as "Paid" | "Partial", amountApplied: 0, amountOwed: 0 } as ReturnType<StoreCtx["markBillPaid"]>;
 
-        // Paying a bill posts it to Transactions/P&L too — this is the ONLY place a bill's
-        // Expense ever gets created, for every bill regardless of source (bills never post at
-        // intake anymore, even AI-confirmed ones — see 20260821150000).
+      /** Applies `newlyApplied` toward one bill row on top of whatever it already had paid
+       * (nonzero only if it was previously left "Partial") — so topping up a bill that was
+       * already partially paid accumulates correctly instead of forgetting the earlier amount.
+       * Returns the patch, plus either a brand-new Expense (first payment on this bill) or the
+       * cost update to apply to its already-linked one (a later top-up), so P&L reflects the true
+       * cumulative amount either way instead of staying stuck at the first partial payment. */
+      const applyPayment = (bill: PropertyBill, newlyApplied: number) => {
+        const priorPaid = bill.status === "Partial" ? bill.paidAmount ?? 0 : 0;
+        const cumulativePaid = priorPaid + newlyApplied;
+        const status: PropertyBill["status"] = cumulativePaid >= bill.amount - 0.005 ? "Paid" : "Partial";
         let linkedExpenseId = bill.linkedExpenseId;
         let newExpense: Expense | null = null;
+        let expenseCostUpdate: { id: string; cost: number } | null = null;
         if (!linkedExpenseId) {
           newExpense = {
             id: uid("ex"),
             itemName: bill.providerName || bill.billType,
-            cost: paidAmount ?? bill.amount,
+            cost: cumulativePaid,
             date: paidDate,
             propertyId: bill.propertyId,
             assetId: bill.assetId,
             unitId: bill.unitId,
-            // Falls back for bills saved before taxCategory existed on property_bills.
             taxCategory: bill.taxCategory ?? "Immediate Deduction",
             category: bill.category,
             hasWarranty: false,
@@ -1508,10 +1516,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             bpayReference: bill.bpayReference,
             paidDate,
             paymentMethod,
-            // Previously dropped on conversion, which silently un-linked the provider directory
-            // entry and the actual bill PDF the moment a bill was marked paid — the Transactions
-            // row then showed neither a provider nor a working invoice link even though both were
-            // right there on the Bill.
             providerName: bill.providerName,
             providerId: bill.providerId,
             invoiceFileName: bill.sourceFileName,
@@ -1522,14 +1526,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (bill.providerName && !bill.providerId) {
             value.findOrCreateProvider(bill.providerName, bill.propertyId);
           }
+        } else {
+          // Topping up a bill left "Partial" from an earlier payment — the linked Expense from
+          // that first payment already exists and needs its cost brought up to the new total.
+          expenseCostUpdate = { id: linkedExpenseId, cost: cumulativePaid };
+          void updateRow(TABLES.expenses, linkedExpenseId, { cost: cumulativePaid, paidDate, paymentMethod });
+        }
+        void updateRow(TABLES.bills, bill.id, { status, paidDate, linkedExpenseId, paymentMethod, paidAmount: cumulativePaid });
+        const patched: PropertyBill = { ...bill, status, paidDate, linkedExpenseId, paymentMethod, paidAmount: cumulativePaid };
+        return { patched, newExpense, expenseCostUpdate, status };
+      };
+
+      set((s) => {
+        const bill = s.bills.find((b) => b.id === id);
+        if (!bill) return s;
+        // opts.amount is what's being paid in THIS transaction, not a running total — so a
+        // top-up on a bill already left "Partial" from an earlier payment is compared against
+        // what's still actually owed, not the bill's full original amount.
+        const remainingOwed = bill.amount - (bill.status === "Partial" ? bill.paidAmount ?? 0 : 0);
+        const appliedAmount = opts?.amount ?? remainingOwed;
+
+        const first = applyPayment(bill, Math.min(appliedAmount, remainingOwed));
+        const billsById = new Map(s.bills.map((b) => [b.id, b]));
+        billsById.set(bill.id, first.patched);
+        const newExpenses: Expense[] = first.newExpense ? [first.newExpense] : [];
+        const expenseCostUpdates = new Map<string, number>();
+        if (first.expenseCostUpdate) expenseCostUpdates.set(first.expenseCostUpdate.id, first.expenseCostUpdate.cost);
+
+        // Overpaid this instalment — roll the excess onto the next unpaid instalment(s) sharing
+        // the same billGroupId (sorted by due date), cascading further if that overpays them too.
+        let excess = appliedAmount - remainingOwed;
+        let instalmentsAffected = 0;
+        let totalOverflowApplied = 0;
+        if (excess > 0.005 && bill.billGroupId) {
+          const siblings = s.bills
+            .filter((b) => b.billGroupId === bill.billGroupId && b.id !== bill.id && b.status !== "Paid")
+            .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+          for (const sibling of siblings) {
+            if (excess <= 0.005) break;
+            const owedOnSibling = sibling.amount - (sibling.status === "Partial" ? sibling.paidAmount ?? 0 : 0);
+            const appliedToSibling = Math.min(excess, owedOnSibling);
+            const next = applyPayment(sibling, appliedToSibling);
+            billsById.set(sibling.id, next.patched);
+            if (next.newExpense) newExpenses.push(next.newExpense);
+            if (next.expenseCostUpdate) expenseCostUpdates.set(next.expenseCostUpdate.id, next.expenseCostUpdate.cost);
+            excess -= appliedToSibling;
+            totalOverflowApplied += appliedToSibling;
+            instalmentsAffected += 1;
+          }
         }
 
-        void updateRow(TABLES.bills, id, { status: "Paid", paidDate, linkedExpenseId, paymentMethod, paidAmount });
-        const updated = s.bills.map((b) =>
-          b.id === id ? { ...b, status: "Paid" as const, paidDate, linkedExpenseId, paymentMethod, paidAmount } : b,
-        );
-        // Auto-create next cycle
-        if (bill.recurrenceMonths && bill.recurrenceMonths > 0) {
+        const updated = Array.from(billsById.values());
+        const expenses =
+          expenseCostUpdates.size === 0
+            ? s.expenses
+            : s.expenses.map((e) => (expenseCostUpdates.has(e.id) ? { ...e, cost: expenseCostUpdates.get(e.id)! } : e));
+
+        // Auto-create next cycle — only once the clicked bill itself is fully paid, not partial.
+        if (first.status === "Paid" && bill.recurrenceMonths && bill.recurrenceMonths > 0) {
           const next: PropertyBill = {
             ...bill,
             id: uid("bill"),
@@ -1543,12 +1597,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void upsertRow(TABLES.bills, { ...next, paidDate: null } as unknown as Record<string, unknown>);
           updated.push(next);
         }
-        return { ...s, bills: updated, expenses: newExpense ? [...s.expenses, newExpense] : s.expenses };
-      }),
+
+        result = {
+          status: first.status,
+          amountApplied: Math.min(appliedAmount, remainingOwed),
+          amountOwed: remainingOwed,
+          ...(instalmentsAffected > 0 ? { overflow: { totalApplied: totalOverflowApplied, instalmentsAffected } } : {}),
+        };
+
+        return { ...s, bills: updated, expenses: [...expenses, ...newExpenses] };
+      });
+
+      return result;
+    },
     unmarkBillPaid: (id) =>
       set((s) => {
         const bill = s.bills.find((b) => b.id === id);
-        if (!bill || bill.status !== "Paid") return s;
+        if (!bill || (bill.status !== "Paid" && bill.status !== "Partial")) return s;
+        // Only undoes THIS bill's own payment — if it had overflowed onto later instalments
+        // (see markBillPaid), those stay as they were and need reverting separately.
         const expenseId = bill.linkedExpenseId;
 
         void updateRow(TABLES.bills, id, {

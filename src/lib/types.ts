@@ -1007,7 +1007,11 @@ export interface PropertyBill {
   billType: BillType;
   amount: number;
   dueDate: string;
-  status: "Unpaid" | "Paid" | "Overdue";
+  /** "Partial" means paidAmount is less than amount — the shortfall stays owed on this same
+   * instalment (it does not roll forward). An overpayment, by contrast, never leaves this bill
+   * "Partial" — the excess is applied to the next unpaid instalment in the same billGroupId
+   * instead (see markBillPaid), so this status only ever reflects THIS bill's own amount vs. paidAmount. */
+  status: "Unpaid" | "Paid" | "Overdue" | "Partial";
   paidDate?: string;
   /** @deprecated portal login now lives on the Provider record — kept for bills saved before that move. */
   portalUrl?: string;
