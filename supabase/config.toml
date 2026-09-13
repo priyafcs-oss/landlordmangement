@@ -7,6 +7,12 @@ project_id = "jnlcjotkhfyttewdegac"
 # longer see anyone else's data anyway.
 enable_signup = true
 
+# Was "http://localhost:3000" — a leftover default that made every confirmation/reset email link
+# redirect to the clicker's own machine instead of the real deployed app, erroring out for anyone
+# who isn't running a local dev server on that exact port. This is the actual production domain
+# (Vercel project "landlordmangement", see `vercel ls`).
+site_url = "https://landlordmangement.vercel.app"
+
 [functions.parse-inbound-bill]
 # Called by Resend's webhook, not by an authenticated app user — Svix signature
 # verification inside the function is the real auth boundary, not a Supabase JWT.

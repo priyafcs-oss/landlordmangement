@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore, clearCache } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,7 @@ export function AppHeader() {
         <UploadDocumentDialog />
         <AiBudgetBadge />
         <CreatorMasterPanel />
+        <CurrentUserBadge />
         <Button
           variant="ghost"
           size="icon"
@@ -115,6 +116,30 @@ export function AppHeader() {
         )}
       </div>
     </header>
+  );
+}
+
+/** Shows who's currently signed in — the name from the Landlord Profile (Settings) if one's been
+ * entered, otherwise falls back to the account's email. Full email is always in the tooltip. */
+function CurrentUserBadge() {
+  const { state } = useStore();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+  }, []);
+
+  if (!email) return null;
+  const displayName = state.landlordProfile.fullName || email;
+
+  return (
+    <div
+      className="hidden max-w-[160px] items-center gap-1 truncate rounded-md border px-2 py-1 text-xs text-muted-foreground sm:flex"
+      title={email}
+    >
+      <User className="h-3 w-3 shrink-0" />
+      <span className="truncate">{displayName}</span>
+    </div>
   );
 }
 
