@@ -6,17 +6,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Lock, Home } from "lucide-react";
+import { Lock, Home, Eye, EyeOff } from "lucide-react";
 
 /**
- * Gates the landlord app behind a real Supabase Auth session. Every table's RLS policy now
- * requires `authenticated` (see the require_auth migration) — this is the client-side half:
- * without a session, nothing renders except the sign-in form, and no data request even fires.
+ * Gates the landlord app behind a real Supabase Auth session. Every table's RLS policy now scopes
+ * to `owner_id = auth.uid()` (see 20260913100000_multi_tenant_owner_scoping.sql) — this is the
+ * client-side half: without a session, nothing renders except the sign-in form, and no data
+ * request even fires.
  *
- * Sign-in only, deliberately no self-serve sign-up here: with RLS currently granting any
- * authenticated user full access (per-landlord row scoping is a later phase), an open sign-up
- * form would let anyone who finds it create an account and get full access. Accounts are created
- * by the project owner via the Supabase dashboard (Authentication → Users → Add user).
+ * Self-serve sign-up is enabled: each new account gets its own completely separate, empty
+ * portfolio (owner-scoped RLS means a new user simply can't see anyone else's rows), so there's no
+ * privilege-escalation risk in letting anyone create one. Sign-in is also guarded by a server-side
+ * lockout (see login_lockout migration) — 5 failed attempts for an email blocks further tries on
+ * it for 5 minutes, enforced in the database so it can't be bypassed by clearing local storage.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -40,18 +42,103 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** The generated Database types won't know about these RPCs until they're regenerated against
+ * the live schema post-migration — same reasoning as db.ts's loosely typed `db` handle. */
+const authRpc = supabase as unknown as {
+  rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+};
+
+async function checkLockout(email: string): Promise<{ locked: boolean; retryAfterSeconds: number }> {
+  const { data, error } = await authRpc.rpc("check_login_lockout", { p_email: email });
+  if (error) {
+    console.error("[auth] lockout check failed", error);
+    return { locked: false, retryAfterSeconds: 0 };
+  }
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { locked?: boolean; retry_after_seconds?: number }
+    | null
+    | undefined;
+  return { locked: !!row?.locked, retryAfterSeconds: row?.retry_after_seconds ?? 0 };
+}
+
+/** Exported for reuse by the "Account & Security" section of Settings (change password). */
+export function PasswordField({
+  label,
+  value,
+  onChange,
+  autoComplete,
+  onEnter,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: string;
+  onEnter?: () => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <div className="relative">
+        <Input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          onKeyDown={(e) => e.key === "Enter" && onEnter?.()}
+          className="pr-9"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground"
+          onClick={() => setShow((s) => !s)}
+          aria-label={show ? "Hide password" : "Show password"}
+        >
+          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SignInScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"signin" | "reset">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
 
   const signIn = async () => {
     if (!email || !password) return toast.error("Enter your email and password");
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const lockout = await checkLockout(email);
+      if (lockout.locked) {
+        const minutes = Math.max(1, Math.ceil(lockout.retryAfterSeconds / 60));
+        toast.error(`Too many failed attempts — try again in ${minutes} minute${minutes === 1 ? "" : "s"}`);
+        return;
+      }
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        void authRpc.rpc("record_login_failure", { p_email: email });
+        toast.error("Incorrect email or password");
+        return;
+      }
+      void authRpc.rpc("clear_login_failures", { p_email: email });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signUp = async () => {
+    if (!email || !password) return toast.error("Enter your email and password");
+    if (password.length < 6) return toast.error("Password must be at least 6 characters");
+    setBusy(true);
+    const { error } = await supabase.auth.signUp({ email, password });
     setBusy(false);
-    if (error) toast.error(error.message);
+    if (error) return toast.error(error.message);
+    toast.success("Account created — check your email to confirm, then sign in");
+    setMode("signin");
   };
 
   const sendReset = async () => {
@@ -76,34 +163,70 @@ function SignInScreen() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {mode === "signin" ? (
+          {mode === "signin" && (
             <>
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
                 <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Password</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  onKeyDown={(e) => e.key === "Enter" && signIn()}
-                />
-              </div>
+              <PasswordField
+                label="Password"
+                value={password}
+                onChange={setPassword}
+                autoComplete="current-password"
+                onEnter={signIn}
+              />
               <Button className="w-full gap-2" disabled={busy} onClick={signIn}>
                 <Lock className="h-4 w-4" /> Sign in
+              </Button>
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  className="text-muted-foreground underline"
+                  onClick={() => setMode("reset")}
+                >
+                  Forgot password?
+                </button>
+                <button
+                  type="button"
+                  className="text-muted-foreground underline"
+                  onClick={() => setMode("signup")}
+                >
+                  Create account
+                </button>
+              </div>
+            </>
+          )}
+          {mode === "signup" && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Create your own account — your properties, tenants and finances stay completely
+                private to you, separate from any other landlord using this app.
+              </p>
+              <div className="space-y-1">
+                <Label className="text-xs">Email</Label>
+                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+              </div>
+              <PasswordField
+                label="Password"
+                value={password}
+                onChange={setPassword}
+                autoComplete="new-password"
+                onEnter={signUp}
+              />
+              <Button className="w-full" disabled={busy} onClick={signUp}>
+                Create account
               </Button>
               <button
                 type="button"
                 className="w-full text-center text-xs text-muted-foreground underline"
-                onClick={() => setMode("reset")}
+                onClick={() => setMode("signin")}
               >
-                Forgot password?
+                Back to sign in
               </button>
             </>
-          ) : (
+          )}
+          {mode === "reset" && (
             <>
               <p className="text-xs text-muted-foreground">
                 Enter your email and we'll send you a link to reset your password.

@@ -36,13 +36,25 @@ export const TABLES = {
 } as const;
 
 export const SETTINGS_TABLE = "app_settings";
-export const SETTINGS_ID = "singleton";
 
 // The generated Database types are refreshed asynchronously by the platform,
 // so we talk to PostgREST through a loosely typed handle.
 const db = supabase as unknown as {
   from: (table: string) => any;
+  rpc: (fn: string) => Promise<{ data: unknown; error: unknown }>;
 };
+
+/** Each user's settings row is keyed by their effective owner id now that the app is multi-tenant
+ * — there's no longer a single global "singleton" row (see
+ * 20260913100000_multi_tenant_owner_scoping.sql). Usually that's just the signed-in user's own id,
+ * but an aliased account (see 20260913120000_owner_aliases_and_shared_access.sql — e.g. two people
+ * sharing one portfolio from before multi-tenancy existed) resolves to the canonical owner's id
+ * instead, so both land on the same settings row. */
+async function effectiveOwnerId(): Promise<string | null> {
+  const { data, error } = await db.rpc("effective_owner_id");
+  report("resolve effective owner id", error);
+  return (data as string | null) ?? null;
+}
 
 function report(context: string, error: unknown) {
   if (error) console.error(`[cloud] ${context}`, error);
@@ -108,7 +120,9 @@ export async function deleteWhereIn(table: string, column: string, values: strin
 }
 
 export async function loadSettings() {
-  const { data, error } = await db.from(SETTINGS_TABLE).select("*").eq("id", SETTINGS_ID).maybeSingle();
+  // RLS alone scopes this to exactly the caller's one row — no need to filter by id/owner_id
+  // explicitly, which matters for an aliased account whose own id isn't what the row is keyed by.
+  const { data, error } = await db.from(SETTINGS_TABLE).select("*").maybeSingle();
   report("load settings", error);
   return data as {
     aiConfig?: unknown;
@@ -120,7 +134,11 @@ export async function loadSettings() {
 }
 
 export async function saveSettings(patch: Record<string, unknown>) {
-  const { error } = await db.from(SETTINGS_TABLE).upsert({ id: SETTINGS_ID, ...patch, updated_at: new Date().toISOString() });
+  const ownerId = await effectiveOwnerId();
+  if (!ownerId) return;
+  const { error } = await db
+    .from(SETTINGS_TABLE)
+    .upsert({ id: ownerId, owner_id: ownerId, ...patch, updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
   report("save settings", error);
 }
 

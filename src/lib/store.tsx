@@ -106,6 +106,18 @@ function loadCache(): AppState | null {
   }
 }
 
+/** Called on sign-out so the next person to sign in on this browser (a different landlord's
+ * account, now that the app is multi-tenant) never gets an initial paint of someone else's
+ * cached portfolio before `refresh()` overwrites it. */
+export function clearCache() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(CACHE_KEY);
+  } catch {
+    // Best-effort — nothing to fall back to here.
+  }
+}
+
 function saveCache(state: AppState) {
   if (typeof window === "undefined") return;
   try {

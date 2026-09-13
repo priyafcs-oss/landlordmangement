@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "@/lib/store";
+import { useStore, clearCache } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,7 +79,10 @@ export function AppHeader() {
           size="icon"
           title="Sign out"
           className="h-8 w-8"
-          onClick={() => void supabase.auth.signOut()}
+          onClick={() => {
+            clearCache();
+            void supabase.auth.signOut();
+          }}
         >
           <LogOut className="h-4 w-4" />
         </Button>

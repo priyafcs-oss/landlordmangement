@@ -30,6 +30,11 @@ function inferMimeType(fileName?: string): string {
  * just chosen by the landlord instead of guessed by Gemini's classification step. On success the
  * original unclassified proposal row is deleted (only after the replacement is confirmed written,
  * so a failed re-parse never leaves neither the original nor a usable result).
+ *
+ * Uses a Supabase client scoped to the caller's own session token (verified below) rather than
+ * the service-role key — see upload-document/index.ts's doc comment for why, and note it also
+ * means the `ai_intake_proposals` lookup below can only ever find the calling landlord's own
+ * proposals, not another landlord's.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -37,6 +42,24 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  }
+
+  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   let body: ReparseRequest;
@@ -54,8 +77,6 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   const { data: existing, error: loadError } = await supabase
     .from("ai_intake_proposals")

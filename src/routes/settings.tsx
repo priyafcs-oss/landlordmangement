@@ -11,9 +11,11 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { User, FileText, ChevronDown, ChevronUp, X, Plus } from "lucide-react";
+import { User, FileText, ChevronDown, ChevronUp, X, Plus, ShieldCheck, HelpCircle } from "lucide-react";
 import { inspectLeaseTemplate, LEASE_DATA_FIELDS, carryOverMapping } from "@/lib/leaseTemplate";
 import type { LeaseTemplateConfig, LeaseTemplateField, ContactPerson } from "@/lib/types";
+import { supabase } from "@/integrations/supabase/client";
+import { PasswordField } from "@/components/AuthGate";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -162,7 +164,120 @@ function SettingsPage() {
 
       <LeaseTemplateSettings />
       <TenantInfoStatementSettings />
+      <AccountSecuritySettings />
+      <HowThisAppWorks />
     </div>
+  );
+}
+
+function AccountSecuritySettings() {
+  const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setCurrentEmail(data.user?.email ?? null));
+  }, []);
+
+  const changeEmail = async () => {
+    if (!newEmail) return toast.error("Enter a new email address");
+    setEmailBusy(true);
+    const { error } = await supabase.auth.updateUser({ email: newEmail });
+    setEmailBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("Check your new email address for a confirmation link");
+    setNewEmail("");
+  };
+
+  const changePassword = async () => {
+    if (newPassword.length < 6) return toast.error("Password must be at least 6 characters");
+    setPasswordBusy(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setPasswordBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("Password updated");
+    setNewPassword("");
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ShieldCheck className="h-4 w-4" />
+          Account &amp; Security
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-3 rounded-md border p-4">
+          <div>
+            <div className="text-sm font-medium">Login email</div>
+            {currentEmail && (
+              <div className="text-xs text-muted-foreground">Currently signed in as {currentEmail}</div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[220px] flex-1">
+              <Field label="New email address">
+                <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+              </Field>
+            </div>
+            <Button disabled={emailBusy} onClick={changeEmail}>
+              Update email
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-md border p-4">
+          <div className="text-sm font-medium">Password</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[220px] flex-1">
+              <PasswordField
+                label="New password"
+                value={newPassword}
+                onChange={setNewPassword}
+                autoComplete="new-password"
+                onEnter={changePassword}
+              />
+            </div>
+            <Button disabled={passwordBusy} onClick={changePassword}>
+              Update password
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function HowThisAppWorks() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <HelpCircle className="h-4 w-4" />
+          How this app works
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs text-muted-foreground">
+        <p>
+          Your login is your own private portfolio — properties, tenants, bills, leases and
+          finances you add are visible only to your account, even if someone else signs up for
+          their own account on this same app.
+        </p>
+        <p>
+          Anyone who wants their own portfolio creates their own account from the "Create account"
+          link on the sign-in screen — there's no shared team login and no way to invite someone
+          into your existing portfolio.
+        </p>
+        <p>
+          Forgot your password? Use "Forgot password?" on the sign-in screen, or change it any
+          time above once you're signed in. You can sign out from the button in the top-right of
+          the header.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

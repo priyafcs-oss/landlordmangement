@@ -198,6 +198,14 @@ Deno.serve(async (req) => {
     return new Response("Server misconfigured", { status: 500 });
   }
 
+  // Stays on the service-role key, unlike upload-document/reparse-document: this is a Resend
+  // webhook with no signed-in landlord to scope a client to. Inserts still land on a sane
+  // owner_id via each table's column default (COALESCE(auth.uid(), <first-created user>) — see
+  // 20260913100000_multi_tenant_owner_scoping.sql), but reads made through this client (the
+  // ai_intake_proposals dedup check and the `entities` lookup in router.ts) are NOT owner-scoped
+  // and see every landlord's rows. Harmless today with one real landlord; once a second one
+  // actually forwards email to this same inbox, this needs a real per-landlord routing story
+  // (e.g. a distinct receiving alias per landlord) before it can be trusted.
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,

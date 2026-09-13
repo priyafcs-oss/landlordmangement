@@ -23,11 +23,15 @@ function isSupportedAttachment(contentType: string): boolean {
  * Lets the landlord upload a bill, rent statement or lease agreement directly from the app,
  * instead of only via the email inbox — same classify → extract → stage pipeline as
  * parse-inbound-bill, just fed from a direct file upload rather than a Resend webhook.
- * `verify_jwt = false` in config.toml, same as every other AI-calling function here — this app
- * has no login (see 20260818100000_drop_auth_requirement.sql) and uses the newer opaque
- * sb_publishable_/sb_secret_ key format, which isn't a JWT and would fail verification anyway.
- * Anyone with the project URL and publishable key can call this directly; that's an accepted
- * tradeoff for a single-landlord app on the free tier, not an oversight.
+ *
+ * `verify_jwt = false` in config.toml because this project uses the newer opaque
+ * sb_publishable_/sb_secret_ key format for its API key, which isn't a JWT and would fail the
+ * gateway's verification unconditionally — but a signed-in user's session token IS a real JWT, so
+ * it's checked explicitly below instead, and the Supabase client used for every DB write in this
+ * request is built from THAT token rather than the service-role key. That's what makes every row
+ * this function writes land under the calling landlord's own `owner_id` for free, via the
+ * owner-scoped RLS policies (20260913100000_multi_tenant_owner_scoping.sql) — no manual owner_id
+ * plumbing needed through the classify/extract parsers this dispatches to.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -35,6 +39,24 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  }
+
+  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const userScopedSupabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: userData, error: userError } = await userScopedSupabase.auth.getUser();
+  if (userError || !userData.user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   let body: UploadRequest;
@@ -78,13 +100,8 @@ Deno.serve(async (req) => {
     bankAccountIdHint: body.bankAccountId,
   };
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-
   try {
-    const result = await routeInboundDocument(supabase, input, null);
+    const result = await routeInboundDocument(userScopedSupabase, input, null);
     if (!result.ok) {
       console.error("[upload-document] parse failed", result.error);
       return new Response(JSON.stringify({ error: result.error }), {

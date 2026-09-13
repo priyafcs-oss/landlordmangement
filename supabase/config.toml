@@ -5,13 +5,14 @@ project_id = "jnlcjotkhfyttewdegac"
 # verification inside the function is the real auth boundary, not a Supabase JWT.
 verify_jwt = false
 
-# Called from the browser via supabase.functions.invoke with no user session (this app has no
-# login — see 20260818100000_drop_auth_requirement.sql) and, since the migration to Supabase's
-# new opaque API key format, src/integrations/supabase/client.ts deliberately strips the
-# Authorization header on these calls (an sb_publishable_/sb_secret_ key isn't a JWT and would
-# fail verification anyway). Leaving verify_jwt at its default (true) here means the platform
-# gateway rejects every call before the function body ever runs, surfacing to the app only as a
-# generic "Edge Function returned a non-2xx status code" with no real detail.
+# Called from the browser via supabase.functions.invoke. Since the migration to Supabase's new
+# opaque API key format, src/integrations/supabase/client.ts only sends a real bearer JWT in the
+# Authorization header when there's an actual signed-in session (otherwise it's the
+# sb_publishable_/sb_secret_ key, which isn't a JWT and would fail gateway verification). Leaving
+# verify_jwt at its default (true) here means the gateway would reject every call before the
+# function body ever runs, surfacing to the app only as a generic "Edge Function returned a
+# non-2xx status code" with no real detail — so verification happens inside the function instead
+# (see its own doc comment), which can return a clear 401.
 [functions.upload-document]
 verify_jwt = false
 
