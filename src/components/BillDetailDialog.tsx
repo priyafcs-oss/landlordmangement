@@ -379,7 +379,7 @@ export function BillDetailDialog({
                           <Input type="date" value={row.dueDate} onChange={(e) => setScheduleRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, dueDate: e.target.value } : r)))} />
                         </Field>
                         <Field label="Amount">
-                          <Input type="number" value={row.amount} onChange={(e) => setScheduleRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, amount: e.target.value } : r)))} />
+                          <Input type="number" step="0.01" value={row.amount} onChange={(e) => setScheduleRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, amount: e.target.value } : r)))} />
                         </Field>
                         <Button size="icon" variant="ghost" onClick={() => removeScheduleRow(row.key)}>
                           <Trash2 className="h-4 w-4" />
@@ -541,10 +541,10 @@ export function BillDetailDialog({
                       </Select>
                     </Field>
                     <Field label="Amount">
-                      <Input type="number" value={li.amount} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))} />
+                      <Input type="number" step="0.01" value={li.amount} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))} />
                     </Field>
                     <Field label="GST">
-                      <Input type="number" value={li.gst} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))} />
+                      <Input type="number" step="0.01" value={li.gst} onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))} />
                     </Field>
                     <Button size="icon" variant="ghost" onClick={() => setLineItems((rows) => rows.filter((r) => r.key !== li.key))}>
                       <Trash2 className="h-4 w-4" />

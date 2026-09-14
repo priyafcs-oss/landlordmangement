@@ -762,6 +762,7 @@ export function AddBillDialog({
                     <Field label="Amount">
                       <Input
                         type="number"
+                        step="0.01"
                         value={inst.amount}
                         onChange={(e) =>
                           setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, amount: e.target.value } : r)))
@@ -956,6 +957,7 @@ export function AddBillDialog({
                     <Field label="Amount">
                       <Input
                         type="number"
+                        step="0.01"
                         value={li.amount}
                         onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))}
                       />
@@ -963,6 +965,7 @@ export function AddBillDialog({
                     <Field label="GST">
                       <Input
                         type="number"
+                        step="0.01"
                         value={li.gst}
                         onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))}
                       />

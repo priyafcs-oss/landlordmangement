@@ -159,12 +159,16 @@ export function BillsBoard({
   const handleSort = (f: SortField) => setSort((s) => toggleSort(s, f));
 
   const outstanding = scopedBills.filter((b) => b.status !== "Paid");
-  const outstandingTotal = outstanding.reduce((s, b) => s + b.amount, 0);
-  const overdueTotal = outstanding.filter(isOverdue).reduce((s, b) => s + b.amount, 0);
-  const due30Total = outstanding.filter((b) => !isOverdue(b) && b.dueDate <= in30).reduce((s, b) => s + b.amount, 0);
+  // What's actually still owed, not the original billed amount — a Partial instalment has
+  // already had some of its amount paid, so counting the full amount here overstates how much
+  // is genuinely outstanding.
+  const owedOn = (b: PropertyBill) => Math.max(0, b.amount - (b.paidAmount ?? 0));
+  const outstandingTotal = outstanding.reduce((s, b) => s + owedOn(b), 0);
+  const overdueTotal = outstanding.filter(isOverdue).reduce((s, b) => s + owedOn(b), 0);
+  const due30Total = outstanding.filter((b) => !isOverdue(b) && b.dueDate <= in30).reduce((s, b) => s + owedOn(b), 0);
   const laterTotal = outstandingTotal - overdueTotal - due30Total;
   const byType = outstanding.reduce<Record<string, number>>((acc, b) => {
-    acc[b.billType] = (acc[b.billType] ?? 0) + b.amount;
+    acc[b.billType] = (acc[b.billType] ?? 0) + owedOn(b);
     return acc;
   }, {});
   const maxByType = Math.max(1, ...Object.values(byType));
@@ -521,6 +525,10 @@ function BillsTableBody({
             }
             const isOpen = expanded.has(key);
             const total = group.reduce((s, b) => s + b.amount, 0);
+            // What's still owed across the whole instalment schedule, not just this row's own
+            // billed amount — a landlord glancing at the Bills list wants to know how much of a
+            // multi-instalment bill is left to pay, not the full original total every time.
+            const pending = group.reduce((s, b) => s + Math.max(0, b.amount - (b.paidAmount ?? 0)), 0);
             const paidCount = group.filter((b) => b.status === "Paid").length;
             const allPaid = paidCount === group.length;
             const anyOverdue = group.some(isOverdue);
@@ -553,7 +561,16 @@ function BillsTableBody({
                   <td className="px-3 py-2 text-xs text-muted-foreground">{primary.category ?? "—"}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{taxTreatmentLabel(primary.category)}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{primary.source ?? "Manual"}</td>
-                  <td className={"px-3 py-2 text-right font-medium " + (anyOverdue ? "text-destructive" : "")}>{fmtCurrency(total)}</td>
+                  <td className={"px-3 py-2 text-right font-medium " + (anyOverdue ? "text-destructive" : "")}>
+                    {allPaid ? (
+                      fmtCurrency(total)
+                    ) : (
+                      <>
+                        <div>{fmtCurrency(pending)} pending</div>
+                        <div className="text-xs font-normal text-muted-foreground">of {fmtCurrency(total)}</div>
+                      </>
+                    )}
+                  </td>
                   <td className="px-2 py-2" />
                 </tr>
                 {isOpen &&
