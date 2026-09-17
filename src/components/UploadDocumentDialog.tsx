@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -17,12 +18,18 @@ import {
   MAX_AI_UPLOAD_BYTES,
   formatFileSize,
   readFileAsBase64,
+  uploadDocumentFile,
   isSupportedDocumentFile,
   ACCEPTED_DOCUMENT_TYPES_LABEL,
   ACCEPTED_DOCUMENT_TYPES_ACCEPT,
   edgeFunctionErrorMessage,
 } from "@/lib/files";
 import { toast } from "sonner";
+
+/** Same list PropertyNoteDialog uses (src/components/PropertyExtraTabs.tsx) — kept in sync there
+ * rather than shared, since that's the only other place it's used and pulling it into a shared
+ * module for one array felt like more indirection than the two lists are worth. */
+const NOTE_CATEGORIES = ["General", "Tenancy", "Finance", "Maintenance", "Compliance", "Insurance", "Other"];
 
 interface UploadResult {
   ok: boolean;
@@ -61,12 +68,19 @@ export function UploadDocumentDialog({
   /** Custom open trigger — falls back to the default "Upload document" button when omitted. */
   trigger?: React.ReactNode;
 } = {}) {
-  const { refreshOne } = useStore();
+  const { state, refreshOne, addPropertyNote } = useStore();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
+  // Files the AI reader rejected (too large, or an unsupported format) — offered a fallback below
+  // to store them anyway (Storage upload + a manually-categorized PropertyNote), rather than a
+  // dead end. Distinct from `files`, which the AI-processing flow above clears/reuses on retry.
+  const [unreadableFiles, setUnreadableFiles] = useState<File[]>([]);
+  const [manualPropertyId, setManualPropertyId] = useState("");
+  const [manualCategory, setManualCategory] = useState(NOTE_CATEGORIES[0]);
+  const [storingManually, setStoringManually] = useState(false);
   // Ordered ids of proposals ready to review — reviewing the front one and dismissing/confirming
   // it (ProposalReviewDialog auto-closes once the proposal leaves "pending") pops it off the
   // queue and immediately reveals the next one, if it's already finished processing in the
@@ -74,14 +88,19 @@ export function UploadDocumentDialog({
   const [reviewQueue, setReviewQueue] = useState<string[]>([]);
   const currentReviewId = reviewQueue[0] ?? null;
 
-  const uploadOne = async (file: File): Promise<UploadResult | { ok: false; error: string }> => {
+  const uploadOne = async (file: File): Promise<UploadResult | { ok: false; error: string; unreadable?: boolean }> => {
     if (!isSupportedDocumentFile(file)) {
-      return { ok: false, error: `${file.name} isn't a PDF or image — the AI reader only supports those. Try exporting/saving it as a PDF first.` };
+      return {
+        ok: false,
+        unreadable: true,
+        error: `${file.name} isn't a PDF or image — the AI reader only supports those. You can still store it below without AI processing.`,
+      };
     }
     if (file.size > MAX_AI_UPLOAD_BYTES) {
       return {
         ok: false,
-        error: `${file.name} is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
+        unreadable: true,
+        error: `${file.name} is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. You can still store it below without AI processing, or try a lower-resolution scan/split it into smaller files first.`,
       };
     }
     const base64 = await readFileAsBase64(file).catch(() => {
@@ -107,11 +126,12 @@ export function UploadDocumentDialog({
     setProcessedCount(0);
     try {
       const failedFiles: File[] = [];
+      const newUnreadable: File[] = [];
       let billedCount = 0;
       let handedOff = false;
 
       for (const file of queued) {
-        let data: UploadResult | { ok: false; error: string };
+        let data: UploadResult | { ok: false; error: string; unreadable?: boolean };
         try {
           data = await uploadOne(file);
         } catch (e) {
@@ -121,7 +141,8 @@ export function UploadDocumentDialog({
 
         if (!data.ok) {
           toast.error(`${file.name}: ${"error" in data ? data.error : "Couldn't process this document"}`);
-          failedFiles.push(file);
+          if ("unreadable" in data && data.unreadable) newUnreadable.push(file);
+          else failedFiles.push(file);
           continue;
         }
         if ("duplicate" in data && data.duplicate) {
@@ -158,9 +179,11 @@ export function UploadDocumentDialog({
           billedCount === 1 ? "Bill uploaded — it'll post to P&L once marked paid" : `${billedCount} bills uploaded — they'll post to P&L once marked paid`,
         );
       }
+      if (newUnreadable.length > 0) setUnreadableFiles((u) => [...u, ...newUnreadable]);
+
       if (failedFiles.length === 0) {
         setFiles([]);
-        if (!handedOff) setOpen(false);
+        if (!handedOff && newUnreadable.length === 0) setOpen(false);
       } else {
         // Keep only the failed files selected so retrying doesn't resubmit ones that already
         // succeeded, and reopen the dialog so they're visible to retry.
@@ -169,6 +192,35 @@ export function UploadDocumentDialog({
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Stores every currently-queued unreadable file directly as a manually-categorized
+   * PropertyNote attachment (see PropertyExtraTabs.tsx's PropertyNoteDialog) — no AI involved at
+   * all, so neither the format restriction nor the size ceiling applies. Applies the one chosen
+   * property/category to all of them; a landlord wanting per-file categories can re-file any of
+   * these individually afterward from that property's Notes tab. */
+  const storeUnreadableFiles = async () => {
+    if (!manualPropertyId) return toast.error("Choose a property first");
+    setStoringManually(true);
+    try {
+      for (const file of unreadableFiles) {
+        const path = await uploadDocumentFile(file);
+        addPropertyNote({
+          propertyId: manualPropertyId,
+          title: file.name,
+          category: manualCategory,
+          tags: [],
+          attachments: [{ name: file.name, data: path }],
+        });
+      }
+      toast.success(
+        unreadableFiles.length === 1 ? "Document stored" : `${unreadableFiles.length} documents stored`,
+      );
+      setUnreadableFiles([]);
+      if (files.length === 0) setOpen(false);
+    } finally {
+      setStoringManually(false);
     }
   };
 
@@ -269,6 +321,60 @@ export function UploadDocumentDialog({
               Max {formatFileSize(MAX_AI_UPLOAD_BYTES)} per file — a large scanned document (e.g. building plans) may
               need to be compressed or split first.
             </p>
+            {unreadableFiles.length > 0 && (
+              <div className="space-y-2 rounded-md border border-dashed p-3">
+                <p className="text-xs font-medium">
+                  {unreadableFiles.length} file{unreadableFiles.length === 1 ? "" : "s"} the AI reader can't process —
+                  store {unreadableFiles.length === 1 ? "it" : "them"} anyway, with no data extraction:
+                </p>
+                <ul className="space-y-1">
+                  {unreadableFiles.map((f, i) => (
+                    <li key={`${f.name}-${i}`} className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1 text-xs">
+                      <span className="min-w-0 truncate" title={f.name}>
+                        {f.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setUnreadableFiles((fs) => fs.filter((_, idx) => idx !== i))}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        title="Remove"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select value={manualPropertyId} onValueChange={setManualPropertyId}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Property" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {state.properties.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.alias || p.address}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={manualCategory} onValueChange={setManualCategory}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {NOTE_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button size="sm" variant="outline" className="w-full" onClick={storeUnreadableFiles} disabled={storingManually}>
+                  {storingManually ? "Storing…" : "Store without AI processing"}
+                </Button>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button onClick={upload} disabled={files.length === 0 || busy}>

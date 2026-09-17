@@ -829,7 +829,7 @@ export interface ProviderDocument {
   expiryDate?: string;
 }
 
-export type EntityType = "Individual" | "Joint" | "Trust" | "SMSF" | "Company";
+export type EntityType = "Individual" | "Joint" | "Tenants in Common" | "Trust" | "SMSF" | "Company";
 
 /** One owner's share of an entity — e.g. a Joint entity has two owners with a percent split. */
 export interface EntityOwner {

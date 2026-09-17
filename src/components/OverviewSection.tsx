@@ -112,6 +112,18 @@ export function OverviewSection({
   const cashflow = computeCashflowSeries(ledger, expenses, loans, cashflowMonths);
   const bufferStatus = computeBufferStatus(buffers);
   const repayments = computeUpcomingRepayments(loans, properties, repayWindow);
+  // The windowed "Upcoming repayments" list below only shows a loan once its next repayment
+  // falls inside the selected 7/14/30-day window — a loan due in 45 days simply doesn't appear.
+  // This persistent list always shows every active loan's actual next occurrence (a year-long
+  // lookahead is enough to find one for any repayment frequency), independent of that filter.
+  const nextRepaymentPerLoan = (() => {
+    const seen = new Set<string>();
+    return computeUpcomingRepayments(loans, properties, 366).items.filter((r) => {
+      if (seen.has(r.loanId)) return false;
+      seen.add(r.loanId);
+      return true;
+    });
+  })();
   const bufferDetails = computeBufferDetails(buffers, expenses, assets, entities);
   const insuranceAlerts = computeInsuranceAlerts(properties, insurancePolicies);
   const heatmap = computeRentHeatmap(ledger);
@@ -458,6 +470,31 @@ export function OverviewSection({
                   </div>
                 )}
               </div>
+
+              {nextRepaymentPerLoan.length > 0 && (
+                <div className="space-y-2 border-t pt-3">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Landmark className="h-3 w-3" /> Next repayment per loan
+                  </span>
+                  <div className="space-y-1.5">
+                    {nextRepaymentPerLoan.map((r) => (
+                      <div key={r.loanId} className="flex items-center justify-between rounded-md border p-2 text-xs">
+                        <span className="font-medium">
+                          {r.bankName}
+                          {r.accountNumber ? ` ····${r.accountNumber.slice(-4)}` : ""}
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            · {r.propertyLabel} · {r.repaymentFrequency}
+                          </span>
+                        </span>
+                        <span className="text-right">
+                          <span className="font-medium">{r.dueDate}</span>
+                          <span className="ml-1 text-muted-foreground">{fmtCurrency(r.amount)}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {buffers.length > 0 && (
                 <div className="space-y-2 border-t pt-3">

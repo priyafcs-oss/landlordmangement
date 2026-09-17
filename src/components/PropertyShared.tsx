@@ -121,6 +121,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { StoredImageLink, StoredVideo } from "@/components/StoredImage";
+import { EntityDialog } from "@/components/EntityDialog";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
@@ -425,11 +426,12 @@ const PROPERTY_DETAIL_FIELDS: { key: keyof PropertyDetailProposalPayload; label:
   { key: "gasSafetyCertExpiry", label: "Gas safety cert expiry", kind: "date" },
 ];
 
-const ENTITY_TYPES: Entity["type"][] = ["Individual", "Joint", "Trust", "SMSF", "Company"];
+const ENTITY_TYPES: Entity["type"][] = ["Individual", "Joint", "Tenants in Common", "Trust", "SMSF", "Company"];
 function mapOwnershipType(raw?: string): Entity["type"] {
   const exact = ENTITY_TYPES.find((t) => t.toLowerCase() === (raw ?? "").trim().toLowerCase());
   if (exact) return exact;
   const c = (raw ?? "").toLowerCase();
+  if (c.includes("tenants in common")) return "Tenants in Common";
   if (c.includes("joint")) return "Joint";
   if (c.includes("smsf") || c.includes("super")) return "SMSF";
   if (c.includes("trust")) return "Trust";
@@ -2612,12 +2614,9 @@ export function PropertyDialog({
   /** Called after a *new* property is actually created (not on edit, not when the dialog merely opens), with its id. */
   onCreated?: (propertyId: string) => void;
 }) {
-  const { state, addProperty, updateProperty, findOrCreateEntity, updateAsset } = useStore();
+  const { state, addProperty, updateProperty, updateAsset } = useStore();
   const asset = property ? state.assets.find((a) => a.id === property.assetId) : undefined;
   const isArchived = asset?.status === "Archived";
-  const [creatingEntity, setCreatingEntity] = useState(false);
-  const [newEntityName, setNewEntityName] = useState("");
-  const [newEntityType, setNewEntityType] = useState<Entity["type"]>("Individual");
   const [open, setOpen] = useState(false);
   const buildForm = () => ({
     address: property?.address ?? initialAddress ?? "",
@@ -2702,8 +2701,6 @@ export function PropertyDialog({
           setForm(buildForm());
           setUnits(property?.units ?? []);
           setAddressSuggestions([]);
-          setCreatingEntity(false);
-          setNewEntityName("");
         } else {
           onDone();
         }
@@ -2849,47 +2846,32 @@ export function PropertyDialog({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Entity (ownership)">
-              {creatingEntity ? (
-                <div className="flex items-center gap-1">
-                  <Input value={newEntityName} onChange={(e) => setNewEntityName(e.target.value)} placeholder="New entity name" className="flex-1" />
-                  <Select value={newEntityType} onValueChange={(v) => setNewEntityType(v as Entity["type"])}>
-                    <SelectTrigger className="w-[110px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Individual">Individual</SelectItem>
-                      <SelectItem value="Joint">Joint</SelectItem>
-                      <SelectItem value="Trust">Trust</SelectItem>
-                      <SelectItem value="SMSF">SMSF</SelectItem>
-                      <SelectItem value="Company">Company</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button size="icon" variant="ghost" onClick={() => { setCreatingEntity(false); setNewEntityName(""); }}>
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ) : (
-                <Select
-                  value={form.entityId || "__none__"}
-                  onValueChange={(v) => {
-                    if (v === "__new__") { setCreatingEntity(true); return; }
-                    setForm({ ...form, entityId: v === "__none__" ? "" : v });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Unassigned</SelectItem>
-                    {state.entities.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {e.name}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="__new__">+ Create new entity…</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
+              <Select
+                value={form.entityId || "__none__"}
+                onValueChange={(v) => {
+                  if (v === "__new__") return; // handled by the EntityDialog trigger item below instead
+                  setForm({ ...form, entityId: v === "__none__" ? "" : v });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Unassigned</SelectItem>
+                  {state.entities.map((e) => (
+                    <SelectItem key={e.id} value={e.id}>
+                      {e.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {/* Full owners+percent editor (unlimited owners, e.g. Tenants in Common with unequal
+                  shares) rather than a name-only shortcut — see EntityDialog's own owners list. */}
+              <EntityDialog onSaved={(e) => setForm((f) => ({ ...f, entityId: e.id }))}>
+                <Button type="button" size="sm" variant="ghost" className="mt-1 h-6 gap-1 px-1 text-xs text-muted-foreground">
+                  <Plus className="h-3 w-3" /> Create new entity…
+                </Button>
+              </EntityDialog>
             </Field>
             <Field label="Occupancy">
               <Select
@@ -2941,10 +2923,7 @@ export function PropertyDialog({
               const payload = {
                 address: form.address,
                 alias: form.alias || undefined,
-                entityId:
-                  creatingEntity && newEntityName.trim()
-                    ? findOrCreateEntity(newEntityName, newEntityType)
-                    : form.entityId || undefined,
+                entityId: form.entityId || undefined,
                 occupancyType: form.occupancyType || undefined,
                 bedrooms: form.bedrooms ? parseFloat(form.bedrooms) : undefined,
                 bathrooms: form.bathrooms ? parseFloat(form.bathrooms) : undefined,

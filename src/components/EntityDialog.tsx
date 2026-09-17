@@ -23,11 +23,22 @@ import { Plus, X } from "lucide-react";
 import type { Entity, EntityOwner, EntityType } from "@/lib/types";
 import { toast } from "sonner";
 
-const ENTITY_TYPES: EntityType[] = ["Individual", "Joint", "Trust", "SMSF", "Company"];
+const ENTITY_TYPES: EntityType[] = ["Individual", "Joint", "Tenants in Common", "Trust", "SMSF", "Company"];
 
 /** Add/edit form for an ownership entity — used both from the Entities list and an entity's own
  * detail page, so kept as a shared component rather than duplicated per caller. */
-export function EntityDialog({ entity, children }: { entity?: Entity; children: React.ReactNode }) {
+export function EntityDialog({
+  entity,
+  children,
+  onSaved,
+}: {
+  entity?: Entity;
+  children: React.ReactNode;
+  /** Called with the saved entity right after Save — e.g. so a caller embedding this dialog
+   * inline (the property form's "+ Create new entity…" shortcut) can select it immediately
+   * instead of leaving the landlord to find and pick it from the list afterward. */
+  onSaved?: (entity: Entity) => void;
+}) {
   const { addEntity, updateEntity } = useStore();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(entity?.name ?? "");
@@ -66,9 +77,11 @@ export function EntityDialog({ entity, children }: { entity?: Entity; children: 
     if (entity) {
       updateEntity(entity.id, payload);
       toast.success("Entity updated");
+      onSaved?.({ ...entity, ...payload });
     } else {
-      addEntity(payload);
+      const id = addEntity(payload);
       toast.success("Entity added");
+      onSaved?.({ ...payload, id });
     }
     setOpen(false);
   };

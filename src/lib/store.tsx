@@ -268,7 +268,10 @@ interface StoreCtx {
    * within one property), or from a name typed two slightly different ways. */
   mergeProviders: (survivorId: string, duplicateId: string) => void;
 
-  addEntity: (e: Omit<Entity, "id">) => void;
+  /** Returns the generated id synchronously, same reasoning as findOrCreateEntity below — lets a
+   * caller (the property form's inline "+ Create new entity…" shortcut) select the new entity
+   * immediately rather than needing a second lookup once state catches up. */
+  addEntity: (e: Omit<Entity, "id">) => string;
   updateEntity: (id: string, e: Partial<Entity>) => void;
   deleteEntity: (id: string) => void;
   /** Case-insensitive name match against existing entities; creates one if none matches. Returns
@@ -1167,6 +1170,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const row: Entity = { ...e, id: uid("ent") };
       void upsertRow(TABLES.entities, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, entities: [...s.entities, row] }));
+      return row.id;
     },
     updateEntity: (id, patch) => {
       void updateRow(TABLES.entities, id, patch as Record<string, unknown>);
@@ -1189,9 +1193,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const existing = state.entities.find((e) => e.name.trim().toLowerCase() === trimmed.toLowerCase());
       if (existing) return existing.id;
 
-      // A "Joint" owner name is usually two people joined by "&"/"and" — split into even-share owners.
+      // A "Joint"/"Tenants in Common" owner name is usually multiple people joined by "&"/"and" —
+      // split into even-share owners (a Tenants in Common entity's shares can then be adjusted to
+      // unequal percentages afterward via the full Entity edit dialog).
       const owners =
-        type === "Joint"
+        type === "Joint" || type === "Tenants in Common"
           ? trimmed
               .split(/\s*(?:&|\band\b)\s*/i)
               .map((n) => n.trim())

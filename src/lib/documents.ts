@@ -22,7 +22,8 @@ export interface DocumentEntry {
     | "Property Sale"
     | "Management Agreement"
     | "Insurance Document"
-    | "Compliance Certificate";
+    | "Compliance Certificate"
+    | "Manual Document";
   /** The date this document is anchored to for period filtering/grouping/sorting — the period it
    * covers when there is one (a statement's periodStart, a lease's start date), not necessarily
    * when it was added. */
@@ -307,6 +308,21 @@ export function buildDocumentEntries(state: AppState): DocumentEntry[] {
         fileName: c.fileName,
         fileData: c.fileData,
       })),
+    // Manually-stored documents the AI reader couldn't process (see UploadDocumentDialog's
+    // "Store without AI processing" fallback) — one entry per attachment, since a note can carry
+    // more than one file.
+    ...state.propertyNotes.flatMap((n) =>
+      n.attachments.map((a, i) => ({
+        id: `${n.id}-attachment-${i}`,
+        kind: "Manual Document" as const,
+        date: n.created_at?.slice(0, 10) ?? "",
+        dateAdded: n.created_at,
+        propertyId: n.propertyId,
+        label: `${n.category ?? "Document"} — ${n.title}`,
+        fileName: a.name,
+        fileData: a.data,
+      })),
+    ),
     // The offer/contract/approval letter attached when a loan was first added (AddLoanDialog) —
     // distinct from the AI-reviewed "Loan Document"/"Loan Statement" proposals below, which only
     // ever cover documents forwarded through the upload-and-review pipeline, not this one.
