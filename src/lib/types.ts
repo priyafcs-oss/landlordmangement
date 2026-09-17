@@ -346,6 +346,11 @@ export interface Tenant {
   leaseStart?: string;
   leaseExpiry?: string; // empty string / undefined = Periodic
   leaseDuration?: LeaseDuration;
+  /** Set once the tenant has given notice — the date they're actually moving out, distinct from
+   * leaseExpiry (a periodic lease has no fixed expiry, but a tenant can still give notice) and
+   * from noticePeriod (the contractual notice LENGTH, not this tenancy's own actual move-out
+   * date). Undefined until notice is given. */
+  vacatingDate?: string;
   lastRentIncreaseDate?: string;
   bankReference?: string;
   bankAccountHolder?: string;
@@ -1091,8 +1096,10 @@ export interface RentLedgerProposalPayload {
   /** tenantName here is per-line, set only on a changeover statement where this specific payment
    * is clearly attributable to a named tenant distinct from the statement's overall tenantName. */
   transactions: { date: string; amount: number; description: string; tenantName?: string }[];
-  /** Expense lines on the same statement (e.g. an agent's management fee or a bill paid on the owner's behalf) — staged for review like everything else from this pipeline, never auto-applied. */
-  expenseLines?: { vendor: string; amount: number; date: string; description: string; category: string }[];
+  /** Expense lines on the same statement (e.g. an agent's management fee or a bill paid on the owner's behalf) — staged for review like everything else from this pipeline, never auto-applied.
+   * tenantName is per-line, for a statement covering more than one dwelling/tenancy at the property (e.g. a house
+   * and a granny flat) — set when this deduction is attributable to one specific tenancy, undefined otherwise. */
+  expenseLines?: { vendor: string; amount: number; date: string; description: string; category: string; tenantName?: string }[];
   /** Rent income minus expense lines, for a quick "does this match the stated net-to-owner" sanity check. */
   netToOwner?: number;
   /** Balance the agent holds, carried between statements — when set, netToOwner is expected to

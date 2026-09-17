@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/Field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -50,6 +51,7 @@ export function MarkBillPaidDialog({
   const [paidDate, setPaidDate] = useState(todayISO());
   const [paymentMethod, setPaymentMethod] = useState<NonNullable<PropertyBill["paymentMethod"]>>("Bank Transfer");
   const [amount, setAmount] = useState(String(remainingOwed));
+  const [notes, setNotes] = useState(bill.notes ?? "");
 
   const setOpen = (o: boolean) => {
     if (controlled) onOpenChangeProp?.(o);
@@ -59,7 +61,7 @@ export function MarkBillPaidDialog({
   const submit = () => {
     const parsed = parseFloat(amount);
     if (!(parsed > 0)) return toast.error("Enter an amount greater than zero");
-    const result = markBillPaid(bill.id, { paidDate, paymentMethod, amount: parsed });
+    const result = markBillPaid(bill.id, { paidDate, paymentMethod, amount: parsed, notes: notes.trim() || undefined });
     if (result.overflow) {
       toast.success(
         `Paid in full — ${fmtCurrency(result.overflow.totalApplied)} applied to ${result.overflow.instalmentsAffected} upcoming instalment${result.overflow.instalmentsAffected === 1 ? "" : "s"}`,
@@ -81,6 +83,7 @@ export function MarkBillPaidDialog({
           setPaidDate(todayISO());
           setPaymentMethod("Bank Transfer");
           setAmount(String(remainingOwed));
+          setNotes(bill.notes ?? "");
         }
       }}
     >
@@ -126,6 +129,9 @@ export function MarkBillPaidDialog({
           </Field>
           <Field label="Amount paid">
             <Input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          <Field label="Notes (optional)">
+            <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. paid from joint account, discount applied" />
           </Field>
         </div>
         <DialogFooter>

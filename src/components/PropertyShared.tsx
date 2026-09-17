@@ -765,7 +765,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
     const ids = new Set(payload.transactions.map((tx) => defaultTenantFor(tx.tenantName)).filter(Boolean));
     return ids.size === 1 ? [...ids][0] : SHARED_EXPENSE_TENANT;
   })();
-  const [expTenantIds, setExpTenantIds] = useState<string[]>(() => expenseLines.map(() => soleTxTenant));
+  // Each line first tries its OWN extracted tenantName (a statement covering multiple dwellings —
+  // a house and a granny flat — attributes a management fee to whichever tenancy's rent it was
+  // deducted from) before falling back to soleTxTenant, which previously collapsed EVERY line to
+  // "Shared" the moment a property had more than one tenant, regardless of what the line itself
+  // said. See parse-ledger.ts's expenseLines[].tenantName for where this comes from.
+  const [expTenantIds, setExpTenantIds] = useState<string[]>(() =>
+    expenseLines.map((e) => (e.tenantName && defaultTenantFor(e.tenantName)) || soleTxTenant),
+  );
   // Always defaults off, even for a water charge with a specific tenant assigned — a statement's
   // "Water Charges" deduction line is usually the FULL bill (fixed service/access charges plus
   // usage), and only the usage portion is the tenant's to pay; ticking this recharges the whole
@@ -911,6 +918,9 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         cost: e.amount,
         date: e.date,
         propertyId: propertyId || undefined,
+        // A tenant-attributed line on a multi-dwelling property (house + granny flat) belongs to
+        // that tenant's own unit, not the whole property — matters for any unit-scoped reporting.
+        unitId: realTenantId ? state.tenants.find((t) => t.id === realTenantId)?.unitId : undefined,
         taxCategory: "Immediate Deduction",
         category: lineCategory,
         providerName: e.vendor,
@@ -9108,6 +9118,7 @@ export function TenantDialog({
     leaseStart: tenant?.leaseStart ?? initialValues?.leaseStart ?? "",
     leaseExpiry: tenant?.leaseExpiry ?? initialValues?.leaseExpiry ?? "",
     leaseDuration: (tenant?.leaseDuration ?? initialValues?.leaseDuration ?? "") as LeaseDuration | "",
+    vacatingDate: tenant?.vacatingDate ?? "",
     lastRentIncreaseDate: tenant?.lastRentIncreaseDate ?? "",
     rentAmount: tenant?.rentAmount?.toString() ?? initialValues?.rentAmount?.toString() ?? "",
     rentFrequency: (tenant?.rentFrequency ?? initialValues?.rentFrequency ?? "Weekly") as RentFrequency,
@@ -9260,6 +9271,13 @@ export function TenantDialog({
               placeholder="Periodic"
             />
           </Field>
+          <Field label="Vacating date">
+            <Input
+              type="date"
+              value={form.vacatingDate}
+              onChange={(e) => setForm({ ...form, vacatingDate: e.target.value })}
+            />
+          </Field>
           <Field label="Last rent increase date">
             <Input
               type="date"
@@ -9384,6 +9402,7 @@ export function TenantDialog({
                 propertyId,
                 leaseStart: form.leaseStart || undefined,
                 leaseExpiry: form.leaseExpiry || undefined,
+                vacatingDate: form.vacatingDate || undefined,
                 leaseDuration: (form.leaseDuration || undefined) as LeaseDuration | undefined,
                 lastRentIncreaseDate: form.lastRentIncreaseDate || undefined,
                 rentAmount,

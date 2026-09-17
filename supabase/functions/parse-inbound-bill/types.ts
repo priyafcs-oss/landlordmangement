@@ -129,8 +129,11 @@ export interface ParsedLedgerFields {
    * changeover statement clearly attributes this specific payment to a named tenant (an outgoing
    * and incoming tenant both paying rent within the same statement period). Null otherwise. */
   transactions: { date: string; amount: number; description: string; tenantName: string | null }[];
-  /** Expense lines on the same statement — e.g. a managing agent's fee, or a bill they paid on the owner's behalf. */
-  expenseLines: { vendor: string; amount: number; date: string; description: string; category: string }[];
+  /** Expense lines on the same statement — e.g. a managing agent's fee, or a bill they paid on the owner's behalf.
+   * tenantName is per-line, for a statement covering more than one dwelling/tenancy at the same property (e.g. a
+   * house and a granny flat) — set when this deduction (especially a management fee) is attributable to one
+   * specific tenancy's own section, null when it's genuinely whole-of-property or unattributable. */
+  expenseLines: { vendor: string; amount: number; date: string; description: string; category: string; tenantName: string | null }[];
   /** The statement's own stated net-to-owner figure, if shown, for a reconciliation sanity check. Null if not stated. */
   netToOwner: number | null;
   /** Balance held by the agent brought forward from the previous statement / carried forward to

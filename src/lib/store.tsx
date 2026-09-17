@@ -50,6 +50,7 @@ import {
   deleteWhereIn,
   loadSettings,
   saveSettings,
+  subscribeToTable,
 } from "./db";
 import { paidUpToDateFromPayments, todayISO } from "./calculations";
 import { matchProviderByName } from "./providerMatch";
@@ -343,7 +344,7 @@ interface StoreCtx {
    * unpaid instalment sharing the same billGroupId (cascading further if that overpays it too). */
   markBillPaid: (
     id: string,
-    opts?: { paidDate?: string; paymentMethod?: PropertyBill["paymentMethod"]; amount?: number },
+    opts?: { paidDate?: string; paymentMethod?: PropertyBill["paymentMethod"]; amount?: number; notes?: string },
   ) => { status: "Paid" | "Partial"; amountApplied: number; amountOwed: number; overflow?: { totalApplied: number; instalmentsAffected: number } };
   /** Undoes a mistaken Mark Paid: reverts status to Unpaid, clears the paid fields, and deletes the
    * Expense that markBillPaid created (never one from any other source, since linkedExpenseId is
@@ -552,6 +553,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The Inbox previously only ever reflected what refresh() saw at the moment the app happened to
+  // load — an email the webhook finished processing an hour into an already-open session simply
+  // never appeared until a manual reload (see the "Inbox refreshed very late" report). This keeps
+  // it live for the lifetime of the session instead.
+  useEffect(() => {
+    return subscribeToTable("email_inbox_log", (event, row) => {
+      setState((s) => {
+        const entry = row as unknown as EmailInboxLogEntry;
+        if (event === "DELETE") {
+          return { ...s, emailInboxLog: s.emailInboxLog.filter((e) => e.id !== entry.id) };
+        }
+        const idx = s.emailInboxLog.findIndex((e) => e.id === entry.id);
+        const emailInboxLog =
+          idx === -1 ? [...s.emailInboxLog, entry] : s.emailInboxLog.map((e, i) => (i === idx ? entry : e));
+        return { ...s, emailInboxLog };
+      });
+    });
   }, []);
 
   const refreshOne: StoreCtx["refreshOne"] = async (tableKey, id) => {
@@ -1488,6 +1508,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     markBillPaid: (id, opts) => {
       const paidDate = opts?.paidDate ?? new Date().toISOString().slice(0, 10);
       const paymentMethod = opts?.paymentMethod;
+      const notes = opts?.notes;
       let result = { status: "Paid" as "Paid" | "Partial", amountApplied: 0, amountOwed: 0 } as ReturnType<StoreCtx["markBillPaid"]>;
 
       /** Pure status/paidAmount math for applying `newlyApplied` on top of whatever a bill
@@ -1609,6 +1630,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             paymentMethod,
             paidAmount: a.cumulativePaid,
           });
+        }
+
+        // notes is specific to the payment being recorded on the bill this call actually targets
+        // (`id`) — not blindly applied to a sibling instalment that happened to absorb overflow
+        // from the same real-world transfer.
+        if (notes !== undefined) {
+          billPatches.set(id, { ...(billPatches.get(id) ?? {}), notes });
         }
 
         const billsById = new Map(s.bills.map((b) => [b.id, b]));

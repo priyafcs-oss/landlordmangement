@@ -195,6 +195,34 @@ export async function saveSettings(patch: Record<string, unknown>) {
   report("save settings", error);
 }
 
+/**
+ * Live INSERT/UPDATE/DELETE notifications for one table, RLS-scoped the same way every other
+ * query here is (a landlord only ever receives events for their own rows). Used so a view like
+ * the email Inbox reflects an email processed by the webhook while the app is already open,
+ * instead of only updating on the next full page reload — see store.tsx's use of this for
+ * "emailInboxLog", added after that exact "Inbox refreshed very late" complaint. Requires the
+ * table to be added to the `supabase_realtime` publication (see the accompanying migration).
+ * Returns an unsubscribe function.
+ */
+export function subscribeToTable(
+  table: string,
+  onChange: (event: "INSERT" | "UPDATE" | "DELETE", row: Record<string, unknown>) => void,
+): () => void {
+  const channel = supabase
+    .channel(`${table}_changes`)
+    .on(
+      "postgres_changes" as never,
+      { event: "*", schema: "public", table },
+      (payload: { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown>; old: Record<string, unknown> }) => {
+        onChange(payload.eventType, payload.eventType === "DELETE" ? payload.old : payload.new);
+      },
+    )
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
 /** Strips undefined values and the server-managed created_at column. */
 function stripUndefined(row: Record<string, unknown>) {
   const out: Record<string, unknown> = {};

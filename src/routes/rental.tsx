@@ -265,6 +265,16 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
           </div>
         )}
 
+        {tenant.vacatingDate && (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            <span>
+              Vacating {tenant.vacatingDate}
+              {tenant.vacatingDate < todayISO() ? " (already passed — update once they've moved out)" : ""}.
+            </span>
+          </div>
+        )}
+
         {isExpiredFixedTerm && (
           <div className="flex flex-wrap items-center gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
             <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
