@@ -3,6 +3,7 @@ import { routeInboundDocument } from "../parse-inbound-bill/router.ts";
 import type { NormalizedBillInput } from "../parse-inbound-bill/types.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { isOversizedUpload, MAX_AI_UPLOAD_BASE64_CHARS } from "../_shared/limits.ts";
+import { tryFetchLinkedAttachment } from "../_shared/linkAttachment.ts";
 
 interface RetryRequest {
   emailId?: string;
@@ -133,7 +134,10 @@ Deno.serve(async (req) => {
     const attachmentMeta =
       body.attachmentId === NO_ATTACHMENT_ID ? undefined : email.attachments?.find((a) => a.id === body.attachmentId);
 
-    const pdfBase64 = attachmentMeta ? await fetchAttachmentBase64(email.id, attachmentMeta.id, apiKey) : undefined;
+    // No real attachment for this attemptId — try a link in the body before falling back to
+    // body-text-only extraction (see linkAttachment.ts; same fallback normalizeOne uses).
+    const linked = attachmentMeta ? null : await tryFetchLinkedAttachment(email.text);
+    const pdfBase64 = attachmentMeta ? await fetchAttachmentBase64(email.id, attachmentMeta.id, apiKey) : linked?.base64;
     if (pdfBase64 && isOversizedUpload(pdfBase64)) {
       const error = `Attachment too large for the AI reader (limit ~${Math.round((MAX_AI_UPLOAD_BASE64_CHARS * 0.75) / (1024 * 1024))}MB).`;
       await supabase.from("email_inbox_log").update({ status: "failed", errorMessage: error }).eq("id", existing.id);
@@ -145,8 +149,8 @@ Deno.serve(async (req) => {
       subject: email.subject,
       textBody: email.text ?? undefined,
       pdfBase64,
-      pdfFileName: attachmentMeta?.filename,
-      attachmentMimeType: attachmentMeta?.content_type,
+      pdfFileName: attachmentMeta?.filename ?? linked?.fileName,
+      attachmentMimeType: attachmentMeta?.content_type ?? linked?.mimeType,
     };
 
     const emailMessageId = body.attachmentId === NO_ATTACHMENT_ID ? body.emailId : `${body.emailId}:${body.attachmentId}`;

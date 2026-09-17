@@ -42,7 +42,7 @@ export const SETTINGS_TABLE = "app_settings";
 // so we talk to PostgREST through a loosely typed handle.
 const db = supabase as unknown as {
   from: (table: string) => any;
-  rpc: (fn: string) => Promise<{ data: unknown; error: unknown }>;
+  rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
 };
 
 /** Each user's settings row is keyed by their effective owner id now that the app is multi-tenant
@@ -55,6 +55,31 @@ async function effectiveOwnerId(): Promise<string | null> {
   const { data, error } = await db.rpc("effective_owner_id");
   report("resolve effective owner id", error);
   return (data as string | null) ?? null;
+}
+
+/**
+ * Genuine encrypted portal-password storage for a Provider, via Supabase Vault (see
+ * supabase/migrations/20260917120000_provider_portal_password_vault.sql) — distinct from
+ * Provider.passwordNote, which is only ever a free-text hint. The plaintext never touches
+ * `selectAll`/AppState/localStorage; it's fetched on demand, straight into whatever local
+ * component state a "reveal password" click needs, and nowhere else.
+ */
+export async function setProviderPortalPassword(providerId: string, password: string): Promise<boolean> {
+  const { error } = await db.rpc("set_provider_portal_password", { p_provider_id: providerId, p_password: password });
+  report("set provider portal password", error);
+  return !error;
+}
+
+export async function getProviderPortalPassword(providerId: string): Promise<string | null> {
+  const { data, error } = await db.rpc("get_provider_portal_password", { p_provider_id: providerId });
+  report("get provider portal password", error);
+  return (data as string | null) ?? null;
+}
+
+export async function clearProviderPortalPassword(providerId: string): Promise<boolean> {
+  const { error } = await db.rpc("clear_provider_portal_password", { p_provider_id: providerId });
+  report("clear provider portal password", error);
+  return !error;
 }
 
 function report(context: string, error: unknown) {

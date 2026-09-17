@@ -4,6 +4,7 @@ import { Webhook } from "npm:svix@1";
 import { routeInboundDocument } from "./router.ts";
 import type { NormalizedBillInput } from "./types.ts";
 import { isOversizedUpload, MAX_AI_UPLOAD_BASE64_CHARS } from "../_shared/limits.ts";
+import { tryFetchLinkedAttachment } from "../_shared/linkAttachment.ts";
 
 interface ResendAttachmentMeta {
   id: string;
@@ -145,14 +146,29 @@ async function normalizeOne(
   apiKey: string,
   attachmentMeta: ResendAttachmentMeta | undefined,
 ): Promise<NormalizedBillInput> {
-  const pdfBase64 = attachmentMeta ? await fetchAttachmentBase64(email.id, attachmentMeta.id, apiKey) : undefined;
+  if (attachmentMeta) {
+    const pdfBase64 = await fetchAttachmentBase64(email.id, attachmentMeta.id, apiKey);
+    return {
+      fromEmail: email.from,
+      subject: email.subject,
+      textBody: email.text ?? undefined,
+      pdfBase64,
+      pdfFileName: attachmentMeta.filename,
+      attachmentMimeType: attachmentMeta.content_type,
+    };
+  }
+
+  // No real attachment — some providers email "click here to view your bill" instead of
+  // attaching a PDF. Try resolving a link in the body before falling back to body-text-only
+  // extraction (see linkAttachment.ts's own doc comment for why this is best-effort, not required).
+  const linked = await tryFetchLinkedAttachment(email.text);
   return {
     fromEmail: email.from,
     subject: email.subject,
     textBody: email.text ?? undefined,
-    pdfBase64,
-    pdfFileName: attachmentMeta?.filename,
-    attachmentMimeType: attachmentMeta?.content_type,
+    pdfBase64: linked?.base64,
+    pdfFileName: linked?.fileName,
+    attachmentMimeType: linked?.mimeType,
   };
 }
 

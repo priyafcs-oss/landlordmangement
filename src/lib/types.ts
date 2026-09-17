@@ -733,7 +733,14 @@ export interface Provider {
   notes?: string;
   portalUrl?: string;
   portalUsername?: string;
+  /** Free-text hint (e.g. "same as email password"), not the actual secret — see
+   * portalPasswordSecretId below for genuine encrypted storage. */
   passwordNote?: string;
+  /** Opaque reference into Supabase Vault (supabase/migrations/20260917120000_...) — the actual
+   * password is never selected through this column or any normal query; only
+   * getProviderPortalPassword's RPC call (src/lib/providerSecrets.ts) can decrypt it, and only for
+   * this provider's own owner. */
+  portalPasswordSecretId?: string;
   /** The ATO category most often confirmed on bills/expenses from this provider — suggested (not
    * forced) on future bills that resolve to this provider via provider-match.ts, the same way a
    * council's bills are always "Council Rates". */

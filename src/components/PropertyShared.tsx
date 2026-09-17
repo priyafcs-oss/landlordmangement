@@ -50,6 +50,7 @@ import {
   Landmark,
   Info,
   Download,
+  Lock,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified } from "@/lib/calculations";
@@ -122,6 +123,7 @@ import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUr
 import { DocumentLink } from "@/components/DocumentLink";
 import { StoredImageLink, StoredVideo } from "@/components/StoredImage";
 import { EntityDialog } from "@/components/EntityDialog";
+import { getProviderPortalPassword, setProviderPortalPassword, clearProviderPortalPassword } from "@/lib/db";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
@@ -6956,6 +6958,111 @@ function AgreementFields({
   );
 }
 
+/**
+ * Genuine encrypted password storage for a provider's login portal (see
+ * setProviderPortalPassword/getProviderPortalPassword in db.ts and the Vault migration those
+ * wrap) — distinct from the plain "Password note" hint field above it. The decrypted value is
+ * only ever fetched on an explicit "Reveal" click, into this component's own local state; it's
+ * never part of AppState/localStorage the way every other field on this dialog is.
+ */
+function ProviderPortalPasswordField({ providerId, hasPassword }: { providerId: string; hasPassword: boolean }) {
+  const { refreshOne } = useStore();
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reveal = async () => {
+    setBusy(true);
+    try {
+      const pw = await getProviderPortalPassword(providerId);
+      if (pw === null) {
+        toast.error("No password stored");
+      } else {
+        setRevealed(pw);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (!newPassword) return toast.error("Enter a password first");
+    setBusy(true);
+    try {
+      const ok = await setProviderPortalPassword(providerId, newPassword);
+      if (ok) {
+        toast.success("Password saved, encrypted");
+        setEditing(false);
+        setNewPassword("");
+        setRevealed(null);
+        await refreshOne("providers", providerId);
+      } else {
+        toast.error("Couldn't save password");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async () => {
+    if (!confirm("Remove the stored password for this provider?")) return;
+    setBusy(true);
+    try {
+      const ok = await clearProviderPortalPassword(providerId);
+      if (ok) {
+        toast.success("Password removed");
+        setRevealed(null);
+        await refreshOne("providers", providerId);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Field label="Portal password (encrypted)">
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <Input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="New password"
+            className="flex-1"
+          />
+          <Button size="sm" onClick={save} disabled={busy}>
+            Save
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setNewPassword(""); }}>
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {revealed ? (
+            <span className="rounded bg-muted px-2 py-1 font-mono text-xs">{revealed}</span>
+          ) : hasPassword ? (
+            <Button size="sm" variant="outline" onClick={reveal} disabled={busy}>
+              Reveal
+            </Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">No password stored</span>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            {hasPassword ? "Change" : "Set password"}
+          </Button>
+          {hasPassword && (
+            <Button size="sm" variant="ghost" className="text-destructive" onClick={clear} disabled={busy}>
+              Remove
+            </Button>
+          )}
+        </div>
+      )}
+    </Field>
+  );
+}
+
 export function ProviderDialog({
   propertyId,
   provider,
@@ -7148,10 +7255,15 @@ export function ProviderDialog({
             <Input value={form.portalUsername} onChange={(e) => setForm((f) => ({ ...f, portalUsername: e.target.value }))} />
           </Field>
           <div className="col-span-2">
-            <Field label="Password note (stored locally)">
+            <Field label="Password note (a hint, not the actual password)">
               <Input value={form.passwordNote} onChange={(e) => setForm((f) => ({ ...f, passwordNote: e.target.value }))} />
             </Field>
           </div>
+          {provider && (
+            <div className="col-span-2">
+              <ProviderPortalPasswordField providerId={provider.id} hasPassword={!!provider.portalPasswordSecretId} />
+            </div>
+          )}
           <div className="col-span-2">
             <Field label="Notes">
               <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={2} />
@@ -7316,10 +7428,16 @@ export function ProviderRow({
             Open portal <ExternalLink className="h-3 w-3" />
           </a>
         )}
-        {(provider.portalUsername || provider.passwordNote) && (
+        {(provider.portalUsername || provider.passwordNote || provider.portalPasswordSecretId) && (
           <div className="text-muted-foreground">
             {provider.portalUsername && <>User: <span className="font-mono">{provider.portalUsername}</span></>}
             {provider.passwordNote && <> • Note: <span className="font-mono">{provider.passwordNote}</span></>}
+            {provider.portalPasswordSecretId && (
+              <>
+                {" "}
+                • <Lock className="inline h-3 w-3" /> Password stored
+              </>
+            )}
           </div>
         )}
         {provider.role === "Agent" && agreement && hasFeeTerms(agreement) && (
