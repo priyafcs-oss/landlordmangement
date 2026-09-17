@@ -22,16 +22,23 @@ export function InboxEntryDetailDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const { refresh } = useStore();
+  const { refreshOne } = useStore();
   const canRetry = (entry.status === "failed" || entry.status === "skipped") && entry.emailId && entry.attachmentId;
 
   const retry = async () => {
     setRetrying(true);
     try {
-      const { data, error } = await supabase.functions.invoke<{ error?: string }>("retry-inbound-email", {
-        body: { emailId: entry.emailId, attachmentId: entry.attachmentId },
-      });
+      const { data, error } = await supabase.functions.invoke<{ error?: string; proposalId?: string; billId?: string }>(
+        "retry-inbound-email",
+        { body: { emailId: entry.emailId, attachmentId: entry.attachmentId } },
+      );
       if (error) throw error;
+      // Mirror only the row(s) this result actually named into local state instead of a full
+      // refresh() across every table — see 756e44f4 (Stop full-portfolio refetch multiplier), the
+      // same fix this dialog was missed by.
+      await refreshOne("emailInboxLog", entry.id);
+      if (data?.proposalId) await refreshOne("aiProposals", data.proposalId);
+      if (data?.billId) await refreshOne("bills", data.billId);
       if (data?.error) {
         toast.error(data.error);
       } else {
@@ -41,9 +48,9 @@ export function InboxEntryDetailDialog({
     } catch (e) {
       console.error("[inbox] retry failed", e);
       toast.error("Retry failed — see the error below for details");
+      await refreshOne("emailInboxLog", entry.id);
     } finally {
       setRetrying(false);
-      void refresh();
     }
   };
 
