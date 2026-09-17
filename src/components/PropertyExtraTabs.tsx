@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Pencil, Trash2, Eye, ShieldCheck, Wrench, HardHat, FileText, X } from "lucide-react";
 import { fmtCurrency, daysUntil } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
+import { StoredImage } from "@/components/StoredImage";
 import { toast } from "sonner";
 import { buildDocumentEntries, type DocumentEntry } from "@/lib/documents";
 import { DocumentsPanel } from "@/components/DocumentEntryRow";
@@ -609,7 +610,7 @@ function MaintenanceItemDialog({
               <div className="flex flex-wrap gap-2 pt-1">
                 {photos.map((p, i) => (
                   <div key={i} className="relative">
-                    <img src={p.data} alt={p.name} className="h-16 w-16 rounded object-cover" />
+                    <StoredImage value={p.data} name={p.name} className="h-16 w-16 rounded object-cover" />
                     <button
                       type="button"
                       onClick={() => setPhotos((ph) => ph.filter((_, idx) => idx !== i))}
@@ -667,7 +668,7 @@ function MaintenanceItemRow({ item }: { item: MaintenanceItem }) {
         {item.photos.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {item.photos.map((p, i) => (
-              <img key={i} src={p.data} alt={p.name} className="h-10 w-10 rounded object-cover" />
+              <StoredImage key={i} value={p.data} name={p.name} className="h-10 w-10 rounded object-cover" />
             ))}
           </div>
         )}

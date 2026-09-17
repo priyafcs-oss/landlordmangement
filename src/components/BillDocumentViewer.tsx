@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { FileX, Maximize2, Minimize2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { base64ToBlobUrl, isImageFileName, mimeForFileName } from "@/lib/files";
+import { isImageFileName, resolveDocumentUrl } from "@/lib/files";
 
 /** Chrome/Edge's built-in PDF viewer opens with its own toolbar and page-thumbnail sidebar by
  * default, which — inside an already-small iframe — eats width that should go to the page
@@ -52,9 +52,20 @@ export function BillDocumentViewer({
       setBlobUrl(null);
       return;
     }
-    const url = base64ToBlobUrl(fileData, mimeForFileName(fileName));
-    setBlobUrl(url);
-    return () => URL.revokeObjectURL(url);
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    resolveDocumentUrl(fileName, fileData).then((url) => {
+      if (cancelled) {
+        if (url) URL.revokeObjectURL(url);
+        return;
+      }
+      objectUrl = url;
+      setBlobUrl(url);
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [fileData, fileName]);
 
   if (!fileData || !blobUrl) {

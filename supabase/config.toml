@@ -57,3 +57,7 @@ verify_jwt = false
 
 [functions.retry-inbound-email]
 verify_jwt = false
+
+# One-off migration, gated by BACKFILL_SECRET rather than a user session — see its own doc comment.
+[functions.backfill-storage]
+verify_jwt = false

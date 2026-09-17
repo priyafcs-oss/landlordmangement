@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { isStoragePath, resolveOwnerId, resolveStoredBase64, uploadBase64ToStorage } from "../_shared/storage.ts";
 import { parseInboundBill } from "../parse-inbound-bill/parse-bill.ts";
 import { parseLeaseAgreement } from "../parse-inbound-bill/parse-lease.ts";
 import { parseRentStatement } from "../parse-inbound-bill/parse-ledger.ts";
@@ -96,10 +97,31 @@ Deno.serve(async (req) => {
     });
   }
 
+  // sourceFileData is a "storage:<path>" marker for anything parsed after the Storage migration
+  // (../_shared/storage.ts) — resolve it back to real bytes before handing it to Gemini, which
+  // needs actual base64, not a path. Falls through unchanged for an older row that's still inline.
+  const pdfBase64 = await resolveStoredBase64(supabase, existing.sourceFileData);
+  if (!pdfBase64) {
+    return new Response(JSON.stringify({ error: "Couldn't read the stored source file" }), {
+      status: 422,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Re-parsing re-classifies the SAME document, so it belongs at the SAME storage path — reuse it
+  // instead of re-uploading these bytes a second time. A not-yet-backfilled legacy row (still
+  // inline base64) gets uploaded here for the first time instead, so re-parsing an old row also
+  // migrates it. Every parser writes this to `sourceFileData` (never pdfBase64 directly, see
+  // ../parse-inbound-bill/router.ts).
+  const pdfStoragePath = isStoragePath(existing.sourceFileData)
+    ? existing.sourceFileData
+    : await uploadBase64ToStorage(supabase, pdfBase64, existing.sourceFileName ?? undefined, await resolveOwnerId(supabase), inferMimeType(existing.sourceFileName));
+
   const input: NormalizedBillInput = {
     fromEmail: "manual-upload",
     subject: existing.sourceSubject || existing.sourceFileName || "Re-parsed document",
-    pdfBase64: existing.sourceFileData,
+    pdfBase64,
+    pdfStoragePath,
     pdfFileName: existing.sourceFileName ?? undefined,
     attachmentMimeType: inferMimeType(existing.sourceFileName),
     textBody: existing.sourceEmailBody ?? undefined,

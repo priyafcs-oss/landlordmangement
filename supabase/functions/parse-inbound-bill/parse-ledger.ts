@@ -146,7 +146,7 @@ export async function parseRentStatement(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     documentDate: parsed.document_date ?? undefined,
     providerName: parsed.managing_agent_name ?? undefined,

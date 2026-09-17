@@ -94,7 +94,7 @@ export async function parseDepreciationReport(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     documentDate: parsed.report_date ?? undefined,
     providerName: parsed.quantity_surveyor ?? undefined,

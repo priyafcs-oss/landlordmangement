@@ -23,7 +23,7 @@ import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCatego
 import { buildRechargeInvoice } from "@/lib/recharge";
 import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
-import { base64ToBlob, mimeForFileName } from "@/lib/files";
+import { resolveDocumentBlob } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 
@@ -196,14 +196,14 @@ export function BillDetailDialog({
    * something this app can work around) — same downloadPdfAndEmailViaGmail pattern used
    * elsewhere: download the source document, then open Gmail compose prefilled so the landlord
    * just has to attach the file that was downloaded and hit send. */
-  const emailTenantAboutLineItem = (li: LineItemRow) => {
+  const emailTenantAboutLineItem = async (li: LineItemRow) => {
     const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
     if (!tenant) return toast.error("No tenant found for this recharge");
     const amount = parseFloat(li.amount) || 0;
     const subject = `${selected.billType} — ${li.description || "usage charge"} (${fmtCurrency(amount)})`;
     const body = `Hi ${tenant.name},\n\nThe ${propertyLabel ?? "property"} ${selected.billType.toLowerCase()} bill has come in. It includes a usage charge of ${fmtCurrency(amount)} for "${li.description}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nThanks`;
-    if (selected.sourceFileData) {
-      const blob = base64ToBlob(selected.sourceFileData, mimeForFileName(selected.sourceFileName));
+    const blob = selected.sourceFileData ? await resolveDocumentBlob(selected.sourceFileName, selected.sourceFileData) : null;
+    if (blob) {
       downloadPdfAndEmailViaGmail({ blob, fileName: selected.sourceFileName || "bill.pdf", to: tenant.email, subject, body });
       toast.success("Bill downloaded — attach it in the Gmail draft that just opened");
     } else {

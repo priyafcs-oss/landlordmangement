@@ -129,7 +129,7 @@ export async function parsePropertyDocument(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     documentDate: parsed.document_date ?? undefined,
     providerName: parsed.provider_name ?? parsed.insurer_name ?? undefined,

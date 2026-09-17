@@ -160,7 +160,7 @@ export async function stageAgencyAgreementProposal(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     documentDate: parsed.document_date ?? undefined,
     providerName: parsed.agency_name ?? undefined,

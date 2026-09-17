@@ -158,7 +158,7 @@ export async function parseLoanStatement(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     documentDate: parsed.document_date ?? undefined,
     providerName: parsed.lender_name,

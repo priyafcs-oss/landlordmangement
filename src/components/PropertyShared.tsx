@@ -120,6 +120,7 @@ import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
+import { StoredImageLink, StoredVideo } from "@/components/StoredImage";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
@@ -5461,9 +5462,7 @@ export function PropertyMediaTab({ prop }: { prop: Property }) {
           <div className="flex flex-wrap gap-2">
             {prop.photos.map((p, i) => (
               <div key={i} className="relative">
-                <a href={p.data} download={p.name}>
-                  <img src={p.data} alt={p.name} className="h-20 w-20 rounded object-cover" />
-                </a>
+                <StoredImageLink value={p.data} name={p.name} className="h-20 w-20 rounded object-cover" />
                 <button
                   type="button"
                   onClick={() => removePhoto(i)}
@@ -5489,7 +5488,7 @@ export function PropertyMediaTab({ prop }: { prop: Property }) {
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
-            <video src={v.data} controls className="max-h-48 w-full rounded" />
+            <StoredVideo value={v.data} className="max-h-48 w-full rounded" />
           </div>
         ))}
       </div>

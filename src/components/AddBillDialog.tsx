@@ -40,8 +40,7 @@ import { buildRechargeInvoice } from "@/lib/recharge";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import {
   openBillDocument,
-  base64ToBlob,
-  mimeForFileName,
+  resolveDocumentBlob,
   MAX_AI_UPLOAD_BYTES,
   formatFileSize,
   readFileAsBase64,
@@ -392,15 +391,15 @@ export function AddBillDialog({
   const addLineItem = () => setLineItems((rows) => [...rows, blankLineItem(form.billType)]);
   const removeLineItem = (key: string) => setLineItems((rows) => rows.filter((r) => r.key !== key));
 
-  const emailTenantAboutLineItem = (li: LineItemRow) => {
+  const emailTenantAboutLineItem = async (li: LineItemRow) => {
     const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
     if (!tenant) return toast.error("Select a tenant for this line item first");
     const amount = parseFloat(li.amount) || 0;
     const property = state.properties.find((p) => p.id === propertyId);
     const subject = `${form.billType} — ${li.description || "usage charge"} (${fmtCurrency(amount)})`;
     const body = `Hi ${tenant.name},\n\nThe ${property?.alias || property?.address || "property"} ${form.billType.toLowerCase()} bill has come in. It includes a usage charge of ${fmtCurrency(amount)} for "${li.description}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nThanks`;
-    if (form.sourceFileData) {
-      const blob = base64ToBlob(form.sourceFileData, mimeForFileName(form.sourceFileName));
+    const blob = form.sourceFileData ? await resolveDocumentBlob(form.sourceFileName, form.sourceFileData) : null;
+    if (blob) {
       downloadPdfAndEmailViaGmail({ blob, fileName: form.sourceFileName || "bill.pdf", to: tenant.email, subject, body });
       toast.success("Bill downloaded — attach it in the Gmail draft that just opened");
     } else {

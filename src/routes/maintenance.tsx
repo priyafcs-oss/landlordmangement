@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { selectPublicProperties, type PublicProperty } from "@/lib/db";
 import { readFileAsDataUrl } from "@/lib/files";
+import { StoredImage } from "@/components/StoredImage";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -222,7 +223,7 @@ function MaintenancePage() {
               <div className="mt-2 flex flex-wrap gap-2">
                 {photos.map((p, i) => (
                   <div key={i} className="relative">
-                    <img src={p.data} alt={p.name} className="h-16 w-16 rounded object-cover" />
+                    <StoredImage value={p.data} name={p.name} className="h-16 w-16 rounded object-cover" />
                     <button
                       type="button"
                       onClick={() => setPhotos((ps) => ps.filter((_, idx) => idx !== i))}

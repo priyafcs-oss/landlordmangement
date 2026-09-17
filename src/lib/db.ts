@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { uploadDocumentBase64 } from "./files";
 
 /** Table names in the cloud database, keyed by the in-app collection name. */
 export const TABLES = {
@@ -93,13 +94,65 @@ export async function selectPublicProperties(): Promise<PublicProperty[]> {
   return (data ?? []) as PublicProperty[];
 }
 
+/**
+ * Every file this app stores — property photos/videos, lease/compliance/loan documents, bill and
+ * expense receipts — has always followed one of two shapes: a top-level `xFileData`/`fileData`/
+ * `photoData` string, or an array of `{name, data}`/`{fileName, fileData}` objects (photos,
+ * videos, attachments). Both shapes are consistent enough across every table (see CLAUDE.md /
+ * types.ts) that a single generic, name-pattern-based scan can find and offload every one of
+ * them to Storage here, in the ONE place every write already passes through — instead of teaching
+ * ~20 separate upload dialogs about Storage individually. See src/lib/files.ts for the actual
+ * upload/resolve implementation and why fields keep their existing names/types (just swapping
+ * base64 content for a "storage:<path>" marker) rather than being renamed.
+ */
+const FILE_DATA_KEY = /^(fileData|photoData|data)$/i;
+const FILE_DATA_SUFFIX = /FileData$/;
+
+function isFileDataKey(key: string): boolean {
+  return FILE_DATA_KEY.test(key) || FILE_DATA_SUFFIX.test(key);
+}
+
+/** Candidate sibling keys (checked in order) that would hold this file's display name, given the
+ * pattern's own key — e.g. "sourceFileData" -> "sourceFileName", "data" -> "name". */
+function nameKeyCandidates(key: string): string[] {
+  const candidates: string[] = [];
+  if (FILE_DATA_SUFFIX.test(key)) candidates.push(key.replace(FILE_DATA_SUFFIX, "FileName"));
+  if (/^photoData$/i.test(key)) candidates.push("photoName");
+  if (/^data$/i.test(key)) candidates.push("name");
+  candidates.push("fileName", "name");
+  return candidates;
+}
+
+async function migrateFileFieldsToStorage(value: unknown): Promise<unknown> {
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((v) => migrateFileFieldsToStorage(v)));
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(obj)) {
+      if (isFileDataKey(key) && typeof v === "string" && v.length > 0 && !v.startsWith("storage:")) {
+        const nameKey = nameKeyCandidates(key).find((k) => typeof obj[k] === "string");
+        const fileName = nameKey ? (obj[nameKey] as string) : undefined;
+        out[key] = await uploadDocumentBase64(v, fileName);
+      } else {
+        out[key] = await migrateFileFieldsToStorage(v);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
 export async function upsertRow(table: string, row: Record<string, unknown>) {
-  const { error } = await db.from(table).upsert(stripUndefined(row));
+  const processed = (await migrateFileFieldsToStorage(row)) as Record<string, unknown>;
+  const { error } = await db.from(table).upsert(stripUndefined(processed));
   report(`upsert ${table}`, error);
 }
 
 export async function updateRow(table: string, id: string, patch: Record<string, unknown>) {
-  const { error } = await db.from(table).update(stripUndefined(patch)).eq("id", id);
+  const processed = (await migrateFileFieldsToStorage(patch)) as Record<string, unknown>;
+  const { error } = await db.from(table).update(stripUndefined(processed)).eq("id", id);
   report(`update ${table}`, error);
 }
 

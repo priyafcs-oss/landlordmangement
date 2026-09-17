@@ -55,6 +55,7 @@ function formatTime12h(time: string): string {
 }
 import { WaterRebillBanner } from "@/components/WaterRebillBanner";
 import { OverviewSection } from "@/components/OverviewSection";
+import { StoredImage, StoredVideo } from "@/components/StoredImage";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -606,16 +607,11 @@ function MaintenanceRequestsWidget() {
                 {r.photos && r.photos.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {r.photos.map((p, i) => (
-                      <img
-                        key={i}
-                        src={p.data}
-                        alt={p.name}
-                        className="h-14 w-14 rounded object-cover"
-                      />
+                      <StoredImage key={i} value={p.data} name={p.name} className="h-14 w-14 rounded object-cover" />
                     ))}
                   </div>
                 )}
-                {r.video && <video src={r.video.data} controls className="mt-2 max-h-40 rounded" />}
+                {r.video && <StoredVideo value={r.video.data} className="mt-2 max-h-40 rounded" />}
               </div>
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => convert(r.id)}>

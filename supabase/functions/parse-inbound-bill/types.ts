@@ -2,8 +2,14 @@
 export interface NormalizedBillInput {
   fromEmail: string;
   subject: string;
-  /** Base64 attachment content — despite the name, may be a PDF or an image (see attachmentMimeType). */
+  /** Base64 attachment content — despite the name, may be a PDF or an image (see attachmentMimeType).
+   * Used only for AI extraction (the inline Gemini request); what actually gets persisted as
+   * sourceFileData is pdfStoragePath below. */
   pdfBase64?: string;
+  /** Storage-backed marker for pdfBase64 — set once by routeInboundDocument (../_shared/storage.ts)
+   * before dispatch, and what every parser writes to `sourceFileData` instead of the raw base64,
+   * so proposals don't inline file bytes into Postgres the way this app used to. */
+  pdfStoragePath?: string;
   pdfFileName?: string;
   /** MIME type of pdfBase64, e.g. "application/pdf" or "image/png". Defaults to "application/pdf" if unset. */
   attachmentMimeType?: string;

@@ -108,7 +108,7 @@ export async function parseBankStatement(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     providerName: parsed.bank_name ?? undefined,
     addressedTo: parsed.addressed_to ?? undefined,

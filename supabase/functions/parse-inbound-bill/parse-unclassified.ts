@@ -32,7 +32,7 @@ export async function stageUnclassifiedDocument(
     sourceSubject: input.subject,
     emailMessageId,
     sourceFileName: input.pdfFileName,
-    sourceFileData: input.pdfBase64,
+    sourceFileData: input.pdfStoragePath,
     sourceEmailBody: input.textBody,
     payload: {
       documentCategory: input.subject || input.pdfFileName || "Unrecognised document",

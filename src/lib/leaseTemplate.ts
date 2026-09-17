@@ -1,5 +1,6 @@
 import { PDFDocument, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown } from "pdf-lib";
 import type { LeaseTemplateConfig, LeaseTemplateField } from "./types";
+import { resolveDocumentBytes } from "./files";
 
 /**
  * The canonical list of data points we can offer to map onto a lease template — shared by the
@@ -109,21 +110,14 @@ export function carryOverMapping(
   return { mapping: next, carriedCount: Object.keys(next).length, droppedCount };
 }
 
-/** This app stores uploaded files as full data URLs (FileReader.readAsDataURL output). */
-function base64ToBytes(dataUrl: string): Uint8Array {
-  const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 /**
  * Loads a fillable PDF and lists its real AcroForm fields — the basis of the file-agnostic
  * mapping approach: we never hardcode a field name, we only ever show/use what's actually here.
  */
 export async function inspectLeaseTemplate(fileData: string): Promise<LeaseTemplateField[]> {
-  const pdfDoc = await PDFDocument.load(base64ToBytes(fileData), { ignoreEncryption: true });
+  const bytes = await resolveDocumentBytes(undefined, fileData);
+  if (!bytes) throw new Error("Couldn't read the stored lease template");
+  const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const form = pdfDoc.getForm();
   const fields: LeaseTemplateField[] = [];
 
@@ -154,7 +148,9 @@ export async function fillLeaseTemplate(
   template: LeaseTemplateConfig,
   values: Record<string, string | boolean | undefined>,
 ): Promise<Uint8Array> {
-  const pdfDoc = await PDFDocument.load(base64ToBytes(template.fileData), { ignoreEncryption: true });
+  const templateBytes = await resolveDocumentBytes(undefined, template.fileData);
+  if (!templateBytes) throw new Error("Couldn't read the stored lease template");
+  const pdfDoc = await PDFDocument.load(templateBytes, { ignoreEncryption: true });
   const form = pdfDoc.getForm();
 
   const resolveOption = (mapping: { valueMap?: Record<string, string> }, v: string | boolean) => {
@@ -211,8 +207,10 @@ export async function fillLeaseTemplate(
  * Tenant Information Statement is required to accompany every NSW tenancy agreement.
  */
 export async function appendPdf(baseBytes: Uint8Array, extraFileData: string): Promise<Uint8Array> {
+  const extraBytes = await resolveDocumentBytes(undefined, extraFileData);
+  if (!extraBytes) throw new Error("Couldn't read the stored document");
   const baseDoc = await PDFDocument.load(baseBytes, { ignoreEncryption: true });
-  const extraDoc = await PDFDocument.load(base64ToBytes(extraFileData), { ignoreEncryption: true });
+  const extraDoc = await PDFDocument.load(extraBytes, { ignoreEncryption: true });
   const copiedPages = await baseDoc.copyPages(extraDoc, extraDoc.getPageIndices());
   for (const page of copiedPages) baseDoc.addPage(page);
   return baseDoc.save();

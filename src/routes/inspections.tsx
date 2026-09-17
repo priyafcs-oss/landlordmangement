@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
 import { readFileAsDataUrl } from "@/lib/files";
+import { StoredImage } from "@/components/StoredImage";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -842,7 +843,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
                   <div>{issue.description}</div>
-                  {issue.photoData && <img src={issue.photoData} alt={issue.photoName} className="mt-1 h-14 w-14 rounded object-cover" />}
+                  {issue.photoData && <StoredImage value={issue.photoData} name={issue.photoName} className="mt-1 h-14 w-14 rounded object-cover" />}
                 </div>
                 <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => removeIssue(issue.id)}>
                   <X className="h-3 w-3" />
@@ -958,7 +959,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
                         <Input placeholder="Condition remarks" value={c.notes ?? ""} onChange={(e) => updateItem(ri, ii, { notes: e.target.value })} className="h-8" />
                       </div>
                       <div className="flex items-start gap-2">
-                        {c.photoData && <img src={c.photoData} alt={c.photoName} className="h-14 w-14 rounded object-cover" />}
+                        {c.photoData && <StoredImage value={c.photoData} name={c.photoName} className="h-14 w-14 rounded object-cover" />}
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => removeItem(ri, ii)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

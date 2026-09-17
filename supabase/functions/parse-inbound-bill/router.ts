@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { resolveOwnerId, uploadBase64ToStorage } from "../_shared/storage.ts";
 import { classifyDocument } from "./classify.ts";
 import { parseInboundBill } from "./parse-bill.ts";
 import { parseLeaseAgreement } from "./parse-lease.ts";
@@ -43,6 +44,17 @@ export async function routeInboundDocument(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<RouteResult> {
+  // Move the attachment to Storage once, up front, before any parser gets a chance to persist it
+  // inline — every parser below writes `sourceFileData: input.pdfStoragePath`, never pdfBase64
+  // directly (pdfBase64 itself is still needed as-is for the Gemini calls just below/downstream).
+  if (input.pdfBase64 && !input.pdfStoragePath) {
+    const ownerId = await resolveOwnerId(supabase);
+    input = {
+      ...input,
+      pdfStoragePath: await uploadBase64ToStorage(supabase, input.pdfBase64, input.pdfFileName, ownerId, input.attachmentMimeType),
+    };
+  }
+
   // The same physical statement/bill can arrive twice with no shared emailMessageId to catch it —
   // a manual re-upload (no message id at all) or the same document forwarded/re-sent as a genuinely
   // separate email. A byte-identical filename is a strong signal it's the same document (this

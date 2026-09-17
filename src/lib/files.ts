@@ -1,3 +1,5 @@
+import { supabase } from "@/integrations/supabase/client";
+
 /**
  * Every AI-extraction edge function embeds the file inline (base64) in a single Gemini
  * `generateContent` request, which Google caps at ~20MB total for the whole request body —
@@ -8,6 +10,110 @@
  * references the file by URI instead of inlining it).
  */
 export const MAX_AI_UPLOAD_BYTES = 12 * 1024 * 1024;
+
+/**
+ * Every file this app stores (property photos/videos, lease/compliance/loan documents, bill and
+ * expense receipts, ...) used to be inlined as base64 directly in its Postgres column — that
+ * column got re-downloaded in full on every app load (src/lib/store.tsx loads every table on
+ * mount), which is what actually drove the Supabase egress bill up. Fields matching this pattern
+ * (see src/lib/db.ts's migrateFileFieldsToStorage) now hold a "storage:<path>" marker instead,
+ * pointing at an object in the private `documents` Storage bucket
+ * (supabase/migrations/20260917100000_document_storage_bucket.sql) — fetched only when a file is
+ * actually opened, not on every table load. Every function below transparently accepts either
+ * form, so a portfolio mid-migration (some rows already backfilled, some not yet) keeps working.
+ */
+const STORAGE_PREFIX = "storage:";
+const DOCUMENTS_BUCKET = "documents";
+
+function isStoragePath(value: string): boolean {
+  return value.startsWith(STORAGE_PREFIX);
+}
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9.\-_]/g, "_").slice(-100);
+}
+
+async function currentUserId(): Promise<string | undefined> {
+  const { data } = await supabase.auth.getUser();
+  return data?.user?.id;
+}
+
+/**
+ * Uploads a File to the signed-in user's own folder in the `documents` bucket (matching every
+ * table's owner_id RLS scoping) and returns a "storage:<path>" marker to persist in place of
+ * base64. Falls back to inlining as base64 — the old behaviour — when there's no signed-in user
+ * to scope the upload to (e.g. the anonymous maintenance-request form) or the upload itself fails,
+ * so a Storage outage degrades to the old egress-heavy path instead of losing the file outright.
+ */
+export async function uploadDocumentFile(file: File): Promise<string> {
+  const uid = await currentUserId();
+  if (!uid) return readFileAsBase64(file);
+  const path = `${uid}/${crypto.randomUUID()}-${sanitizeFileName(file.name)}`;
+  const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, file, {
+    contentType: file.type || mimeForFileName(file.name),
+  });
+  if (error) {
+    console.error("[storage] upload failed, falling back to inline base64", error);
+    return readFileAsBase64(file);
+  }
+  return STORAGE_PREFIX + path;
+}
+
+/**
+ * Same as uploadDocumentFile, for a base64 payload already read into memory — every AI-extraction
+ * dialog reads the file as base64 anyway (for the inline Gemini request), so this lets it reuse
+ * that instead of reading the File a second time.
+ */
+export async function uploadDocumentBase64(base64: string, fileName: string | undefined): Promise<string> {
+  const uid = await currentUserId();
+  if (!uid) return base64;
+  const path = `${uid}/${crypto.randomUUID()}-${sanitizeFileName(fileName || "file")}`;
+  const blob = base64ToBlob(base64, mimeForFileName(fileName));
+  const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, blob, { contentType: blob.type });
+  if (error) {
+    console.error("[storage] upload failed, falling back to inline base64", error);
+    return base64;
+  }
+  return STORAGE_PREFIX + path;
+}
+
+/** Signed, time-limited URL for a "storage:<path>" marker — null for a legacy inline value (which
+ * needs no signing) or on a resolve failure. */
+export async function getSignedDocumentUrl(storedValue: string, expiresIn = 3600): Promise<string | null> {
+  if (!isStoragePath(storedValue)) return null;
+  const path = storedValue.slice(STORAGE_PREFIX.length);
+  const { data, error } = await supabase.storage.from(DOCUMENTS_BUCKET).createSignedUrl(path, expiresIn);
+  if (error) {
+    console.error("[storage] failed to sign url", error);
+    return null;
+  }
+  return data.signedUrl;
+}
+
+/** Resolves either a legacy inline base64 payload or a "storage:<path>" marker to the file's
+ * actual bytes. */
+export async function resolveDocumentBlob(fileName: string | undefined, storedValue: string | undefined): Promise<Blob | null> {
+  if (!storedValue) return null;
+  if (!isStoragePath(storedValue)) return base64ToBlob(storedValue, mimeForFileName(fileName));
+  const url = await getSignedDocumentUrl(storedValue);
+  if (!url) return null;
+  const res = await fetch(url);
+  return res.ok ? res.blob() : null;
+}
+
+/** Resolves a stored value to a browser-usable object URL — caller owns calling
+ * URL.revokeObjectURL on it once done with it (see BillDocumentViewer's cleanup effect). */
+export async function resolveDocumentUrl(fileName: string | undefined, storedValue: string | undefined): Promise<string | null> {
+  const blob = await resolveDocumentBlob(fileName, storedValue);
+  return blob ? URL.createObjectURL(blob) : null;
+}
+
+/** Resolves a stored value to raw bytes — for callers that need to hand a Uint8Array to something
+ * other than the DOM (e.g. pdf-lib, see src/lib/leaseTemplate.ts), not just display it. */
+export async function resolveDocumentBytes(fileName: string | undefined, storedValue: string | undefined): Promise<Uint8Array | null> {
+  const blob = await resolveDocumentBlob(fileName, storedValue);
+  return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+}
 
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -96,19 +202,14 @@ export function base64ToBlob(base64: string, mime: string): Blob {
   return new Blob([new Uint8Array(byteNumbers)], { type: mime });
 }
 
-/**
- * Base64 -> Blob object URL. Chrome (and most modern browsers) block window.open()/top-level
- * navigation to data: URIs as a phishing mitigation, so a document that opens fine embedded in an
- * <iframe>/<img> can still silently fail to open in a new tab via a raw data: URL — blob: URLs
- * aren't subject to that restriction.
- */
-export function base64ToBlobUrl(base64: string, mime: string): string {
-  return URL.createObjectURL(base64ToBlob(base64, mime));
-}
-
-export function openBillDocument(fileName: string | undefined, base64: string | undefined) {
-  if (!base64) return;
-  window.open(base64ToBlobUrl(base64, mimeForFileName(fileName)), "_blank");
+/** Opens a stored file (legacy inline base64, or a storage-backed "storage:<path>" marker) in a
+ * new tab via a blob: URL — not a raw data: URI, which Chrome/Edge block from opening in a new
+ * tab as a phishing mitigation. Callers invoke this synchronously from onClick handlers, so it
+ * stays fire-and-forget (async) rather than something every one of those ~25 call sites has to
+ * await. */
+export async function openBillDocument(fileName: string | undefined, storedValue: string | undefined) {
+  const url = await resolveDocumentUrl(fileName, storedValue);
+  if (url) window.open(url, "_blank");
 }
 
 /** Reads a File into a full `data:<mime>;base64,<data>` string. */
