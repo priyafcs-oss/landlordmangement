@@ -77,17 +77,38 @@ export async function uploadDocumentBase64(base64: string, fileName: string | un
   return STORAGE_PREFIX + path;
 }
 
+/**
+ * In-memory cache of already-signed URLs, keyed by storage path, so re-opening the same document
+ * (or a thumbnail remounting in a list) reuses the existing URL instead of re-signing — and lets
+ * the browser's own HTTP cache serve the bytes — rather than forcing a fresh download every time.
+ * Entries are dropped a minute before their real expiry so nothing rides in on a URL that expires
+ * mid-request. Pending requests are cached too, so two components resolving the same path at once
+ * (e.g. React StrictMode's double-invoke, or the same file shown twice on one screen) share one
+ * network call instead of racing two.
+ */
+const signedUrlCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
+
 /** Signed, time-limited URL for a "storage:<path>" marker — null for a legacy inline value (which
  * needs no signing) or on a resolve failure. */
-export async function getSignedDocumentUrl(storedValue: string, expiresIn = 3600): Promise<string | null> {
-  if (!isStoragePath(storedValue)) return null;
+export function getSignedDocumentUrl(storedValue: string, expiresIn = 3600): Promise<string | null> {
+  if (!isStoragePath(storedValue)) return Promise.resolve(null);
   const path = storedValue.slice(STORAGE_PREFIX.length);
-  const { data, error } = await supabase.storage.from(DOCUMENTS_BUCKET).createSignedUrl(path, expiresIn);
-  if (error) {
-    console.error("[storage] failed to sign url", error);
-    return null;
-  }
-  return data.signedUrl;
+  const cached = signedUrlCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+  const promise = supabase.storage
+    .from(DOCUMENTS_BUCKET)
+    .createSignedUrl(path, expiresIn)
+    .then(({ data, error }) => {
+      if (error) {
+        console.error("[storage] failed to sign url", error);
+        signedUrlCache.delete(path);
+        return null;
+      }
+      return data.signedUrl;
+    });
+  signedUrlCache.set(path, { expiresAt: Date.now() + (expiresIn - 60) * 1000, promise });
+  return promise;
 }
 
 /** Resolves either a legacy inline base64 payload or a "storage:<path>" marker to the file's
