@@ -6,16 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
-import { readFileAsDataUrl } from "@/lib/files";
+import { readFileAsDataUrl, formatFileSize } from "@/lib/files";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { User, FileText, ChevronDown, ChevronUp, X, Plus, ShieldCheck, HelpCircle } from "lucide-react";
+import { User, FileText, ChevronDown, ChevronUp, X, Plus, ShieldCheck, HelpCircle, HardDrive, RefreshCw } from "lucide-react";
 import { inspectLeaseTemplate, LEASE_DATA_FIELDS, carryOverMapping } from "@/lib/leaseTemplate";
 import type { LeaseTemplateConfig, LeaseTemplateField, ContactPerson } from "@/lib/types";
 import { supabase } from "@/integrations/supabase/client";
 import { PasswordField } from "@/components/AuthGate";
+import { getStorageUsageSummary, getAccessActivity, type StorageUsageSummary, type AccessActivitySummary } from "@/lib/usage";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -165,8 +167,143 @@ function SettingsPage() {
       <LeaseTemplateSettings />
       <TenantInfoStatementSettings />
       <AccountSecuritySettings />
+      <StorageUsageSettings />
       <HowThisAppWorks />
     </div>
+  );
+}
+
+function formatDayLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-AU", { month: "short", day: "numeric" });
+}
+
+function UsageStatTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+/** Everything this app stores (photos, receipts, leases, ...) lives in Supabase Storage, fetched
+ * only when actually opened (src/lib/files.ts) rather than on every page load — this card gives a
+ * landlord a place to watch that in practice: current storage footprint, plus a day-by-day count
+ * of real (non-cached) file downloads, the thing that actually drove a past Supabase egress
+ * overage before that fix shipped. */
+function StorageUsageSettings() {
+  const [summary, setSummary] = useState<StorageUsageSummary | null>(null);
+  const [activity, setActivity] = useState<AccessActivitySummary | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([getStorageUsageSummary(), getAccessActivity(14)]).then(([s, a]) => {
+      setSummary(s);
+      setActivity(a);
+      setLoading(false);
+    });
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const maxCount = Math.max(1, ...(activity?.byDay.map((d) => d.count) ?? [0]));
+  const hasActivity = (activity?.byDay ?? []).some((d) => d.count > 0);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2 text-base">
+          <span className="flex items-center gap-2">
+            <HardDrive className="h-4 w-4" />
+            Storage &amp; File Usage
+          </span>
+          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={load} disabled={loading} title="Refresh">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Files only get downloaded when you actually open them, not on every page load — this
+          tracks real usage so you can watch it stay low as you use the app.
+        </p>
+
+        <div className="grid grid-cols-3 gap-3">
+          <UsageStatTile
+            label="Stored"
+            value={summary ? formatFileSize(summary.bytes) : "—"}
+            sub={summary ? `${summary.fileCount} file(s)` : undefined}
+          />
+          <UsageStatTile label="Downloads today" value={activity ? String(activity.today) : "—"} />
+          <UsageStatTile label="Downloads (7d)" value={activity ? String(activity.last7Days) : "—"} />
+        </div>
+
+        <div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">Real file downloads, last 14 days</div>
+          {activity && !hasActivity ? (
+            <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+              No file downloads logged yet — open a document or photo to see activity here.
+            </div>
+          ) : (
+            <TooltipProvider delayDuration={100}>
+              <div className="flex h-24 items-end gap-1">
+                {(activity?.byDay ?? []).map((d) => (
+                  <Tooltip key={d.date}>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="min-h-[4px] flex-1 rounded-t-sm bg-primary/70 transition-colors hover:bg-primary"
+                        style={{ height: `${Math.max(4, (d.count / maxCount) * 100)}%` }}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {formatDayLabel(d.date)} — {d.count} download{d.count === 1 ? "" : "s"}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </TooltipProvider>
+          )}
+        </div>
+
+        {hasActivity && (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="outline" size="sm" className="w-full justify-between text-xs">
+                View as table
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 max-h-56 overflow-y-auto rounded border">
+              <table className="w-full text-xs">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="px-2 py-1 text-left">Date</th>
+                    <th className="px-2 py-1 text-right">Downloads</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activity?.byDay ?? [])
+                    .slice()
+                    .reverse()
+                    .map((d) => (
+                      <tr key={d.date} className="border-t">
+                        <td className="px-2 py-1">{formatDayLabel(d.date)}</td>
+                        <td className="px-2 py-1 text-right">{d.count}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

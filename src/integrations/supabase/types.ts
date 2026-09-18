@@ -550,6 +550,24 @@ export type Database = {
           },
         ]
       }
+      file_access_log: {
+        Row: {
+          created_at: string
+          id: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          storage_path?: string
+        }
+        Relationships: []
+      }
       gold_details: {
         Row: {
           assetId: string

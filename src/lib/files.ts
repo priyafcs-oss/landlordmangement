@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { logFileAccess } from "@/lib/usage";
 
 /**
  * Every AI-extraction edge function embeds the file inline (base64) in a single Gemini
@@ -105,6 +106,7 @@ export function getSignedDocumentUrl(storedValue: string, expiresIn = 3600): Pro
         signedUrlCache.delete(path);
         return null;
       }
+      logFileAccess(path);
       return data.signedUrl;
     });
   signedUrlCache.set(path, { expiresAt: Date.now() + (expiresIn - 60) * 1000, promise });
