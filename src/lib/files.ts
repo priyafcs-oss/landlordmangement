@@ -25,9 +25,21 @@ export const MAX_AI_UPLOAD_BYTES = 12 * 1024 * 1024;
  */
 const STORAGE_PREFIX = "storage:";
 const DOCUMENTS_BUCKET = "documents";
+/**
+ * A landlord who's connected their own Google Drive (Settings -> "Connected Google Drive") gets
+ * new uploads written here instead of the shared `documents` bucket above — see
+ * supabase/functions/_shared/googleDrive.ts and the migrate-storage-to-drive one-off migration.
+ * A "storage:<path>" marker is still fully readable indefinitely (any owner not yet connected, or
+ * mid-migration), so both prefixes are checked everywhere a stored value is resolved.
+ */
+const GDRIVE_PREFIX = "gdrive:";
 
 function isStoragePath(value: string): boolean {
   return value.startsWith(STORAGE_PREFIX);
+}
+
+function isGoogleDrivePath(value: string): boolean {
+  return value.startsWith(GDRIVE_PREFIX);
 }
 
 function sanitizeFileName(name: string): string {
@@ -40,24 +52,16 @@ async function currentUserId(): Promise<string | undefined> {
 }
 
 /**
- * Uploads a File to the signed-in user's own folder in the `documents` bucket (matching every
- * table's owner_id RLS scoping) and returns a "storage:<path>" marker to persist in place of
- * base64. Falls back to inlining as base64 — the old behaviour — when there's no signed-in user
- * to scope the upload to (e.g. the anonymous maintenance-request form) or the upload itself fails,
- * so a Storage outage degrades to the old egress-heavy path instead of losing the file outright.
+ * Uploads a File to the signed-in user's own Drive (if connected, via the drive-upload edge
+ * function — the browser never holds a Drive refresh token, see supabase/functions/drive-upload)
+ * or their folder in the shared `documents` bucket otherwise, and returns a "gdrive:<fileId>" or
+ * "storage:<path>" marker to persist in place of base64. Falls back to inlining as base64 — the
+ * old behaviour — when there's no signed-in user to scope the upload to (e.g. the anonymous
+ * maintenance-request form) or the upload itself fails, so an outage degrades to the old
+ * egress-heavy path instead of losing the file outright.
  */
 export async function uploadDocumentFile(file: File): Promise<string> {
-  const uid = await currentUserId();
-  if (!uid) return readFileAsBase64(file);
-  const path = `${uid}/${crypto.randomUUID()}-${sanitizeFileName(file.name)}`;
-  const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, file, {
-    contentType: file.type || mimeForFileName(file.name),
-  });
-  if (error) {
-    console.error("[storage] upload failed, falling back to inline base64", error);
-    return readFileAsBase64(file);
-  }
-  return STORAGE_PREFIX + path;
+  return uploadDocumentBase64(await readFileAsBase64(file), file.name);
 }
 
 /**
@@ -68,60 +72,81 @@ export async function uploadDocumentFile(file: File): Promise<string> {
 export async function uploadDocumentBase64(base64: string, fileName: string | undefined): Promise<string> {
   const uid = await currentUserId();
   if (!uid) return base64;
+
+  const { data, error } = await supabase.functions.invoke("drive-upload", {
+    body: { fileBase64: base64, fileName: fileName || "file", mimeType: mimeForFileName(fileName) },
+  });
+  if (!error && data?.marker) return data.marker as string;
+  // Not connected to Drive (drive-upload returns a handled 422 for this, not a thrown error) —
+  // or connected but the upload itself failed — either way, fall back to the shared bucket.
   const path = `${uid}/${crypto.randomUUID()}-${sanitizeFileName(fileName || "file")}`;
   const blob = base64ToBlob(base64, mimeForFileName(fileName));
-  const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, blob, { contentType: blob.type });
-  if (error) {
-    console.error("[storage] upload failed, falling back to inline base64", error);
+  const { error: storageError } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, blob, { contentType: blob.type });
+  if (storageError) {
+    console.error("[storage] upload failed, falling back to inline base64", storageError);
     return base64;
   }
   return STORAGE_PREFIX + path;
 }
 
 /**
- * In-memory cache of already-signed URLs, keyed by storage path, so re-opening the same document
- * (or a thumbnail remounting in a list) reuses the existing URL instead of re-signing — and lets
- * the browser's own HTTP cache serve the bytes — rather than forcing a fresh download every time.
- * Entries are dropped a minute before their real expiry so nothing rides in on a URL that expires
- * mid-request. Pending requests are cached too, so two components resolving the same path at once
- * (e.g. React StrictMode's double-invoke, or the same file shown twice on one screen) share one
- * network call instead of racing two.
+ * In-memory cache of already-resolved file bytes, keyed by the full "storage:<path>" or
+ * "gdrive:<fileId>" marker, so re-opening the same document (or a thumbnail remounting in a list)
+ * reuses the fetched Blob instead of re-fetching it every time. Entries expire well under an
+ * hour — both a Storage signed URL and a Drive access token are short-lived, so nothing here
+ * outlives what it was fetched with. Pending requests are cached too (the Promise itself, not
+ * just its result), so two components resolving the same marker at once (e.g. React StrictMode's
+ * double-invoke, or the same file shown twice on one screen) share one network call instead of
+ * racing two.
  */
-const signedUrlCache = new Map<string, { expiresAt: number; promise: Promise<string | null> }>();
+const blobCache = new Map<string, { expiresAt: number; promise: Promise<Blob | null> }>();
+const BLOB_CACHE_TTL_MS = 55 * 60 * 1000;
 
-/** Signed, time-limited URL for a "storage:<path>" marker — null for a legacy inline value (which
- * needs no signing) or on a resolve failure. */
-export function getSignedDocumentUrl(storedValue: string, expiresIn = 3600): Promise<string | null> {
-  if (!isStoragePath(storedValue)) return Promise.resolve(null);
+async function fetchStorageBlob(storedValue: string): Promise<Blob | null> {
   const path = storedValue.slice(STORAGE_PREFIX.length);
-  const cached = signedUrlCache.get(path);
-  if (cached && cached.expiresAt > Date.now()) return cached.promise;
-
-  const promise = supabase.storage
-    .from(DOCUMENTS_BUCKET)
-    .createSignedUrl(path, expiresIn)
-    .then(({ data, error }) => {
-      if (error) {
-        console.error("[storage] failed to sign url", error);
-        signedUrlCache.delete(path);
-        return null;
-      }
-      logFileAccess(path);
-      return data.signedUrl;
-    });
-  signedUrlCache.set(path, { expiresAt: Date.now() + (expiresIn - 60) * 1000, promise });
-  return promise;
+  const { data, error } = await supabase.storage.from(DOCUMENTS_BUCKET).createSignedUrl(path, 3600);
+  if (error) {
+    console.error("[storage] failed to sign url", error);
+    blobCache.delete(storedValue);
+    return null;
+  }
+  const res = await fetch(data.signedUrl);
+  if (!res.ok) {
+    blobCache.delete(storedValue);
+    return null;
+  }
+  logFileAccess(storedValue);
+  return res.blob();
 }
 
-/** Resolves either a legacy inline base64 payload or a "storage:<path>" marker to the file's
- * actual bytes. */
+/** Re-types the octet-stream Blob drive-download always responds with (see that function's own
+ * doc comment for why) using the real content type it reports back via the X-File-Content-Type
+ * header on invoke()'s raw `response` — falls back to filename-based inference (matching every
+ * other upload path in this app) only if that header is somehow missing. */
+async function fetchDriveBlob(storedValue: string, fileName: string | undefined): Promise<Blob | null> {
+  const { data, error, response } = await supabase.functions.invoke("drive-download", { body: { marker: storedValue } });
+  if (error || !(data instanceof Blob)) {
+    console.error("[drive] failed to download", error);
+    blobCache.delete(storedValue);
+    return null;
+  }
+  logFileAccess(storedValue);
+  const realType = response?.headers.get("x-file-content-type") || mimeForFileName(fileName);
+  return data.type === realType ? data : new Blob([data], { type: realType });
+}
+
+/** Resolves a legacy inline base64 payload, a "storage:<path>" marker, or a "gdrive:<fileId>"
+ * marker to the file's actual bytes. */
 export async function resolveDocumentBlob(fileName: string | undefined, storedValue: string | undefined): Promise<Blob | null> {
   if (!storedValue) return null;
-  if (!isStoragePath(storedValue)) return base64ToBlob(storedValue, mimeForFileName(fileName));
-  const url = await getSignedDocumentUrl(storedValue);
-  if (!url) return null;
-  const res = await fetch(url);
-  return res.ok ? res.blob() : null;
+  if (!isStoragePath(storedValue) && !isGoogleDrivePath(storedValue)) return base64ToBlob(storedValue, mimeForFileName(fileName));
+
+  const cached = blobCache.get(storedValue);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+  const promise = isGoogleDrivePath(storedValue) ? fetchDriveBlob(storedValue, fileName) : fetchStorageBlob(storedValue);
+  blobCache.set(storedValue, { expiresAt: Date.now() + BLOB_CACHE_TTL_MS, promise });
+  return promise;
 }
 
 /** Resolves a stored value to a browser-usable object URL — caller owns calling

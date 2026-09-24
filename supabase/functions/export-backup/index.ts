@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { resolveStoredBase64 } from "../_shared/storage.ts";
+import { downloadBytesFromDrive, driveFileId, getAccessTokenForOwner, isGoogleDrivePath } from "../_shared/googleDrive.ts";
 
 // Every table in the app's schema — see src/lib/db.ts's TABLES map, which this mirrors, plus
 // app_settings (not in that map, has its own constant elsewhere in the client). Was missing
@@ -50,23 +51,41 @@ function isFileDataKey(key: string): boolean {
   return FILE_DATA_KEY.test(key) || FILE_DATA_SUFFIX.test(key);
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 /**
  * Every file field used to hold base64 directly, making a data-only export self-contained by
  * construction. Since the Storage migration (../_shared/storage.ts, ../backfill-storage) those
- * fields hold "storage:<path>" markers instead — resolved back to base64 here so this export
- * stays a genuinely complete, standalone backup rather than a set of pointers into Storage that
- * outlive the rows referencing them.
+ * fields hold "storage:<path>" markers instead — resolved back to base64 here with the
+ * service-role key (works because service_role bypasses the bucket's owner-scoped Storage RLS).
+ * Since the Google Drive migration, a field can also hold a "gdrive:<fileId>" marker pointing at
+ * ONE SPECIFIC LANDLORD's own personal Drive — service_role has no access to that at all, so
+ * those need the OWNING row's own Drive refresh token (admin_get_google_drive_refresh_token),
+ * looked up via ownerId (the exporting row's own owner_id — every table has one) rather than a
+ * single global resolve pass. getAccessTokenForOwner caches per owner internally, so this stays
+ * cheap even with many rows sharing the same owner.
  */
-async function inlineStorageFiles(supabase: SupabaseClient, value: unknown): Promise<unknown> {
-  if (Array.isArray(value)) return Promise.all(value.map((v) => inlineStorageFiles(supabase, v)));
+async function inlineStorageFiles(supabase: SupabaseClient, value: unknown, ownerId: string | null): Promise<unknown> {
+  if (Array.isArray(value)) return Promise.all(value.map((v) => inlineStorageFiles(supabase, v, ownerId)));
   if (value && typeof value === "object") {
     const obj = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(obj)) {
       if (isFileDataKey(key) && typeof v === "string" && v.startsWith("storage:")) {
         out[key] = (await resolveStoredBase64(supabase, v)) ?? v;
+      } else if (isFileDataKey(key) && typeof v === "string" && isGoogleDrivePath(v)) {
+        const token = await getAccessTokenForOwner(supabase, ownerId, "admin");
+        const downloaded = token ? await downloadBytesFromDrive(token.accessToken, driveFileId(v)) : null;
+        out[key] = downloaded ? bytesToBase64(downloaded.bytes) : v;
       } else {
-        out[key] = await inlineStorageFiles(supabase, v);
+        out[key] = await inlineStorageFiles(supabase, v, ownerId);
       }
     }
     return out;
@@ -118,7 +137,9 @@ Deno.serve(async (req) => {
       errors[table] = error.message;
       tables[table] = [];
     } else {
-      tables[table] = (await Promise.all((data ?? []).map((row) => inlineStorageFiles(supabase, row)))) as unknown[];
+      tables[table] = (await Promise.all(
+        (data ?? []).map((row) => inlineStorageFiles(supabase, row, (row as { owner_id?: string }).owner_id ?? null)),
+      )) as unknown[];
     }
   }
 

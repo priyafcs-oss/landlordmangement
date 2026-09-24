@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { isStoragePath, resolveOwnerId, resolveStoredBase64, uploadBase64ToStorage } from "../_shared/storage.ts";
+import { downloadBytesFromDrive, driveFileId, getAccessTokenForOwner, isGoogleDrivePath, uploadBytesToDrive } from "../_shared/googleDrive.ts";
 import { parseInboundBill } from "../parse-inbound-bill/parse-bill.ts";
 import { parseLeaseAgreement } from "../parse-inbound-bill/parse-lease.ts";
 import { parseRentStatement } from "../parse-inbound-bill/parse-ledger.ts";
@@ -22,6 +23,23 @@ function inferMimeType(fileName?: string): string {
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
   if (["png", "gif", "webp", "heic"].includes(ext)) return `image/${ext}`;
   return "application/pdf";
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const raw = base64.includes(",") ? base64.slice(base64.indexOf(",") + 1) : base64;
+  const bin = atob(raw);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
 }
 
 /**
@@ -97,25 +115,48 @@ Deno.serve(async (req) => {
     });
   }
 
-  // sourceFileData is a "storage:<path>" marker for anything parsed after the Storage migration
-  // (../_shared/storage.ts) — resolve it back to real bytes before handing it to Gemini, which
-  // needs actual base64, not a path. Falls through unchanged for an older row that's still inline.
-  const pdfBase64 = await resolveStoredBase64(supabase, existing.sourceFileData);
-  if (!pdfBase64) {
-    return new Response(JSON.stringify({ error: "Couldn't read the stored source file" }), {
-      status: 422,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const ownerId = await resolveOwnerId(supabase);
 
-  // Re-parsing re-classifies the SAME document, so it belongs at the SAME storage path — reuse it
-  // instead of re-uploading these bytes a second time. A not-yet-backfilled legacy row (still
-  // inline base64) gets uploaded here for the first time instead, so re-parsing an old row also
-  // migrates it. Every parser writes this to `sourceFileData` (never pdfBase64 directly, see
-  // ../parse-inbound-bill/router.ts).
-  const pdfStoragePath = isStoragePath(existing.sourceFileData)
-    ? existing.sourceFileData
-    : await uploadBase64ToStorage(supabase, pdfBase64, existing.sourceFileName ?? undefined, await resolveOwnerId(supabase), inferMimeType(existing.sourceFileName));
+  // sourceFileData is a "gdrive:<fileId>" marker (an owner who's connected Drive), a
+  // "storage:<path>" marker (Supabase Storage — either not-yet-migrated to Drive, or the owner
+  // hasn't connected Drive at all), or legacy inline base64 — resolve whichever it is back to real
+  // bytes before handing it to Gemini, which needs actual base64, not a path.
+  let pdfBase64: string | undefined;
+  let pdfStoragePath: string | undefined = existing.sourceFileData;
+
+  if (isGoogleDrivePath(existing.sourceFileData)) {
+    const token = await getAccessTokenForOwner(supabase, ownerId, "self");
+    const downloaded = token ? await downloadBytesFromDrive(token.accessToken, driveFileId(existing.sourceFileData)) : null;
+    if (!downloaded) {
+      return new Response(JSON.stringify({ error: "Couldn't read the stored source file from Google Drive" }), {
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    pdfBase64 = bytesToBase64(downloaded.bytes);
+    // Re-parsing re-classifies the SAME document — reuse the same Drive file rather than
+    // re-uploading these bytes a second time.
+  } else {
+    pdfBase64 = await resolveStoredBase64(supabase, existing.sourceFileData);
+    if (!pdfBase64) {
+      return new Response(JSON.stringify({ error: "Couldn't read the stored source file" }), {
+        status: 422,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!isStoragePath(existing.sourceFileData)) {
+      // A not-yet-backfilled legacy row (still inline base64) gets uploaded here for the first
+      // time — to the owner's Drive if they're connected, otherwise Supabase Storage as before,
+      // so re-parsing an old row also migrates it onto whichever backend that owner is on.
+      const token = await getAccessTokenForOwner(supabase, ownerId, "self");
+      pdfStoragePath = token
+        ? (await uploadBytesToDrive(token.accessToken, token.rootFolderId, base64ToUint8Array(pdfBase64), existing.sourceFileName ?? "file", inferMimeType(existing.sourceFileName))) ?? existing.sourceFileData
+        : await uploadBase64ToStorage(supabase, pdfBase64, existing.sourceFileName ?? undefined, ownerId, inferMimeType(existing.sourceFileName));
+    }
+    // Already a "storage:<path>" marker — left unchanged here; migrating an already-Storage-backed
+    // document to Drive is the batch migration script's job (../migrate-storage-to-drive), not a
+    // side effect of an unrelated re-parse.
+  }
 
   const input: NormalizedBillInput = {
     fromEmail: "manual-upload",

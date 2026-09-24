@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { User, FileText, ChevronDown, ChevronUp, X, Plus, ShieldCheck, HelpCircle, HardDrive, RefreshCw } from "lucide-react";
+import { User, FileText, ChevronDown, ChevronUp, X, Plus, ShieldCheck, HelpCircle, HardDrive, RefreshCw, Cloud } from "lucide-react";
 import { inspectLeaseTemplate, LEASE_DATA_FIELDS, carryOverMapping } from "@/lib/leaseTemplate";
 import type { LeaseTemplateConfig, LeaseTemplateField, ContactPerson } from "@/lib/types";
 import { supabase } from "@/integrations/supabase/client";
@@ -167,6 +167,7 @@ function SettingsPage() {
       <LeaseTemplateSettings />
       <TenantInfoStatementSettings />
       <AccountSecuritySettings />
+      <ConnectedGoogleDriveSettings />
       <StorageUsageSettings />
       <HowThisAppWorks />
     </div>
@@ -383,6 +384,110 @@ function AccountSecuritySettings() {
             </Button>
           </div>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface DriveConnection {
+  status: "disconnected" | "connected" | "error";
+  connected_email: string | null;
+}
+
+/** Each landlord connects their OWN Google Drive account (OAuth, scope drive.file — the app can
+ * only ever see files/folders it itself creates there, never anything else in that Drive) rather
+ * than storing files in a shared bucket this app operates. See
+ * supabase/functions/oauth-google-drive-start/-callback and
+ * supabase/migrations/20260924100000_google_drive_connections.sql. */
+function ConnectedGoogleDriveSettings() {
+  const [connection, setConnection] = useState<DriveConnection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    supabase
+      .from("google_drive_connections")
+      .select("status, connected_email")
+      .maybeSingle()
+      .then(({ data }) => {
+        setConnection((data as DriveConnection | null) ?? { status: "disconnected", connected_email: null });
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    load();
+    // oauth-google-drive-callback redirects back here with ?drive=connected|error once the
+    // consent flow completes — surface that as a toast, then strip the param so a page refresh
+    // doesn't re-show it.
+    const params = new URLSearchParams(window.location.search);
+    const driveParam = params.get("drive");
+    if (driveParam === "connected") {
+      toast.success("Google Drive connected");
+    } else if (driveParam === "error") {
+      toast.error("Couldn't connect Google Drive — try again");
+    }
+    if (driveParam) {
+      params.delete("drive");
+      window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke("oauth-google-drive-start");
+    setBusy(false);
+    if (error || !data?.url) return toast.error("Couldn't start the Google Drive connection");
+    window.location.href = data.url;
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    const { error } = await supabase.rpc("disconnect_google_drive");
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success("Google Drive disconnected");
+    load();
+  };
+
+  const isConnected = connection?.status === "connected";
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Cloud className="h-4 w-4" />
+          Connected Google Drive
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Files you upload — photos, receipts, leases, statements — are stored in your own Google
+          Drive, not a shared bucket. The app can only see files it creates there, never anything
+          else already in your Drive.
+        </p>
+        {loading ? (
+          <div className="text-xs text-muted-foreground">Loading…</div>
+        ) : isConnected ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+            <div>
+              <div className="text-sm font-medium">Connected</div>
+              {connection?.connected_email && <div className="text-xs text-muted-foreground">{connection.connected_email}</div>}
+            </div>
+            <Button variant="outline" size="sm" disabled={busy} onClick={disconnect}>
+              Disconnect
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+            <div className="text-sm">Not connected — new uploads use shared storage for now.</div>
+            <Button size="sm" disabled={busy} onClick={connect}>
+              Connect Google Drive
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

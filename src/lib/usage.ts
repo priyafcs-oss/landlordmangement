@@ -14,6 +14,18 @@ export interface StorageUsageSummary {
 }
 
 /**
+ * A landlord who's connected Google Drive (Settings -> "Connected Google Drive") has their usage
+ * summed from their own Drive instead (drive-usage-summary edge function) — this only ever checks
+ * connection STATUS, not migration progress, matching src/lib/files.ts's own upload/read paths:
+ * once connected, everything new-and-migrated lives in Drive, so that's what's worth reporting.
+ * A not-yet-connected owner falls through to the legacy bucket listing below unchanged.
+ */
+async function isDriveConnected(): Promise<boolean> {
+  const { data } = await supabase.from("google_drive_connections").select("status").maybeSingle();
+  return data?.status === "connected";
+}
+
+/**
  * Sums the size of every object under the signed-in user's own folder in the `documents` bucket —
  * a live, client-side equivalent of backfill-storage's `?report=1` mode (see that function's
  * `totalBucketSize`), scoped by the same `owner_read_documents` Storage policy every other client
@@ -24,6 +36,15 @@ export interface StorageUsageSummary {
 export async function getStorageUsageSummary(): Promise<StorageUsageSummary | null> {
   const uid = await currentUserId();
   if (!uid) return null;
+
+  if (await isDriveConnected()) {
+    const { data, error } = await supabase.functions.invoke("drive-usage-summary");
+    if (!error && data) return data as StorageUsageSummary;
+    console.error("[usage] failed to load drive usage summary", error);
+    // Falls through to the (now likely near-empty, for a connected owner) bucket listing below
+    // rather than returning null outright, so a transient Drive API failure still shows something.
+  }
+
   let bytes = 0;
   let fileCount = 0;
   let offset = 0;

@@ -61,3 +61,28 @@ verify_jwt = false
 # One-off migration, gated by BACKFILL_SECRET rather than a user session — see its own doc comment.
 [functions.backfill-storage]
 verify_jwt = false
+
+# Same reasoning as upload-document above — called via supabase.functions.invoke with a real
+# session token, verified inside the function itself.
+[functions.oauth-google-drive-start]
+verify_jwt = false
+
+# Invoked by Google's own browser redirect after OAuth consent, not by the app — carries no
+# Supabase session at all. The HMAC-signed `state` param (../_shared/oauthState.ts) is the real
+# auth boundary here, not a JWT.
+[functions.oauth-google-drive-callback]
+verify_jwt = false
+
+[functions.drive-upload]
+verify_jwt = false
+
+[functions.drive-download]
+verify_jwt = false
+
+[functions.drive-usage-summary]
+verify_jwt = false
+
+# One-off per-owner migration, gated by DRIVE_MIGRATE_SECRET rather than a user session — see its
+# own doc comment.
+[functions.migrate-storage-to-drive]
+verify_jwt = false

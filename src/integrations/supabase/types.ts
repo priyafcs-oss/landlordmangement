@@ -600,6 +600,36 @@ export type Database = {
           },
         ]
       }
+      google_drive_connections: {
+        Row: {
+          connected_at: string | null
+          connected_email: string | null
+          owner_id: string
+          refresh_token_secret_id: string | null
+          root_folder_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          connected_at?: string | null
+          connected_email?: string | null
+          owner_id?: string
+          refresh_token_secret_id?: string | null
+          root_folder_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          connected_at?: string | null
+          connected_email?: string | null
+          owner_id?: string
+          refresh_token_secret_id?: string | null
+          root_folder_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       inspections: {
         Row: {
           checklist: Json | null
@@ -1929,7 +1959,27 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      admin_get_google_drive_refresh_token: {
+        Args: { p_owner_id: string }
+        Returns: string
+      }
+      admin_upsert_google_drive_connection: {
+        Args: {
+          p_owner_id: string
+          p_refresh_token: string
+          p_connected_email: string
+          p_root_folder_id: string
+        }
+        Returns: undefined
+      }
+      disconnect_google_drive: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      get_my_google_drive_refresh_token: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never

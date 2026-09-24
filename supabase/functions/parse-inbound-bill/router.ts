@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { resolveOwnerId, uploadBase64ToStorage } from "../_shared/storage.ts";
+import { uploadBase64ToStorage } from "../_shared/storage.ts";
+import { getAccessTokenForOwner, uploadBytesToDrive } from "../_shared/googleDrive.ts";
 import { classifyDocument } from "./classify.ts";
 import { parseInboundBill } from "./parse-bill.ts";
 import { parseLeaseAgreement } from "./parse-lease.ts";
@@ -19,6 +20,32 @@ import type { NormalizedBillInput, ParseResult, ProposalParseResult } from "./ty
  * since this module has no other reason to import from there. */
 function escapeIlike(s: string): string {
   return s.replace(/[%_]/g, (c) => `\\${c}`);
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const raw = base64.includes(",") ? base64.slice(base64.indexOf(",") + 1) : base64;
+  const bin = atob(raw);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Same resolution as ../_shared/storage.ts's resolveOwnerId, but also reports WHICH RPC scope to
+ * fetch that owner's Drive refresh token with: "self" for an authenticated in-app call
+ * (upload-document/reparse-document, whose Supabase client carries the calling landlord's own
+ * session), "admin" for the service-role email webhook with no session, which falls back to
+ * first_landlord_id() the same way every table's owner_id DEFAULT does.
+ */
+async function resolveOwnerAndScope(supabase: SupabaseClient): Promise<{ ownerId: string | null; scope: "self" | "admin" }> {
+  const { data: userData } = await supabase.auth.getUser();
+  if (userData?.user?.id) return { ownerId: userData.user.id, scope: "self" };
+  const { data, error } = await supabase.rpc("first_landlord_id");
+  if (error) {
+    console.error("[parse-inbound-bill] failed to resolve fallback owner id", error);
+    return { ownerId: null, scope: "admin" };
+  }
+  return { ownerId: (data as string | null) ?? null, scope: "admin" };
 }
 
 export type RouteResult = (ParseResult | ProposalParseResult) & {
@@ -44,15 +71,22 @@ export async function routeInboundDocument(
   input: NormalizedBillInput,
   emailMessageId: string | null,
 ): Promise<RouteResult> {
-  // Move the attachment to Storage once, up front, before any parser gets a chance to persist it
-  // inline — every parser below writes `sourceFileData: input.pdfStoragePath`, never pdfBase64
-  // directly (pdfBase64 itself is still needed as-is for the Gemini calls just below/downstream).
+  // Move the attachment to the owning landlord's Drive (if connected) or the shared Storage
+  // bucket (if not) once, up front, before any parser gets a chance to persist it inline — every
+  // parser below writes `sourceFileData: input.pdfStoragePath`, never pdfBase64 directly
+  // (pdfBase64 itself is still needed as-is for the Gemini calls just below/downstream). Which
+  // owner this resolves to — and therefore which Drive gets written to — inherits the same known
+  // limitation ../_shared/storage.ts's old resolveOwnerId always had for the email-webhook path
+  // (no per-landlord email routing yet, see CLAUDE.md); this migration doesn't fix that, it just
+  // makes owner resolution matter for one more thing.
   if (input.pdfBase64 && !input.pdfStoragePath) {
-    const ownerId = await resolveOwnerId(supabase);
-    input = {
-      ...input,
-      pdfStoragePath: await uploadBase64ToStorage(supabase, input.pdfBase64, input.pdfFileName, ownerId, input.attachmentMimeType),
-    };
+    const { ownerId, scope } = await resolveOwnerAndScope(supabase);
+    const driveToken = await getAccessTokenForOwner(supabase, ownerId, scope);
+    const pdfStoragePath = driveToken
+      ? (await uploadBytesToDrive(driveToken.accessToken, driveToken.rootFolderId, base64ToUint8Array(input.pdfBase64), input.pdfFileName || "file", input.attachmentMimeType || "application/octet-stream")) ??
+        (await uploadBase64ToStorage(supabase, input.pdfBase64, input.pdfFileName, ownerId, input.attachmentMimeType))
+      : await uploadBase64ToStorage(supabase, input.pdfBase64, input.pdfFileName, ownerId, input.attachmentMimeType);
+    input = { ...input, pdfStoragePath };
   }
 
   // The same physical statement/bill can arrive twice with no shared emailMessageId to catch it —
