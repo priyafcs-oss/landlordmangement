@@ -67,6 +67,8 @@ export function AddLoanDialog({
   loan,
   refinanceFrom,
   propertyId: lockedPropertyId,
+  initialValues,
+  onCreated,
   trigger,
 }: {
   /** Edits an existing Loan in place instead of creating a new one. */
@@ -80,6 +82,12 @@ export function AddLoanDialog({
    * property's own Loans tab) — omit for the portfolio-wide Loans summary, where the landlord
    * picks the property themselves. */
   propertyId?: string;
+  /** Pre-fills a *new* loan's fields from AI-extracted data (e.g. src/components/AiPlanStepList.tsx).
+   * Ignored in edit/refinance mode. */
+  initialValues?: { bankName?: string; originalAmount?: number; interestRate?: number; monthlyEmi?: number };
+  /** Called after a *new* loan is actually created (not on edit/refinance, not when the dialog
+   * merely opens), with its id. */
+  onCreated?: (loanId: string) => void;
   trigger?: React.ReactNode;
 }) {
   const { state, addLoan, updateLoan, deleteLoan } = useStore();
@@ -103,18 +111,18 @@ export function AddLoanDialog({
     propertyId: prefill?.propertyId ?? lockedPropertyId ?? state.properties[0]?.id ?? "",
     // A refinance is a new lender/product by definition — leave these blank to type in, rather
     // than prefilling the old bank's own details onto what's meant to replace them.
-    bankName: isRefinance ? "" : (prefill?.bankName ?? ""),
+    bankName: isRefinance ? "" : (prefill?.bankName ?? initialValues?.bankName ?? ""),
     bsb: isRefinance ? "" : (prefill?.bsb ?? ""),
     accountNumber: isRefinance ? "" : (prefill?.accountNumber ?? ""),
     productType: isRefinance ? "" : (prefill?.productType ?? ""),
     loanType: (prefill?.loanType ?? "Principal & Interest") as Loan["loanType"],
     purpose: (prefill?.purpose ?? "Investment") as Loan["purpose"],
-    originalAmount: prefill?.originalAmount !== undefined ? String(prefill.originalAmount) : "",
-    totalBalance: prefill ? String(prefill.totalBalance) : "",
+    originalAmount: prefill?.originalAmount !== undefined ? String(prefill.originalAmount) : initialValues?.originalAmount !== undefined ? String(initialValues.originalAmount) : "",
+    totalBalance: prefill ? String(prefill.totalBalance) : initialValues?.originalAmount !== undefined ? String(initialValues.originalAmount) : "",
     creditLimit: prefill?.creditLimit !== undefined ? String(prefill.creditLimit) : "",
-    interestRate: isRefinance ? "" : prefill ? String(prefill.interestRate) : "",
+    interestRate: isRefinance ? "" : prefill ? String(prefill.interestRate) : initialValues?.interestRate !== undefined ? String(initialValues.interestRate) : "",
     rateType: (prefill?.rateType ?? "Variable") as Loan["rateType"],
-    monthlyEmi: isRefinance ? "" : prefill ? String(prefill.monthlyEmi) : "",
+    monthlyEmi: isRefinance ? "" : prefill ? String(prefill.monthlyEmi) : initialValues?.monthlyEmi !== undefined ? String(initialValues.monthlyEmi) : "",
     repaymentFrequency: (prefill?.repaymentFrequency ?? "Monthly") as Loan["repaymentFrequency"],
     nextRepaymentDate: isRefinance ? "" : (prefill?.nextRepaymentDate ?? ""),
     dueDayOfMonth: isRefinance ? "" : prefill?.dueDayOfMonth !== undefined ? String(prefill.dueDayOfMonth) : "",
@@ -261,7 +269,8 @@ export function AddLoanDialog({
       updateLoan(refinanceFrom.id, { status: "Paid Off" });
       toast.success(`Refinanced — new loan added, ${refinanceFrom.bankName} kept on record as history`);
     } else {
-      addLoan(payload);
+      const newId = addLoan(payload);
+      onCreated?.(newId);
       toast.success("Loan added");
     }
     setOpen(false);

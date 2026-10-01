@@ -139,6 +139,7 @@ export function AddTransactionDialog({
   trigger,
   open: openProp,
   onOpenChange: onOpenChangeProp,
+  onSaved,
 }: {
   propertyId?: string;
   /** Pre-fills the form from an already-staged "expense" proposal (a manually-entered
@@ -155,6 +156,11 @@ export function AddTransactionDialog({
   trigger?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Called after a genuinely NEW expense is actually created (not on an edit, not when a line
+   * item gets flagged into the duplicate/price-spike review queue instead) with its id — only the
+   * FIRST id when a save creates several (a split across properties, or multiple line items),
+   * since nothing in this app currently needs to reference a specific one of several at once. */
+  onSaved?: (expenseId: string) => void;
 } = {}) {
   const { state, addExpense, updateExpense, addInvoice, addExpenseProposal, markProposalApplied, dismissProposal, findOrCreateProvider } =
     useStore();
@@ -567,6 +573,7 @@ export function AddTransactionDialog({
     const validItems = lineItems.filter((li) => parseFloat(li.amount) > 0);
     const perPropertyDivisor = properties.length;
     let flaggedCount = 0;
+    let firstCreatedId: string | undefined;
     // Only pass a default category through to the provider when there's exactly one line item —
     // with several lines (possibly different categories each), a single provider-level default
     // would be a guess, not a fact, so it's left unset rather than picking one arbitrarily.
@@ -619,7 +626,7 @@ export function AddTransactionDialog({
             }),
           );
         }
-        addExpense({
+        const newExpenseId = addExpense({
           itemName,
           cost: amount,
           date: form.date,
@@ -646,10 +653,12 @@ export function AddTransactionDialog({
           invoiceFileData: form.invoiceFileData,
           additionalFiles: additionalFiles.length > 0 ? additionalFiles : undefined,
         });
+        firstCreatedId ??= newExpenseId;
       }
     }
 
     if (initialProposal) markProposalApplied(initialProposal.id, { propertyId: form.propertyId });
+    if (firstCreatedId) onSaved?.(firstCreatedId);
     setOpen(false);
     if (flaggedCount > 0) {
       toast.success(`Transaction added — ${flaggedCount} line item(s) sent for review (possible duplicate or price spike)`);

@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Sparkles, Send, User, Bot } from "lucide-react";
 import { buildTenantLedger, fmtCurrency, daysUntil } from "@/lib/calculations";
 import { toast } from "sonner";
+import { AiPlanStepList } from "@/components/AiPlanStepList";
+import { normalizeSteps, type AiPlanStep, type RawPlanStep } from "@/lib/aiPlanTypes";
 
 export const Route = createFileRoute("/copilot")({
   head: () => ({
@@ -29,7 +31,13 @@ const SUGGESTIONS = [
 
 interface Msg {
   role: "user" | "assistant";
-  content: string;
+  /** Either this (a plain text reply) or `plan` is set, never both — see send()'s branch on the
+   * edge function's { answer, steps } response. */
+  content?: string;
+  /** A proposed multi-step task plan (src/components/AiPlanStepList.tsx) instead of a text
+   * reply — never executed automatically; each step only runs when a human opens its real Add
+   * dialog and clicks Save. */
+  plan?: AiPlanStep[];
 }
 
 function CopilotPage() {
@@ -100,17 +108,34 @@ function CopilotPage() {
     setInput("");
     setLoading(true);
     const context = buildContext();
-    const systemPrompt = `You are the AI assistant for an Australian independent landlord. You have full context of their portfolio (below as JSON). Answer questions concisely and accurately using this data. When asked for arrears, list tenants with amounts. When asked for yields, compute gross yield = (annual rent / purchase price) * 100. When asked to draft notices, write in a professional Australian tone integrating exact data.
+    const systemPrompt = `You are the AI assistant for an Australian independent landlord. You have full context of their portfolio (below as JSON), with two response modes — use exactly one per reply:
 
-PORTFOLIO_JSON:
+1. "answer" — a plain text answer to a question (arrears, yields, upcoming tasks, drafting a notice, etc). Use this for anything that doesn't require creating or changing a record. When asked for arrears, list tenants with amounts. When asked for yields, compute gross yield = (annual rent / purchase price) * 100. When asked to draft notices, write in a professional Australian tone integrating exact data.
+2. "steps" — when asked to DO something that creates records (e.g. "create a property at X and add a tenant Y paying $Z/week"), return an ORDERED list of steps instead of an answer. You never create anything yourself — each step is only a PROPOSAL a human reviews and explicitly runs, so it's fine to propose steps even from an ambiguous/incomplete request; the landlord fills in or corrects anything missing before running each one.
+
+Rules for "steps":
+- Valid step types: create_property, create_tenant, add_expense, add_loan.
+- Order steps so anything a later step depends on comes first — e.g. create_property before a create_tenant for that same property.
+- If a step refers to a property that does not yet exist (being created by an earlier step in this same plan), set its propertyRef to that earlier step's stepId prefixed with "$" (e.g. "$step1"), never a made-up id.
+- If a step refers to an EXISTING property already in the portfolio data below, set propertyRef to that property's address exactly as it appears there.
+- Give every step a short stepId ("step1", "step2", ...) and a one-line human-readable summary.
+- Only propose steps for what was actually asked to be created/added — never invent extra steps.
+
+PORTFOLIO_JSON (existing properties/tenants/etc — match propertyRef against the addresses here when the landlord refers to an existing property):
 ${JSON.stringify(context, null, 2)}`;
 
     try {
-      const { data, error } = await supabase.functions.invoke<{ content: string }>("copilot-chat", {
+      const { data, error } = await supabase.functions.invoke<{ answer: string | null; steps: RawPlanStep[] | null }>("copilot-chat", {
         body: {
           messages: [
             { role: "system", content: systemPrompt },
-            ...newMsgs.map((m) => ({ role: m.role, content: m.content })),
+            // A past "plan" message has no content string (see the Msg interface) — stands in a
+            // short summary instead of sending blank, so a follow-up message still has context
+            // on what was previously proposed.
+            ...newMsgs.map((m) => ({
+              role: m.role,
+              content: m.content ?? (m.plan ? `[Proposed steps: ${m.plan.map((s) => s.summary).join("; ")}]` : ""),
+            })),
           ],
         },
       });
@@ -123,7 +148,12 @@ ${JSON.stringify(context, null, 2)}`;
         throw error;
       }
       if (!data) throw new Error("No response from AI Assistant");
-      setMessages((m) => [...m, { role: "assistant", content: data.content }]);
+      const steps = normalizeSteps(data.steps);
+      if (steps.length > 0) {
+        setMessages((m) => [...m, { role: "assistant", plan: steps }]);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: data.answer ?? "I didn't get a response — try rephrasing that." }]);
+      }
     } catch (err) {
       toast.error("AI request failed");
       console.error(err);
@@ -168,14 +198,18 @@ ${JSON.stringify(context, null, 2)}`;
                 >
                   {m.role === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                 </div>
-                <div
-                  className={
-                    "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm " +
-                    (m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted")
-                  }
-                >
-                  {m.content}
-                </div>
+                {m.plan ? (
+                  <AiPlanStepList steps={m.plan} />
+                ) : (
+                  <div
+                    className={
+                      "max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm " +
+                      (m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted")
+                    }
+                  >
+                    {m.content}
+                  </div>
+                )}
               </div>
             ))}
             {loading && (
