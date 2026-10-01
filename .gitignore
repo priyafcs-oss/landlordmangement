@@ -36,3 +36,10 @@ dist-ssr
 
 # Local scratch space — may contain data exports/backups, never commit
 .scratch/
+
+# Test artifacts — generated locally by `npm test`/`npm run test:e2e`, never commit.
+# playwright/.auth holds a real signed-in session (see e2e/auth.setup.ts) — sensitive, not just noise.
+coverage/
+playwright-report/
+test-results/
+playwright/.auth/

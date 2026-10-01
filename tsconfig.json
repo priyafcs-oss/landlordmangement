@@ -1,5 +1,29 @@
 {
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "eslint.config.js"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts",
+    "eslint.config.js",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "e2e/**/*.ts"
+  ],
+  // These two test files (plus the edge-runtime setup shim they both rely on) import real
+  // Deno-runtime source (supabase/functions/**) under Node — `@ts-nocheck` on the test file
+  // itself isn't enough to stop tsc from also type-checking everything IT imports as part of the
+  // same program, so those files are excluded from this tsconfig entirely instead. That source is
+  // normally typechecked via `deno check` (see CLAUDE.md), which understands Deno's globals and
+  // `npm:` specifiers natively; Vitest still runs these test files correctly regardless (its
+  // esbuild-based transform doesn't require full type soundness) — only editor/tsc-level
+  // type-checking is the accepted tradeoff here. See TESTING.md's "known limitations".
+  "exclude": [
+    "tests/unit/gemini-parser.test.ts",
+    "tests/integration/resend-webhook.test.ts",
+    "tests/integration/copilot-chat.test.ts",
+    "tests/setup.edge.ts"
+  ],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
