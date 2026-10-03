@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { createDriveFolder, type DriveItem, GDRIVE_PREFIX, listDriveTree, moveDriveFile, renameDriveItem } from "./googleDrive.ts";
+import { createDriveFolder, type DriveItem, GDRIVE_PREFIX, listDriveTree, moveDriveFile, renameDriveItem, trashDriveItem } from "./googleDrive.ts";
 
 /** Every table whose rows can hold a stored file — mirrors src/lib/db.ts's TABLES (minus the
  * file-less `singleton`). */
@@ -39,33 +39,86 @@ export const FILE_TABLES = [
 ];
 
 /**
- * Type subfolder per table, in priority order — one file is often referenced from several rows
- * (an agent statement from every ledger entry AND the fee expense it produced; a bill from its
- * AI intake proposal AND the bill row), and a Drive file can only sit in one folder, so the
- * earliest category any of its rows maps to wins. "Inbox" (still-unreviewed AI intake) is last,
- * so a document moves out of it the moment it's approved into a real record.
+ * Folder layout under the owner's root:
+ *
+ *   <property>/FY 2025-2026/Bills|Rent Statements|Expenses|...   year-bound documents
+ *   <property>/Purchase & Setup|Leases & Tenants|Loans|...        documents that span years
+ *   General/...                                                   same shape, no single property
+ *
+ * `yearly` categories go under an FY folder when the row has a document date (see DATE_FIELDS);
+ * without one they fall back to sitting directly under the property like a non-yearly one.
+ *
+ * Listed in priority order — one file is often referenced from several rows (an agent statement
+ * from every ledger entry AND the fee expense it produced; a bill from its AI intake proposal AND
+ * the bill row), and a Drive file can only sit in one folder, so the earliest category any of its
+ * rows maps to wins. "Inbox" (still-unreviewed AI intake) is last, so a document moves out of it
+ * the moment it's approved into a real record.
  */
-const CATEGORIES: [string, string[]][] = [
-  ["Bills", ["property_bills"]],
-  ["Rent Statements", ["ledger_entries"]],
-  ["Loans", ["loans", "loan_statements", "loan_balance_snapshots"]],
-  ["Insurance & Compliance", ["insurance_policies", "compliance_certificates"]],
-  ["Leases & Tenants", ["tenants", "lease_history", "rent_changes", "inspections", "tenant_invoices"]],
-  ["Maintenance", ["maintenance_requests", "maintenance_items"]],
-  ["Agents & Providers", ["providers", "provider_agreements", "provider_properties", "provider_documents"]],
-  ["Depreciation & Valuations", ["depreciation_items", "assets", "gold_details", "etf_details", "valuation_snapshots"]],
-  ["Bank Statements", ["bank_accounts", "buffers"]],
-  ["Expenses", ["expenses"]],
-  ["Photos & Notes", ["properties", "property_notes"]],
-  ["Other", ["entities", "app_settings"]],
-  ["Inbox", ["ai_intake_proposals", "email_inbox_log"]],
+const CATEGORIES: { name: string; yearly: boolean; tables: string[] }[] = [
+  { name: "Bills", yearly: true, tables: ["property_bills"] },
+  { name: "Rent Statements", yearly: true, tables: ["ledger_entries"] },
+  { name: "Loan Statements", yearly: true, tables: ["loan_statements", "loan_balance_snapshots"] },
+  { name: "Insurance", yearly: true, tables: ["insurance_policies"] },
+  { name: "Compliance", yearly: true, tables: ["compliance_certificates"] },
+  { name: "Tenancy", yearly: true, tables: ["rent_changes", "inspections", "tenant_invoices"] },
+  { name: "Maintenance", yearly: true, tables: ["maintenance_requests", "maintenance_items"] },
+  { name: "Valuations", yearly: true, tables: ["valuation_snapshots"] },
+  { name: "Bank Statements", yearly: true, tables: ["bank_accounts", "buffers"] },
+  { name: "Expenses", yearly: true, tables: ["expenses"] },
+  { name: "Leases & Tenants", yearly: false, tables: ["tenants", "lease_history"] },
+  { name: "Loans", yearly: false, tables: ["loans"] },
+  { name: "Agents & Providers", yearly: false, tables: ["providers", "provider_agreements", "provider_properties", "provider_documents"] },
+  { name: "Purchase & Setup", yearly: false, tables: ["properties", "assets", "depreciation_items", "gold_details", "etf_details"] },
+  { name: "Notes", yearly: false, tables: ["property_notes"] },
+  { name: "Other", yearly: false, tables: ["entities", "app_settings"] },
+  { name: "Inbox", yearly: false, tables: ["ai_intake_proposals", "email_inbox_log"] },
 ];
 const CATEGORY_RANK = new Map<string, number>();
+const YEARLY = new Set<string>();
 const TABLE_CATEGORY = new Map<string, string>();
-CATEGORIES.forEach(([name, tables], i) => {
+CATEGORIES.forEach(({ name, yearly, tables }, i) => {
   CATEGORY_RANK.set(name, i);
+  if (yearly) YEARLY.add(name);
   for (const t of tables) TABLE_CATEGORY.set(t, name);
 });
+/**
+ * The document's own date, per table, in preference order — decides its financial-year folder.
+ * Deliberately never `created_at`: that's when it was uploaded, which for a back-filed statement
+ * can be a different FY entirely. Only yearly categories' tables need one.
+ */
+const DATE_FIELDS: Record<string, string[]> = {
+  property_bills: ["issueDate", "periodEnd", "dueDate", "paidDate"],
+  ledger_entries: ["date"],
+  expenses: ["date", "paidDate", "periodEnd"],
+  loan_statements: ["periodEnd", "periodStart"],
+  loan_balance_snapshots: ["date"],
+  insurance_policies: ["coverStart"],
+  compliance_certificates: ["issueDate"],
+  rent_changes: ["changeDate"],
+  inspections: ["date"],
+  tenant_invoices: ["dateIssued", "dueDate"],
+  maintenance_requests: ["createdAt"],
+  maintenance_items: ["completedDate", "scheduledDate", "startDate"],
+  valuation_snapshots: ["date"],
+};
+
+/** Australian FY (1 July – 30 June), labelled the same "2025-2026" way as the app's own FY
+ * pickers (src/lib/calculations.ts's ausFinancialYear). Only trusts an ISO-shaped date. */
+function financialYear(value: unknown): string | undefined {
+  const m = typeof value === "string" ? /^(\d{4})-(\d{2})-\d{2}/.exec(value) : null;
+  if (!m) return undefined;
+  const year = Number(m[1]);
+  return Number(m[2]) >= 7 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+}
+
+function rowFinancialYear(table: string, row: Record<string, unknown>): string | undefined {
+  for (const field of DATE_FIELDS[table] ?? []) {
+    const fy = financialYear(row[field]);
+    if (fy) return fy;
+  }
+  return undefined;
+}
+
 const INBOX = "Inbox";
 const GENERAL_FOLDER = "General";
 /** Tags a property's folder with its id, so renaming the property renames the folder instead of
@@ -118,14 +171,14 @@ export interface OrganizeResult {
   moved: number;
   alreadyFiled: number;
   foldersCreated: number;
+  emptyFoldersRemoved: number;
   failed: number;
   error?: string;
 }
 
 /**
- * Files every Drive document a row references into `<property>/<type>/` under the owner's root
- * folder ("General/<type>/" when no single property owns it). Idempotent: anything already in its
- * right folder is left alone, so it's cheap to run after every save. Only ever moves files — ids
+ * Files every Drive document a row references into the CATEGORIES layout under the owner's root
+ * folder. Idempotent: anything already in its right folder is left alone, so it's cheap to run after every save. Only ever moves files — ids
  * don't change on a move, so no row is rewritten — and never touches a file no row references
  * (it may be a just-uploaded one whose row hasn't been saved yet).
  */
@@ -135,7 +188,7 @@ export async function organizeDrive(
   accessToken: string,
   rootFolderId: string,
 ): Promise<OrganizeResult> {
-  const empty = { referencedFiles: 0, moved: 0, alreadyFiled: 0, foldersCreated: 0, failed: 0 };
+  const empty = { referencedFiles: 0, moved: 0, alreadyFiled: 0, foldersCreated: 0, emptyFoldersRemoved: 0, failed: 0 };
   const [tables, tree] = await Promise.all([loadAllRows(supabase, ownerId), listDriveTree(accessToken, rootFolderId)]);
   if (!tables) return { ok: false, ...empty, error: "Couldn't read every table" };
   if (!tree) return { ok: false, ...empty, error: "Couldn't list the Drive folder" };
@@ -159,8 +212,8 @@ export async function organizeDrive(
     return id && propertyName.has(id) ? id : undefined;
   };
 
-  // fileId -> every (category, property) a referencing row implies
-  const refs = new Map<string, { category: string; propertyId?: string }[]>();
+  // fileId -> every (category, property, FY) a referencing row implies
+  const refs = new Map<string, { category: string; propertyId?: string; fy?: string }[]>();
   for (const [table, rows] of tables) {
     const category = TABLE_CATEGORY.get(table) ?? "Other";
     for (const row of rows) {
@@ -168,9 +221,10 @@ export async function organizeDrive(
       collectDriveIds(row, ids);
       if (ids.size === 0) continue;
       const propertyId = rowProperty(table, row);
+      const fy = YEARLY.has(category) ? rowFinancialYear(table, row) : undefined;
       for (const id of ids) {
         const list = refs.get(id) ?? [];
-        list.push({ category, propertyId });
+        list.push({ category, propertyId, fy });
         refs.set(id, list);
       }
     }
@@ -178,10 +232,12 @@ export async function organizeDrive(
 
   // Folder lookup by (parent, name), plus property folders by their id tag.
   const childFolder = new Map<string, string>();
+  const folderParent = new Map<string, string>();
   const propertyFolder = new Map<string, DriveItem>();
   for (const f of tree.folders.values()) {
     const parent = f.parents?.[0];
     if (parent && f.name) childFolder.set(`${parent}/${f.name}`, f.id);
+    if (parent) folderParent.set(f.id, parent);
     const tagged = f.appProperties?.[PROPERTY_FOLDER_KEY];
     if (tagged && parent === rootFolderId) propertyFolder.set(tagged, f);
   }
@@ -198,6 +254,7 @@ export async function organizeDrive(
         if (id) {
           foldersCreated++;
           childFolder.set(key, id);
+          folderParent.set(id, parentId);
         }
         return id;
       });
@@ -247,7 +304,14 @@ export async function organizeDrive(
     const properties = new Set(chosen.map((r) => r.propertyId).filter((p): p is string => !!p));
     const propertyId = properties.size === 1 ? [...properties][0] : undefined;
 
-    const parentId = propertyId ? await ensurePropertyFolder(propertyId) : await ensureFolder(rootFolderId, GENERAL_FOLDER);
+    // Most common FY among the rows that decided the category (a statement straddling 30 June can
+    // be referenced from both sides of it); ties go to the later year.
+    const fyVotes = new Map<string, number>();
+    for (const r of chosen) if (r.category === category && r.fy) fyVotes.set(r.fy, (fyVotes.get(r.fy) ?? 0) + 1);
+    const fy = [...fyVotes].sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))[0]?.[0];
+
+    const baseId = propertyId ? await ensurePropertyFolder(propertyId) : await ensureFolder(rootFolderId, GENERAL_FOLDER);
+    const parentId = baseId && fy ? await ensureFolder(baseId, `FY ${fy}`) : baseId;
     const targetId = parentId ? await ensureFolder(parentId, category) : null;
     if (!targetId) {
       failed++;
@@ -258,9 +322,29 @@ export async function organizeDrive(
       alreadyFiled++;
       continue;
     }
-    if (await moveDriveFile(accessToken, fileId, parents, targetId)) moved++;
-    else failed++;
+    if (await moveDriveFile(accessToken, fileId, parents, targetId)) {
+      moved++;
+      file.parents = [targetId];
+    } else {
+      failed++;
+    }
   }
 
-  return { ok: failed === 0, referencedFiles: refs.size, moved, alreadyFiled, foldersCreated, failed };
+  // A re-file or a layout change can leave folders with nothing in them. Any folder with a file
+  // anywhere beneath it stays — including files no row references, which are never moved — and so
+  // do property folders (they carry the id tag a later rename relies on). Only the topmost folder
+  // of each empty branch is trashed; its children go with it.
+  const nonEmpty = new Set<string>();
+  for (const f of tree.files) {
+    for (let id = f.parents?.[0]; id && !nonEmpty.has(id); id = folderParent.get(id)) nonEmpty.add(id);
+  }
+  const keep = new Set([rootFolderId, ...[...propertyFolder.values()].map((f) => f.id)]);
+  let emptyFoldersRemoved = 0;
+  for (const [id, parent] of folderParent) {
+    if (nonEmpty.has(id) || keep.has(id)) continue;
+    if (!nonEmpty.has(parent) && !keep.has(parent)) continue; // an empty ancestor is trashed instead
+    if (await trashDriveItem(accessToken, id)) emptyFoldersRemoved++;
+  }
+
+  return { ok: failed === 0, referencedFiles: refs.size, moved, alreadyFiled, foldersCreated, emptyFoldersRemoved, failed };
 }

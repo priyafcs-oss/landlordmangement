@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { mimeForFileName } from "../_shared/storage.ts";
-import { type DriveItem, GDRIVE_PREFIX, getAccessTokenForOwner, listDriveTree, uploadBytesToDrive } from "../_shared/googleDrive.ts";
+import { type DriveItem, GDRIVE_PREFIX, getAccessTokenForOwner, listDriveTree, trashDriveItem, uploadBytesToDrive } from "../_shared/googleDrive.ts";
 import { FILE_TABLES, organizeDrive } from "../_shared/driveOrganize.ts";
 
 /**
@@ -158,16 +158,6 @@ function remapDriveMarkers(value: unknown, remap: Map<string, string>, reference
   return { changed: false, value };
 }
 
-/** Moves to Drive's trash rather than deleting outright — recoverable for 30 days. */
-async function trashDriveFile(accessToken: string, fileId: string): Promise<boolean> {
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ trashed: true }),
-  });
-  return res.ok;
-}
-
 const PAGE_SIZE = 20;
 const PRIMARY_KEY: Record<string, string> = { gold_details: "assetId", etf_details: "assetId" };
 
@@ -262,7 +252,7 @@ async function dedupeDrive(supabase: SupabaseClient, ownerId: string, accessToke
   let trashed = 0;
   if (apply && scanErrors.length === 0) {
     for (const f of unreferenced) {
-      if (await trashDriveFile(accessToken, f.id)) trashed++;
+      if (await trashDriveItem(accessToken, f.id)) trashed++;
     }
   }
 

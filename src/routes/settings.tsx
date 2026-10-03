@@ -474,7 +474,7 @@ function ConnectedGoogleDriveSettings() {
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
           Files you upload — photos, receipts, leases, statements — are stored in your own Google
-          Drive, not a shared bucket, filed into a folder per property and document type. The app
+          Drive, not a shared bucket, filed by property, financial year and document type. The app
           can only see files it creates there, never anything else already in your Drive.
         </p>
         {loading ? (

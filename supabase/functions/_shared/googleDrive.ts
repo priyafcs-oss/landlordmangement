@@ -315,3 +315,14 @@ export async function moveDriveFile(accessToken: string, fileId: string, fromPar
   if (!res.ok) console.error("[googleDrive] move failed", fileId, res.status, await res.text());
   return res.ok;
 }
+
+/** Moves a file or folder to Drive's trash rather than deleting it outright — recoverable for 30
+ * days. */
+export async function trashDriveItem(accessToken: string, id: string): Promise<boolean> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  return res.ok;
+}
