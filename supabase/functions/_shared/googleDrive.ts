@@ -150,9 +150,10 @@ export async function uploadBytesToDrive(
   bytes: Uint8Array,
   fileName: string,
   mimeType: string,
+  appProperties?: Record<string, string>,
 ): Promise<string | null> {
   const boundary = `landlordos-${crypto.randomUUID()}`;
-  const metadata = JSON.stringify({ name: sanitizeFileName(fileName), parents: [rootFolderId] });
+  const metadata = JSON.stringify({ name: sanitizeFileName(fileName), parents: [rootFolderId], ...(appProperties ? { appProperties } : {}) });
   const encoder = new TextEncoder();
   const parts: Uint8Array[] = [
     encoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`),
