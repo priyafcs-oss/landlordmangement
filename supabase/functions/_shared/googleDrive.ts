@@ -198,25 +198,120 @@ export async function downloadBytesFromDrive(
   return { bytes, contentType };
 }
 
-/** Paginated listing of every file under the owner's root folder, for the usage summary — Drive
- * returns `size` as a string for binary files (this app never creates native Google Docs/Sheets,
- * which have no size field, so a plain Number() is safe here without extra guarding). */
-export async function listDriveFiles(accessToken: string, rootFolderId: string): Promise<{ id: string; size: number }[]> {
-  const files: { id: string; size: number }[] = [];
+export const FOLDER_MIME = "application/vnd.google-apps.folder";
+
+export interface DriveItem {
+  id: string;
+  name?: string;
+  parents?: string[];
+  size?: string;
+  md5Checksum?: string;
+  createdTime?: string;
+  appProperties?: Record<string, string>;
+}
+
+/** Every page of a files.list query — null on any failed page, so a caller can never mistake a
+ * partial listing for a complete one. */
+async function listAll(accessToken: string, q: string, fields: string): Promise<DriveItem[] | null> {
+  const items: DriveItem[] = [];
   let pageToken: string | undefined;
   do {
-    const q = encodeURIComponent(`'${rootFolderId}' in parents and trashed=false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,size)&pageSize=1000${pageToken ? `&pageToken=${pageToken}` : ""}`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(${fields})&pageSize=1000${pageToken ? `&pageToken=${pageToken}` : ""}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (!res.ok) {
       console.error("[googleDrive] list failed", res.status, await res.text());
-      break;
+      return null;
     }
     const data = await res.json();
-    for (const f of data.files ?? []) {
-      files.push({ id: f.id, size: Number(f.size ?? 0) });
-    }
+    items.push(...(data.files ?? []));
     pageToken = data.nextPageToken;
   } while (pageToken);
-  return files;
+  return items;
+}
+
+export interface DriveTree {
+  /** Every folder under (and including) the root, by id. */
+  folders: Map<string, DriveItem>;
+  /** Every non-folder file anywhere under the root. */
+  files: DriveItem[];
+}
+
+/**
+ * Files live in per-property/per-type subfolders under the owner's root folder (see
+ * ./driveOrganize.ts), not directly in it — so a `'<root>' in parents` query no longer finds them.
+ * Lists every folder and file this app can see (scope drive.file: only what it created) and keeps
+ * just the ones that descend from the root, so nothing outside "Landlord OS Documents" is ever
+ * counted, deduped or moved even if the app created it.
+ */
+export async function listDriveTree(accessToken: string, rootFolderId: string): Promise<DriveTree | null> {
+  const [allFolders, allFiles] = await Promise.all([
+    listAll(accessToken, `mimeType='${FOLDER_MIME}' and trashed=false`, "id,name,parents,appProperties"),
+    listAll(accessToken, `mimeType!='${FOLDER_MIME}' and trashed=false`, "id,name,parents,size,md5Checksum,createdTime"),
+  ]);
+  if (!allFolders || !allFiles) return null;
+
+  const byId = new Map(allFolders.map((f) => [f.id, f]));
+  const inTree = new Map<string, boolean>([[rootFolderId, true]]);
+  const isInTree = (id: string, seen = new Set<string>()): boolean => {
+    const known = inTree.get(id);
+    if (known !== undefined) return known;
+    const parent = byId.get(id)?.parents?.[0];
+    const result = !!parent && !seen.has(id) && isInTree(parent, seen.add(id));
+    inTree.set(id, result);
+    return result;
+  };
+
+  const folders = new Map<string, DriveItem>();
+  folders.set(rootFolderId, { id: rootFolderId });
+  for (const f of allFolders) if (isInTree(f.id)) folders.set(f.id, f);
+  const files = allFiles.filter((f) => (f.parents ?? []).some((p) => folders.has(p)));
+  return { folders, files };
+}
+
+/** Every file under the owner's root folder, at any depth, for the usage summary — Drive returns
+ * `size` as a string for binary files (this app never creates native Google Docs/Sheets, which
+ * have no size field, so a plain Number() is safe here without extra guarding). */
+export async function listDriveFiles(accessToken: string, rootFolderId: string): Promise<{ id: string; size: number }[]> {
+  const tree = await listDriveTree(accessToken, rootFolderId);
+  return (tree?.files ?? []).map((f) => ({ id: f.id, size: Number(f.size ?? 0) }));
+}
+
+export async function createDriveFolder(
+  accessToken: string,
+  name: string,
+  parentId: string,
+  appProperties?: Record<string, string>,
+): Promise<string | null> {
+  const res = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parentId], ...(appProperties ? { appProperties } : {}) }),
+  });
+  if (!res.ok) {
+    console.error("[googleDrive] failed to create folder", res.status, await res.text());
+    return null;
+  }
+  return (await res.json()).id ?? null;
+}
+
+export async function renameDriveItem(accessToken: string, id: string, name: string): Promise<boolean> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return res.ok;
+}
+
+/** A moved file keeps its id, so every "gdrive:<fileId>" marker pointing at it stays valid. */
+export async function moveDriveFile(accessToken: string, fileId: string, fromParents: string[], toParent: string): Promise<boolean> {
+  const params = new URLSearchParams({ addParents: toParent, fields: "id" });
+  if (fromParents.length) params.set("removeParents", fromParents.join(","));
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?${params}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!res.ok) console.error("[googleDrive] move failed", fileId, res.status, await res.text());
+  return res.ok;
 }

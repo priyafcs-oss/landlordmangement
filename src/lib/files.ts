@@ -42,6 +42,44 @@ function isGoogleDrivePath(value: string): boolean {
   return value.startsWith(GDRIVE_PREFIX);
 }
 
+/** True for a value that already points at an uploaded file (either backend) — as opposed to raw
+ * base64 that still needs uploading. */
+export function isStoredFileMarker(value: string): boolean {
+  return isStoragePath(value) || isGoogleDrivePath(value);
+}
+
+let organizeTimer: ReturnType<typeof setTimeout> | undefined;
+let organizeInFlight = false;
+let organizeQueued = false;
+
+/**
+ * Files the signed-in landlord's Drive documents into per-property/per-type folders (see
+ * supabase/functions/_shared/driveOrganize.ts). Debounced, and never more than one run at a time,
+ * so a burst of saves (an AI intake approval writing several rows) is one pass, and two passes
+ * can't race each other into creating the same folder twice. Fire-and-forget: a failure only
+ * means files stay where they are until the next save, and a not-connected landlord just gets a
+ * handled 422.
+ */
+export function scheduleDriveOrganize(delayMs = 4000) {
+  clearTimeout(organizeTimer);
+  organizeTimer = setTimeout(async () => {
+    if (organizeInFlight) {
+      organizeQueued = true;
+      return;
+    }
+    organizeInFlight = true;
+    try {
+      await supabase.functions.invoke("drive-organize");
+    } finally {
+      organizeInFlight = false;
+      if (organizeQueued) {
+        organizeQueued = false;
+        scheduleDriveOrganize();
+      }
+    }
+  }, delayMs);
+}
+
 function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_").slice(-100);
 }

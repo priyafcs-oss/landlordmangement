@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { uploadDocumentBase64 } from "./files";
+import { isStoredFileMarker, scheduleDriveOrganize, uploadDocumentBase64 } from "./files";
 
 /** Table names in the cloud database, keyed by the in-app collection name. */
 export const TABLES = {
@@ -156,7 +156,7 @@ async function migrateFileFieldsToStorage(value: unknown): Promise<unknown> {
     const obj = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [key, v] of Object.entries(obj)) {
-      if (isFileDataKey(key) && typeof v === "string" && v.length > 0 && !v.startsWith("storage:")) {
+      if (isFileDataKey(key) && typeof v === "string" && v.length > 0 && !isStoredFileMarker(v)) {
         const nameKey = nameKeyCandidates(key).find((k) => typeof obj[k] === "string");
         const fileName = nameKey ? (obj[nameKey] as string) : undefined;
         out[key] = await uploadDocumentBase64(v, fileName);
@@ -169,16 +169,24 @@ async function migrateFileFieldsToStorage(value: unknown): Promise<unknown> {
   return value;
 }
 
+/** A saved row that references a Drive file may have just added it, or changed which property it
+ * belongs to — either way it may now be in the wrong folder. */
+function organizeIfDriveFile(processed: Record<string, unknown>) {
+  if (JSON.stringify(processed).includes('"gdrive:')) scheduleDriveOrganize();
+}
+
 export async function upsertRow(table: string, row: Record<string, unknown>) {
   const processed = (await migrateFileFieldsToStorage(row)) as Record<string, unknown>;
   const { error } = await db.from(table).upsert(stripUndefined(processed));
   report(`upsert ${table}`, error);
+  if (!error) organizeIfDriveFile(processed);
 }
 
 export async function updateRow(table: string, id: string, patch: Record<string, unknown>) {
   const processed = (await migrateFileFieldsToStorage(patch)) as Record<string, unknown>;
   const { error } = await db.from(table).update(stripUndefined(processed)).eq("id", id);
   report(`update ${table}`, error);
+  if (!error) organizeIfDriveFile(processed);
 }
 
 export async function deleteRow(table: string, id: string) {

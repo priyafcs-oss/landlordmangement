@@ -86,3 +86,7 @@ verify_jwt = false
 # own doc comment.
 [functions.migrate-storage-to-drive]
 verify_jwt = false
+
+# Verifies the caller's session in-function, like drive-upload.
+[functions.drive-organize]
+verify_jwt = false

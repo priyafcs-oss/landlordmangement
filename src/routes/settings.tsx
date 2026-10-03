@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
-import { readFileAsDataUrl, formatFileSize } from "@/lib/files";
+import { readFileAsDataUrl, formatFileSize, edgeFunctionErrorMessage } from "@/lib/files";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -452,6 +452,15 @@ function ConnectedGoogleDriveSettings() {
     load();
   };
 
+  // Runs automatically after saves too (src/lib/db.ts) — this is for an on-demand full re-file.
+  const organize = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke("drive-organize");
+    setBusy(false);
+    if (error) return toast.error(await edgeFunctionErrorMessage(error));
+    toast.success(data?.moved ? `Moved ${data.moved} file${data.moved === 1 ? "" : "s"} into folders` : "Everything's already in its folder");
+  };
+
   const isConnected = connection?.status === "connected";
 
   return (
@@ -465,8 +474,8 @@ function ConnectedGoogleDriveSettings() {
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
           Files you upload — photos, receipts, leases, statements — are stored in your own Google
-          Drive, not a shared bucket. The app can only see files it creates there, never anything
-          else already in your Drive.
+          Drive, not a shared bucket, filed into a folder per property and document type. The app
+          can only see files it creates there, never anything else already in your Drive.
         </p>
         {loading ? (
           <div className="text-xs text-muted-foreground">Loading…</div>
@@ -476,9 +485,14 @@ function ConnectedGoogleDriveSettings() {
               <div className="text-sm font-medium">Connected</div>
               {connection?.connected_email && <div className="text-xs text-muted-foreground">{connection.connected_email}</div>}
             </div>
-            <Button variant="outline" size="sm" disabled={busy} onClick={disconnect}>
-              Disconnect
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={busy} onClick={organize}>
+                Organise into folders
+              </Button>
+              <Button variant="outline" size="sm" disabled={busy} onClick={disconnect}>
+                Disconnect
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">

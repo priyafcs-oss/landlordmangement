@@ -1,7 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { mimeForFileName } from "../_shared/storage.ts";
-import { GDRIVE_PREFIX, getAccessTokenForOwner, uploadBytesToDrive } from "../_shared/googleDrive.ts";
+import { type DriveItem, GDRIVE_PREFIX, getAccessTokenForOwner, listDriveTree, uploadBytesToDrive } from "../_shared/googleDrive.ts";
+import { FILE_TABLES, organizeDrive } from "../_shared/driveOrganize.ts";
 
 /**
  * One-off, per-owner migration: moves everything a single connected landlord still has in the
@@ -18,41 +19,10 @@ import { GDRIVE_PREFIX, getAccessTokenForOwner, uploadBytesToDrive } from "../_s
  * Run via: `curl -X POST "https://<project>.functions.supabase.co/migrate-storage-to-drive?ownerId=<uuid>" -H "x-migrate-secret: <DRIVE_MIGRATE_SECRET>"`.
  * `?report=1&ownerId=<uuid>` instead just sums that owner's remaining Supabase Storage footprint,
  * with no writes — use it to confirm nothing is left before retiring the bucket for good.
+ * `?dedupe=1` and `?organize=1` are follow-up passes over the migrated Drive files — see
+ * dedupeDrive below and ../_shared/driveOrganize.ts.
  */
-const TABLES = [
-  "properties",
-  "tenants",
-  "ledger_entries",
-  "tenant_invoices",
-  "loans",
-  "expenses",
-  "inspections",
-  "rent_changes",
-  "lease_history",
-  "maintenance_requests",
-  "property_bills",
-  "ai_intake_proposals",
-  "email_inbox_log",
-  "providers",
-  "provider_agreements",
-  "provider_properties",
-  "entities",
-  "assets",
-  "gold_details",
-  "etf_details",
-  "depreciation_items",
-  "valuation_snapshots",
-  "loan_balance_snapshots",
-  "loan_statements",
-  "buffers",
-  "bank_accounts",
-  "insurance_policies",
-  "maintenance_items",
-  "compliance_certificates",
-  "property_notes",
-  "provider_documents",
-  "app_settings",
-];
+const TABLES = FILE_TABLES;
 
 const DOCUMENTS_BUCKET = "documents";
 const STORAGE_PREFIX = "storage:";
@@ -87,8 +57,8 @@ async function sourcePathTag(path: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function findDriveFileBySourceTag(accessToken: string, rootFolderId: string, tag: string): Promise<string | null> {
-  const q = encodeURIComponent(`'${rootFolderId}' in parents and trashed=false and appProperties has { key='${SOURCE_PROPERTY}' and value='${tag}' }`);
+async function findDriveFileBySourceTag(accessToken: string, tag: string): Promise<string | null> {
+  const q = encodeURIComponent(`trashed=false and appProperties has { key='${SOURCE_PROPERTY}' and value='${tag}' }`);
   const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=1`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -115,7 +85,7 @@ function migrateStoragePath(ctx: MigrateContext, path: string, fileName: string 
   if (!pending) {
     pending = (async () => {
       const tag = await sourcePathTag(path);
-      const existing = await findDriveFileBySourceTag(ctx.accessToken, ctx.rootFolderId, tag);
+      const existing = await findDriveFileBySourceTag(ctx.accessToken, tag);
       if (existing) return existing;
       const downloaded = await downloadFromBucket(ctx.supabase, path);
       if (!downloaded) return null;
@@ -186,31 +156,6 @@ function remapDriveMarkers(value: unknown, remap: Map<string, string>, reference
     return { changed, value: changed ? out : value };
   }
   return { changed: false, value };
-}
-
-interface DriveFileInfo {
-  id: string;
-  md5Checksum?: string;
-  size?: string;
-  createdTime: string;
-}
-
-async function listDriveFilesWithChecksums(accessToken: string, rootFolderId: string): Promise<DriveFileInfo[] | null> {
-  const files: DriveFileInfo[] = [];
-  let pageToken: string | undefined;
-  do {
-    const q = encodeURIComponent(`'${rootFolderId}' in parents and trashed=false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,md5Checksum,size,createdTime)&pageSize=1000${pageToken ? `&pageToken=${pageToken}` : ""}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) {
-      console.error("[migrate-storage-to-drive] list failed", res.status, await res.text());
-      return null;
-    }
-    const data = await res.json();
-    files.push(...(data.files ?? []));
-    pageToken = data.nextPageToken;
-  } while (pageToken);
-  return files;
 }
 
 /** Moves to Drive's trash rather than deleting outright — recoverable for 30 days. */
@@ -289,10 +234,11 @@ async function rewriteOwnerRows(
  * deletes a Drive file when a row is removed, the same as the shared-path Storage it replaced.
  */
 async function dedupeDrive(supabase: SupabaseClient, ownerId: string, accessToken: string, rootFolderId: string, apply: boolean) {
-  const files = await listDriveFilesWithChecksums(accessToken, rootFolderId);
-  if (!files) return { ok: false, error: "Couldn't list the owner's Drive folder" };
+  const tree = await listDriveTree(accessToken, rootFolderId);
+  if (!tree) return { ok: false, error: "Couldn't list the owner's Drive folder" };
+  const files = tree.files;
 
-  const byChecksum = new Map<string, DriveFileInfo[]>();
+  const byChecksum = new Map<string, DriveItem[]>();
   for (const f of files) {
     if (!f.md5Checksum) continue;
     const group = byChecksum.get(f.md5Checksum) ?? [];
@@ -302,7 +248,7 @@ async function dedupeDrive(supabase: SupabaseClient, ownerId: string, accessToke
   const remap = new Map<string, string>();
   for (const group of byChecksum.values()) {
     if (group.length < 2) continue;
-    group.sort((a, b) => a.createdTime.localeCompare(b.createdTime));
+    group.sort((a, b) => (a.createdTime ?? "").localeCompare(b.createdTime ?? ""));
     for (const dup of group.slice(1)) remap.set(GDRIVE_PREFIX + dup.id, GDRIVE_PREFIX + group[0].id);
   }
 
@@ -386,6 +332,11 @@ Deno.serve(async (req) => {
   const token = await getAccessTokenForOwner(supabase, ownerId, "admin");
   if (!token) {
     return json({ error: "This owner hasn't connected Google Drive yet — connect it in Settings first" }, 400);
+  }
+
+  if (url.searchParams.get("organize") === "1") {
+    const result = await organizeDrive(supabase, ownerId, token.accessToken, token.rootFolderId);
+    return json({ ownerId, ...result }, result.ok ? 200 : 500);
   }
 
   if (url.searchParams.get("dedupe") === "1") {
