@@ -112,7 +112,7 @@ async function migrateValue(
           ? await uploadBytesToDrive(accessToken, rootFolderId, downloaded.bytes, fileName || "file", downloaded.contentType || mimeForFileName(fileName))
           : null;
         out[key] = marker ?? v; // keep the original storage: marker on any failure — never drop the file
-        changed = marker !== null;
+        if (marker !== null) changed = true; // never reset — an earlier key in this object may already have changed
       } else {
         const r = await migrateValue(supabase, accessToken, rootFolderId, v);
         out[key] = r.value;
