@@ -308,6 +308,17 @@ export function ProposalReviewDialog({
     if (proposalId && !allowAnyStatus && !isPending) onOpenChange(false);
   }, [proposalId, isPending, allowAnyStatus, onOpenChange]);
 
+  // A reopened already-applied proposal never leaves "pending" (it isn't in it), so the guard above
+  // can't close it after its confirm — instead close on a fresh apply since it was opened. Left
+  // open, its card re-ran its duplicate check against the rows it had just added and showed a
+  // "Possible duplicate" warning for the very payment that was just recorded.
+  const appliedAtOpen = useRef<{ id: string | null; at: number | undefined }>({ id: null, at: undefined });
+  if (appliedAtOpen.current.id !== proposalId) appliedAtOpen.current = { id: proposalId, at: proposal?.appliedAt };
+  const appliedAt = proposal?.appliedAt;
+  useEffect(() => {
+    if (proposalId && appliedAt !== undefined && appliedAt !== appliedAtOpen.current.at) onOpenChange(false);
+  }, [proposalId, appliedAt, onOpenChange]);
+
   if (!proposal || (!allowAnyStatus && !isPending)) return null;
 
   // Bills and one-off transactions get the real Add Bill / Add Transaction forms, pre-filled

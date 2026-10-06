@@ -1738,7 +1738,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void updateRow(TABLES.aiProposals, id, { status: "applied", ...patch });
       set((s) => ({
         ...s,
-        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, ...patch, status: "applied" as const } : x)),
+        aiProposals: s.aiProposals.map((x) => (x.id === id ? { ...x, ...patch, status: "applied" as const, appliedAt: Date.now() } : x)),
       }));
     },
     updateProposal: (id, patch) => {

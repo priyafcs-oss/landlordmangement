@@ -1313,6 +1313,10 @@ export interface ExpenseProposalPayload {
 
 export interface AiIntakeProposal {
   id: string;
+  /** Client-only, never persisted: bumped by the store's markProposalApplied each time this
+   * proposal is applied, including a re-apply of an already-"applied" one (whose status doesn't
+   * change) — what ProposalReviewDialog watches to close itself after a confirm. */
+  appliedAt?: number;
   /** Server-set on insert — when this document was received, used for the Documents archive. */
   created_at?: string;
   kind:
