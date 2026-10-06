@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import { isStoredFileMarker, scheduleDriveOrganize, uploadDocumentBase64 } from "./files";
 
 /** Table names in the cloud database, keyed by the in-app collection name. */
@@ -84,6 +85,37 @@ export async function clearProviderPortalPassword(providerId: string): Promise<b
 
 function report(context: string, error: unknown) {
   if (error) console.error(`[cloud] ${context}`, error);
+}
+
+/**
+ * Every write below is fire-and-forget from store.tsx, which updates its in-memory state (and the
+ * localStorage cache) first — so a failed write used to show only in the console while the screen
+ * kept displaying the change, until the next reload quietly dropped it. That is exactly how two
+ * approved agent statements lost their rent payments without anyone noticing. Say so on screen.
+ */
+function reportWriteFailure(context: string, error: unknown) {
+  console.error(`[cloud] ${context}`, error);
+  toast.error("A change didn't save", {
+    id: "cloud-write-failed",
+    description: "Refresh the page to see what was actually saved, then try that change again.",
+    duration: Infinity,
+  });
+}
+
+/** Runs one write, reporting both a returned Supabase error and anything thrown before or during
+ * it (e.g. a file upload failing inside migrateFileFieldsToStorage). */
+async function write(context: string, run: () => Promise<{ error: unknown } | void>): Promise<boolean> {
+  try {
+    const result = await run();
+    if (result && result.error) {
+      reportWriteFailure(context, result.error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    reportWriteFailure(context, e);
+    return false;
+  }
 }
 
 export async function selectAll<T>(table: string): Promise<T[]> {
@@ -176,33 +208,34 @@ function organizeIfDriveFile(processed: Record<string, unknown>) {
 }
 
 export async function upsertRow(table: string, row: Record<string, unknown>) {
-  const processed = (await migrateFileFieldsToStorage(row)) as Record<string, unknown>;
-  const { error } = await db.from(table).upsert(stripUndefined(processed));
-  report(`upsert ${table}`, error);
-  if (!error) organizeIfDriveFile(processed);
+  let processed: Record<string, unknown> = {};
+  const ok = await write(`upsert ${table}`, async () => {
+    processed = (await migrateFileFieldsToStorage(row)) as Record<string, unknown>;
+    return db.from(table).upsert(stripUndefined(processed));
+  });
+  if (ok) organizeIfDriveFile(processed);
 }
 
 export async function updateRow(table: string, id: string, patch: Record<string, unknown>) {
-  const processed = (await migrateFileFieldsToStorage(patch)) as Record<string, unknown>;
-  const { error } = await db.from(table).update(stripUndefined(processed)).eq("id", id);
-  report(`update ${table}`, error);
-  if (!error) organizeIfDriveFile(processed);
+  let processed: Record<string, unknown> = {};
+  const ok = await write(`update ${table}`, async () => {
+    processed = (await migrateFileFieldsToStorage(patch)) as Record<string, unknown>;
+    return db.from(table).update(stripUndefined(processed)).eq("id", id);
+  });
+  if (ok) organizeIfDriveFile(processed);
 }
 
 export async function deleteRow(table: string, id: string) {
-  const { error } = await db.from(table).delete().eq("id", id);
-  report(`delete ${table}`, error);
+  await write(`delete ${table}`, async () => db.from(table).delete().eq("id", id));
 }
 
 export async function deleteWhere(table: string, column: string, value: string) {
-  const { error } = await db.from(table).delete().eq(column, value);
-  report(`delete ${table} by ${column}`, error);
+  await write(`delete ${table} by ${column}`, async () => db.from(table).delete().eq(column, value));
 }
 
 export async function deleteWhereIn(table: string, column: string, values: string[]) {
   if (values.length === 0) return;
-  const { error } = await db.from(table).delete().in(column, values);
-  report(`delete ${table} by ${column} in`, error);
+  await write(`delete ${table} by ${column} in`, async () => db.from(table).delete().in(column, values));
 }
 
 export async function loadSettings() {
@@ -222,10 +255,11 @@ export async function loadSettings() {
 export async function saveSettings(patch: Record<string, unknown>) {
   const ownerId = await effectiveOwnerId();
   if (!ownerId) return;
-  const { error } = await db
-    .from(SETTINGS_TABLE)
-    .upsert({ id: ownerId, owner_id: ownerId, ...patch, updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
-  report("save settings", error);
+  await write("save settings", async () =>
+    db
+      .from(SETTINGS_TABLE)
+      .upsert({ id: ownerId, owner_id: ownerId, ...patch, updated_at: new Date().toISOString() }, { onConflict: "owner_id" }),
+  );
 }
 
 /**
