@@ -303,6 +303,12 @@ export interface LedgerRow {
   source?: LedgerEntry["source"];
 }
 
+/** A ledger entry for something the tenant is recharged for (not rent) — it never advances the
+ * paid-up-to date, see paidUpToDetails. */
+function isNonRentRecharge(e: LedgerEntry): boolean {
+  return e.type === "Water Invoice" || e.type === "Maintenance Charge";
+}
+
 /**
  * Build the full running-balance ledger for a tenant.
  * Weekly rent cycles are 7 days; a cycle spans cursor .. cursor+period-1 inclusive
@@ -360,11 +366,17 @@ export function buildTenantLedger(
   entries
     .filter((e) => e.tenantId === tenant.id)
     .forEach((e) => {
+      // A recharge line on an agent statement (water usage, ...) is the tenant paying a charge
+      // that was never itself posted here — on its own it reads as pure credit, so every water
+      // payment made the tenant look that much ahead on rent, and the only way to square it was a
+      // manual Adjustment Debit, which paidUpToDetails then (correctly, for rent) subtracted from
+      // rent paid. Show it as charged-and-paid on the one row so it nets to zero.
+      const selfSettlingRecharge = isNonRentRecharge(e) && e.credit > 0 && !e.debit;
       rows.push({
         id: e.id,
         date: e.date,
         description: `${e.type}: ${e.description}`,
-        debit: e.debit,
+        debit: selfSettlingRecharge ? e.credit : e.debit,
         credit: e.credit,
         balance: 0,
         entryId: e.id,
