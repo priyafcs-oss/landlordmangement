@@ -662,6 +662,14 @@ function namesOverlap(a: string, b: string): boolean {
   return aParts.some((p) => bParts.includes(p));
 }
 
+/** An agent ownership statement runs up to the day it's issued, so when extraction found a start
+ * but no printed end date (e.g. statement 47: "31/08/2026 → —", issued 18/09/2026), its own
+ * document date is the end of the period it covers. */
+function rentStatementPeriodEnd(p: AiIntakeProposal): string | undefined {
+  const payload = p.payload as RentLedgerProposalPayload;
+  return payload.periodEnd ?? (payload.periodStart ? p.documentDate : undefined);
+}
+
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
   const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied, refreshOne, removeOne } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
@@ -1018,7 +1026,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           <Badge variant="secondary">Rent statement</Badge>
           {payload.tenantName && <span className="font-medium">{payload.tenantName}</span>}
           <span className="text-xs text-muted-foreground">
-            {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+            {payload.periodStart || "—"} → {rentStatementPeriodEnd(proposal) || "—"}
           </span>
           {(postedTxForThisStatement.length > 0 || postedExpForThisStatement.length > 0) && (
             <Badge variant="outline" className="text-[10px] text-muted-foreground">
@@ -7748,7 +7756,7 @@ function AgentStatementsSection({
   // periodStart put it in the wrong month AND the wrong financial year.
   const periodOf = (p: AiIntakeProposal) => {
     const payload = p.payload as RentLedgerProposalPayload;
-    return payload.periodEnd ?? payload.periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
+    return rentStatementPeriodEnd(p) ?? payload.periodStart ?? p.documentDate ?? p.created_at?.slice(0, 10) ?? "";
   };
 
   // On a changeover statement, the statement's OWN overall tenantName is often left blank —
@@ -7838,7 +7846,7 @@ function AgentStatementsSection({
     return (
       <tr key={p.id} className={`border-b text-xs last:border-b-0 ${discrepancy ? "bg-destructive/5" : ""}`}>
         <td className="px-3 py-2 whitespace-nowrap font-medium">
-          {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+          {payload.periodStart || "—"} → {rentStatementPeriodEnd(p) || "—"}
         </td>
         <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{fmtModified(p.created_at) ?? "—"}</td>
         <td className="min-w-0 max-w-[220px] truncate px-3 py-2 text-muted-foreground" title={p.sourceFileName ?? undefined}>
