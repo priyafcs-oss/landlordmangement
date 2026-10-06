@@ -411,6 +411,10 @@ export interface LedgerEntry {
    * edit can explicitly clear it (updateLedger's DB write only drops `undefined` keys). */
   sourceFileName?: string | null;
   sourceFileData?: string | null;
+  /** Set when this payment was recorded from a bank account's compiled feed (source:
+   * "bank_feed") — the same link Expense carries, see BankAccounts.tsx's buildFeedRows. */
+  feedProposalId?: string;
+  feedLineIndex?: number;
 }
 
 export interface TenantInvoice {

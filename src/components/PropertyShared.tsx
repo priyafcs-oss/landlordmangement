@@ -53,7 +53,7 @@ import {
   Lock,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified } from "@/lib/calculations";
+import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -2213,7 +2213,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
 }
 
 function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addExpense, addBankAccount, updateProposal, markBillPaid, markProposalApplied } = useStore();
+  const { addLedger, state, addExpense, addBankAccount, updateProposal, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as BankStatementProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [bankAccountId, setBankAccountId] = useState(proposal.bankAccountId ?? "");
@@ -2276,6 +2276,17 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
     toast.success("Bank account created");
   };
 
+  // Incoming rent goes on a tenant's ledger, not into Expenses — see RENT_INCOME_CATEGORY.
+  const [rentTenantIds, setRentTenantIds] = useState<string[]>(() => payload.transactions.map(() => ""));
+  const tenantsHere = state.tenants.filter((t) => t.propertyId === propertyId);
+  const defaultRentTenantId = likelyRentTenantId(state.tenants, state.ledger, propertyId) ?? "";
+  const rentTenantFor = (i: number) =>
+    payload.transactions[i].direction === "in" && categories[i] === RENT_INCOME_CATEGORY && tenantsHere.length > 0
+      ? tenantsHere.some((t) => t.id === rentTenantIds[i])
+        ? rentTenantIds[i]
+        : defaultRentTenantId
+      : "";
+
   const confirm = () => {
     if (!propertyId) return toast.error("Select a property first");
     let count = 0;
@@ -2284,6 +2295,24 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       const match = billMatches[i];
       if (match && matchAsBill[i]) {
         markBillPaid(match.id, { paidDate: tx.date });
+        count++;
+        return;
+      }
+      const rentTenantId = rentTenantFor(i);
+      if (rentTenantId) {
+        addLedger({
+          tenantId: rentTenantId,
+          date: tx.date,
+          type: "Rent Payment",
+          description: tx.description,
+          debit: 0,
+          credit: tx.amount,
+          source: "bank_feed",
+          sourceFileName: proposal.sourceFileName,
+          sourceFileData: proposal.sourceFileData,
+          feedProposalId: proposal.id,
+          feedLineIndex: i,
+        });
         count++;
         return;
       }
@@ -2416,6 +2445,26 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                       ))}
                     </SelectContent>
                   </Select>
+                  {rentTenantFor(i) && (
+                    <>
+                      <span className="text-[11px] text-muted-foreground">Tenant ledger:</span>
+                      <Select
+                        value={rentTenantFor(i)}
+                        onValueChange={(v) => setRentTenantIds((ids) => ids.map((x, j) => (j === i ? v : x)))}
+                      >
+                        <SelectTrigger className="h-6 w-[190px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {tenantsHere.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </>
+                  )}
                 </div>
               )}
               {billMatches[i] && (

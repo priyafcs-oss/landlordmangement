@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "@/lib/store";
-import { fmtCurrency, expenseCategoryToTaxCategory } from "@/lib/calculations";
+import { fmtCurrency, expenseCategoryToTaxCategory, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +31,7 @@ import type {
   BankAccount,
   BankStatementProposalPayload,
   ExpenseCategory,
+  LedgerEntry,
 } from "@/lib/types";
 
 interface FeedRow {
@@ -47,17 +48,22 @@ interface FeedRow {
   sourceFileData?: string;
   recorded: boolean;
   expenseId?: string;
+  /** Set instead of expenseId when the line was recorded as a tenant's rent payment. */
+  ledgerEntryId?: string;
 }
+
 
 function buildFeedRows(
   proposals: AiIntakeProposal[],
   expenses: ReturnType<typeof useStore>["state"]["expenses"],
+  ledger: LedgerEntry[],
 ): FeedRow[] {
   const rows: FeedRow[] = [];
   for (const p of proposals) {
     const payload = p.payload as BankStatementProposalPayload;
     payload.transactions.forEach((tx, i) => {
       const match = expenses.find((e) => e.feedProposalId === p.id && e.feedLineIndex === i);
+      const ledgerMatch = match ? undefined : ledger.find((e) => e.feedProposalId === p.id && e.feedLineIndex === i);
       rows.push({
         proposalId: p.id,
         lineIndex: i,
@@ -70,8 +76,9 @@ function buildFeedRows(
         suggestedPropertyId: p.propertyId,
         sourceFileName: p.sourceFileName,
         sourceFileData: p.sourceFileData,
-        recorded: !!match,
+        recorded: !!match || !!ledgerMatch,
         expenseId: match?.id,
+        ledgerEntryId: ledgerMatch?.id,
       });
     });
   }
@@ -88,11 +95,18 @@ function RecordTransactionDialog({
 }: {
   recording: FeedRow | null;
   onClose: () => void;
-  onRecord: (row: FeedRow, propertyId: string, category: string) => void;
+  onRecord: (row: FeedRow, propertyId: string, category: string, tenantId?: string) => void;
 }) {
   const { state } = useStore();
   const [category, setCategory] = useState<string>("");
   const [propertyId, setPropertyId] = useState("");
+  const [tenantId, setTenantId] = useState("");
+
+  const isRent = recording?.direction === "in" && category === RENT_INCOME_CATEGORY;
+  const tenantsHere = state.tenants.filter((t) => t.propertyId === propertyId);
+  const chosenTenantId = tenantsHere.some((t) => t.id === tenantId)
+    ? tenantId
+    : (likelyRentTenantId(state.tenants, state.ledger, propertyId) ?? "");
 
   // Re-seed whenever a different row opens — a stale category/property from the previous row
   // must never carry over into this one.
@@ -110,6 +124,7 @@ function RecordTransactionDialog({
   const close = () => {
     setCategory("");
     setPropertyId("");
+    setTenantId("");
     onClose();
   };
 
@@ -160,6 +175,25 @@ function RecordTransactionDialog({
                 </SelectContent>
               </Select>
             </Field>
+            {isRent && tenantsHere.length > 0 && (
+              <>
+                <Field label="Tenant">
+                  <Select value={chosenTenantId} onValueChange={setTenantId}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tenantsHere.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <p className="text-xs text-muted-foreground">Recorded as a rent payment on this tenant's ledger.</p>
+              </>
+            )}
           </div>
         )}
         <DialogFooter>
@@ -170,7 +204,7 @@ function RecordTransactionDialog({
             onClick={() => {
               if (!recording) return;
               if (!propertyId) return toast.error("Select which property this belongs to");
-              onRecord(recording, propertyId, category);
+              onRecord(recording, propertyId, category, isRent ? chosenTenantId || undefined : undefined);
               close();
             }}
           >
@@ -180,6 +214,64 @@ function RecordTransactionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Recording/unrecording a feed line — shared by a specific account's feed and the unassigned
+ * bucket. */
+function useFeedRecording() {
+  const { addExpense, deleteExpense, addLedger, deleteLedger, markProposalApplied } = useStore();
+
+  const record = (row: FeedRow, propertyId: string, category: string, tenantId?: string) => {
+    if (tenantId) {
+      addLedger({
+        tenantId,
+        date: row.date,
+        type: "Rent Payment",
+        description: row.description,
+        debit: 0,
+        credit: row.amount,
+        source: "bank_feed",
+        sourceFileName: row.sourceFileName,
+        sourceFileData: row.sourceFileData,
+        feedProposalId: row.proposalId,
+        feedLineIndex: row.lineIndex,
+      });
+    } else {
+      addExpense({
+        itemName: row.description,
+        cost: row.amount,
+        date: row.date,
+        propertyId,
+        direction: row.direction === "in" ? "Income" : undefined,
+        category: category as ExpenseCategory,
+        taxCategory:
+          row.direction === "out" ? expenseCategoryToTaxCategory(category) : "Immediate Deduction",
+        providerId: row.providerId,
+        providerName: row.suggestedProviderName,
+        hasWarranty: false,
+        rechargeToTenant: false,
+        status: "approved",
+        source: "upload",
+        sourceFileName: row.sourceFileName,
+        sourceFileData: row.sourceFileData,
+        feedProposalId: row.proposalId,
+        feedLineIndex: row.lineIndex,
+      });
+    }
+    markProposalApplied(row.proposalId, { propertyId });
+    toast.success(tenantId ? "Recorded as rent on the tenant's ledger" : "Recorded");
+  };
+
+  const unrecord = (r: FeedRow) => {
+    if (!r.expenseId && !r.ledgerEntryId) return;
+    const what = r.ledgerEntryId ? "rent payment from the tenant's ledger" : "recorded expense";
+    if (!confirm(`Revert this transaction back to the feed? This deletes the ${what}.`)) return;
+    if (r.ledgerEntryId) deleteLedger(r.ledgerEntryId);
+    else if (r.expenseId) deleteExpense(r.expenseId);
+    toast.success("Reverted to feed");
+  };
+
+  return { record, unrecord };
 }
 
 function FeedRowList({
@@ -199,7 +291,7 @@ function FeedRowList({
     direction: r.direction === "in" ? "credit" : "debit",
     status: r.recorded ? "recorded" : "feed_only",
     onRecord: !r.recorded ? () => onRecord(r) : undefined,
-    onUnrecord: r.recorded && r.expenseId ? () => onUnrecord(r) : undefined,
+    onUnrecord: r.recorded && (r.expenseId || r.ledgerEntryId) ? () => onUnrecord(r) : undefined,
   }));
   return <CompiledFeedTable rows={tableRows} />;
 }
@@ -259,47 +351,15 @@ function BankAccountStatementFiles({ account }: { account: BankAccount }) {
  * this exact account, independently recordable against whichever property it actually belongs
  * to (an everyday account routinely pays bills for more than one property). */
 function BankAccountFeed({ account }: { account: BankAccount }) {
-  const { state, addExpense, deleteExpense, markProposalApplied } = useStore();
+  const { state } = useStore();
+  const { record, unrecord } = useFeedRecording();
   const proposals = relevantBankStatementProposals(
     state.aiProposals,
     (p) => p.bankAccountId === account.id,
   );
-  const rows = buildFeedRows(proposals, state.expenses);
+  const rows = buildFeedRows(proposals, state.expenses, state.ledger);
   const [recording, setRecording] = useState<FeedRow | null>(null);
   if (rows.length === 0) return null;
-
-  const record = (row: FeedRow, propertyId: string, category: string) => {
-    addExpense({
-      itemName: row.description,
-      cost: row.amount,
-      date: row.date,
-      propertyId,
-      direction: row.direction === "in" ? "Income" : undefined,
-      category: category as ExpenseCategory,
-      taxCategory:
-        row.direction === "out" ? expenseCategoryToTaxCategory(category) : "Immediate Deduction",
-      providerId: row.providerId,
-      providerName: row.suggestedProviderName,
-      hasWarranty: false,
-      rechargeToTenant: false,
-      status: "approved",
-      source: "upload",
-      sourceFileName: row.sourceFileName,
-      sourceFileData: row.sourceFileData,
-      feedProposalId: row.proposalId,
-      feedLineIndex: row.lineIndex,
-    });
-    markProposalApplied(row.proposalId, { propertyId });
-    toast.success("Recorded");
-  };
-
-  const unrecord = (r: FeedRow) => {
-    if (!r.expenseId) return;
-    if (!confirm("Revert this transaction back to the feed? This deletes the recorded expense."))
-      return;
-    deleteExpense(r.expenseId);
-    toast.success("Reverted to feed");
-  };
 
   return (
     <CollapsibleGroupSection label="Compiled bank feed" summary={<span>{rows.length}</span>}>
@@ -319,44 +379,12 @@ function BankAccountFeed({ account }: { account: BankAccount }) {
  * (nothing to pre-target it at) or one uploaded before this account was added. Kept visible and
  * recordable rather than silently dropped, but not filed under any one account's own sections. */
 function UnassignedBankFeed() {
-  const { state, addExpense, deleteExpense, markProposalApplied } = useStore();
+  const { state } = useStore();
+  const { record, unrecord } = useFeedRecording();
   const proposals = relevantBankStatementProposals(state.aiProposals, (p) => !p.bankAccountId);
-  const rows = buildFeedRows(proposals, state.expenses);
+  const rows = buildFeedRows(proposals, state.expenses, state.ledger);
   const [recording, setRecording] = useState<FeedRow | null>(null);
   if (rows.length === 0) return null;
-
-  const record = (row: FeedRow, propertyId: string, category: string) => {
-    addExpense({
-      itemName: row.description,
-      cost: row.amount,
-      date: row.date,
-      propertyId,
-      direction: row.direction === "in" ? "Income" : undefined,
-      category: category as ExpenseCategory,
-      taxCategory:
-        row.direction === "out" ? expenseCategoryToTaxCategory(category) : "Immediate Deduction",
-      providerId: row.providerId,
-      providerName: row.suggestedProviderName,
-      hasWarranty: false,
-      rechargeToTenant: false,
-      status: "approved",
-      source: "upload",
-      sourceFileName: row.sourceFileName,
-      sourceFileData: row.sourceFileData,
-      feedProposalId: row.proposalId,
-      feedLineIndex: row.lineIndex,
-    });
-    markProposalApplied(row.proposalId, { propertyId });
-    toast.success("Recorded");
-  };
-
-  const unrecord = (r: FeedRow) => {
-    if (!r.expenseId) return;
-    if (!confirm("Revert this transaction back to the feed? This deletes the recorded expense."))
-      return;
-    deleteExpense(r.expenseId);
-    toast.success("Reverted to feed");
-  };
 
   return (
     <div className="space-y-2 border-t pt-4">

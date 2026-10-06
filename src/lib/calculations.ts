@@ -303,6 +303,22 @@ export interface LedgerRow {
   source?: LedgerEntry["source"];
 }
 
+/** Incoming rent recorded from a bank feed goes on the tenant's own ledger, not into Expenses —
+ * that's what advances their paid-up-to date and shows on the Rental hub, and ledger entries
+ * already appear in Transactions (as Gross Rent), so recording it both ways would count it twice. */
+export const RENT_INCOME_CATEGORY = "Gross Rent";
+
+/** Which tenant an incoming rent deposit at this property most likely belongs to: whoever has the
+ * most recent ledger entry — a property keeps its past tenants on file, so "the only tenant" or
+ * "the first one" would often pick someone who moved out long ago. */
+export function likelyRentTenantId(tenants: Tenant[], ledger: LedgerEntry[], propertyId: string): string | undefined {
+  const lastPaid = new Map<string, string>();
+  for (const e of ledger) if (e.date > (lastPaid.get(e.tenantId) ?? "")) lastPaid.set(e.tenantId, e.date);
+  return tenants
+    .filter((t) => t.propertyId === propertyId)
+    .sort((a, b) => (lastPaid.get(b.id) ?? "").localeCompare(lastPaid.get(a.id) ?? ""))[0]?.id;
+}
+
 /** A ledger entry for something the tenant is recharged for (not rent) — it never advances the
  * paid-up-to date, see paidUpToDetails. */
 function isNonRentRecharge(e: LedgerEntry): boolean {
