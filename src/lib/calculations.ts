@@ -13,6 +13,7 @@ import type {
   DepreciationItem,
   ExpenseCategory,
   IncomeCategory,
+  LeaseDuration,
 } from "./types";
 import { categoryGroupOf } from "./types";
 
@@ -508,6 +509,25 @@ export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[], rentChan
   return { date: addDays(start, Math.max(-1, fullDays - 1)), extra };
 }
 
+/**
+ * Re-derives each tenant's stored paidUpToDate from their payments, returning only the tenants
+ * whose value changed. Run once on load so a date computed before the addDays DST fix corrects
+ * itself. Only a small drift (≤3 days) is healed — anything bigger isn't that bug — and nothing
+ * at all when `ledger` is empty: selectAll returns [] on a failed load, which would otherwise wind
+ * every tenant back to their lease start.
+ */
+export function healPaidUpDates(tenants: Tenant[], ledger: LedgerEntry[], rentChanges: RentChange[]): Tenant[] {
+  if (ledger.length === 0) return [];
+  const changed: Tenant[] = [];
+  for (const t of tenants) {
+    if (!t.paidUpToDate) continue;
+    const derived = paidUpToDateFromPayments(t, ledger, rentChanges);
+    if (derived === t.paidUpToDate || Math.abs(daysBetween(t.paidUpToDate, derived)) > 3) continue;
+    changed.push({ ...t, paidUpToDate: derived });
+  }
+  return changed;
+}
+
 export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[], rentChanges: RentChange[] = []): string {
   return paidUpToDetails(tenant, entries, rentChanges).date;
 }
@@ -655,6 +675,13 @@ export function buildDepreciationSchedule(items: DepreciationItem[]): Depreciati
       total: Math.round((v.div40 + v.div43) * 100) / 100,
     }))
     .sort((a, b) => (a.fy < b.fy ? -1 : 1));
+}
+
+/** Last day of a fixed-term lease starting `start` — the day before the same date 6 or 12 months
+ * on. "" for a periodic lease or a missing start. */
+export function leaseEndDate(start: string, duration: LeaseDuration | ""): string {
+  if (!start || !duration || duration === "Periodic") return "";
+  return addDays(addMonths(start, duration === "6 Months" ? 6 : 12), -1);
 }
 
 /** Add whole months and return ISO date — UTC throughout, same reason as addDays. */

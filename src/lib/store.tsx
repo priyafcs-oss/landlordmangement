@@ -52,7 +52,7 @@ import {
   saveSettings,
   subscribeToTable,
 } from "./db";
-import { addDays, addMonths, daysBetween, paidUpToDateFromPayments, todayISO } from "./calculations";
+import { addDays, addMonths, healPaidUpDates, paidUpToDateFromPayments, todayISO } from "./calculations";
 import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
 
@@ -344,7 +344,15 @@ interface StoreCtx {
    * unpaid instalment sharing the same billGroupId (cascading further if that overpays it too). */
   markBillPaid: (
     id: string,
-    opts?: { paidDate?: string; paymentMethod?: PropertyBill["paymentMethod"]; amount?: number; notes?: string },
+    opts?: {
+      paidDate?: string;
+      paymentMethod?: PropertyBill["paymentMethod"];
+      amount?: number;
+      notes?: string;
+      /** The bank-feed line this payment came from — set on the Expense it creates, so the feed
+       * shows that line as recorded (and Unrecord can find it). */
+      feedLink?: { proposalId: string; lineIndex: number };
+    },
   ) => { status: "Paid" | "Partial"; amountApplied: number; amountOwed: number; overflow?: { totalApplied: number; instalmentsAffected: number } };
   /** Undoes a mistaken Mark Paid: reverts status to Unpaid, clears the paid fields, and deletes the
    * Expense that markBillPaid created (never one from any other source, since linkedExpenseId is
@@ -492,21 +500,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (changed) void updateRow(TABLES.properties, p.id, { units });
         return changed ? { ...p, units } : p;
       });
-      // paidUpToDate is persisted, and until the DST fix in addDays it was computed a day short for
-      // any period after a daylight-saving start — re-derive it once here so it corrects itself
-      // without waiting for the next payment. Only a small drift is healed (anything bigger isn't
-      // that bug), and never when the ledger came back empty: selectAll returns [] on a failed
-      // load, which would otherwise wind every tenant back to their lease start.
-      const healedTenants =
-        ledger.length === 0
-          ? tenants
-          : tenants.map((t) => {
-              const derived = paidUpToDateFromPayments(t, ledger, rentChanges);
-              if (!t.paidUpToDate || derived === t.paidUpToDate) return t;
-              if (Math.abs(daysBetween(t.paidUpToDate, derived)) > 3) return t;
-              void updateRow(TABLES.tenants, t.id, { paidUpToDate: derived });
-              return { ...t, paidUpToDate: derived };
-            });
+      // paidUpToDate is persisted and was computed a day short before the addDays DST fix — see
+      // healPaidUpDates.
+      const healed = new Map(healPaidUpDates(tenants, ledger, rentChanges).map((t) => [t.id, t]));
+      for (const t of healed.values()) void updateRow(TABLES.tenants, t.id, { paidUpToDate: t.paidUpToDate });
+      const healedTenants = tenants.map((t) => healed.get(t.id) ?? t);
       const next: AppState = {
         properties: propertiesWithUnitIds,
         tenants: healedTenants,
@@ -1604,6 +1602,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             providerId: anchor.providerId,
             invoiceFileName: anchor.sourceFileName,
             invoiceFileData: anchor.sourceFileData,
+            ...(opts?.feedLink
+              ? { feedProposalId: opts.feedLink.proposalId, feedLineIndex: opts.feedLink.lineIndex }
+              : {}),
           };
           newExpenses.push(sharedExpense);
           void upsertRow(TABLES.expenses, sharedExpense as unknown as Record<string, unknown>);

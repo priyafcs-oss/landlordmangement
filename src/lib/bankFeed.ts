@@ -129,6 +129,9 @@ export function annotateFeedRow(row: FeedRow, state: AnnotateState): FeedRowAnno
     },
     state,
   );
+  // Paying an unpaid bill is the point of a "bill" suggestion — the duplicate check would just
+  // find that same bill and flag it.
+  if (suggestion?.kind === "bill") return { suggestion, existing: null };
   return {
     suggestion,
     existing: existingRecordFor(
@@ -138,6 +141,12 @@ export function annotateFeedRow(row: FeedRow, state: AnnotateState): FeedRowAnno
       state,
     ),
   };
+}
+
+/** A flagged line that's safe to record in one click: a suggestion with a known property, and
+ * nothing already on the books for it. */
+export function isAcceptable(a: FeedRowAnnotation & { row: FeedRow }): boolean {
+  return !a.row.recorded && !!a.suggestion?.propertyId && !a.existing;
 }
 
 /** The duplicate check recording this line would trip: a matching rent payment on the tenant's
@@ -190,6 +199,8 @@ export interface StatementSummary {
   newCount: number;
   /** Of those, how many have a rent suggestion with nothing already on the ledger for it. */
   rentSuggestions: number;
+  /** Of those, debits that look like a property expense or pay an unpaid bill. */
+  expenseFlags: number;
 }
 
 /** What a newly uploaded bank statement adds to its account's feed — for the compact notice. */
@@ -202,9 +213,36 @@ export function summarizeStatement(
     proposal.id,
   );
   const open = rows.filter((r) => !r.recorded);
-  const rentSuggestions = open.filter((r) => {
-    const a = annotateFeedRow(r, state);
-    return a.suggestion?.tenantId && !a.existing;
-  }).length;
-  return { total: rows.length, newCount: open.length, rentSuggestions };
+  const annotated = open.map((r) => annotateFeedRow(r, state));
+  const rentSuggestions = annotated.filter(
+    (a) => a.suggestion?.kind === "rent" && !a.existing,
+  ).length;
+  const expenseFlags = annotated.filter(
+    (a) => a.suggestion && a.suggestion.kind !== "rent" && !a.existing,
+  ).length;
+  return { total: rows.length, newCount: open.length, rentSuggestions, expenseFlags };
+}
+
+export interface FeedTotals {
+  /** Money in (credit lines). */
+  totalIn: number;
+  /** Money out (debit lines). */
+  totalOut: number;
+  net: number;
+}
+
+/** In/out/net over compiled-feed rows (CompiledFeedTable's month subtotals) — "reference" lines (informational loan EMI lines) aren't money
+ * movements of their own, so they're left out. */
+export function feedTotals(
+  rows: { amount: number; direction: "debit" | "credit"; status: string }[],
+): FeedTotals {
+  let totalIn = 0;
+  let totalOut = 0;
+  for (const r of rows) {
+    if (r.status === "reference") continue;
+    if (r.direction === "credit") totalIn += r.amount;
+    else totalOut += r.amount;
+  }
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return { totalIn: round(totalIn), totalOut: round(totalOut), net: round(totalIn - totalOut) };
 }

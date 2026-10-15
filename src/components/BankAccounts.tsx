@@ -32,6 +32,7 @@ import {
   annotateFeedRow,
   buildFeedRows,
   existingRecordFor,
+  isAcceptable,
   rowsForStatement,
   type FeedRow,
   type FeedRowAnnotation,
@@ -191,17 +192,35 @@ interface RecordArgs {
   category: string;
   /** Set when the line is a rent payment for this tenant's ledger. */
   tenantId?: string;
+  /** Set when the line pays this unpaid bill — marks it paid instead of a new Expense. */
+  billId?: string;
 }
 
 /** Recording/unrecording a feed line — shared by a specific account's feed and the unassigned
  * bucket. `rows` is the whole feed the lines come from, used to tell when a statement has nothing
  * left to record. Render `dialog` once: it's the duplicate warning a record can stop on. */
 function useFeedRecording(rows: FeedRow[]) {
-  const { state, addExpense, deleteExpense, addLedger, deleteLedger, markProposalApplied, updateProposal } = useStore();
+  const {
+    state,
+    addExpense,
+    deleteExpense,
+    addLedger,
+    deleteLedger,
+    markBillPaid,
+    unmarkBillPaid,
+    markProposalApplied,
+    updateProposal,
+  } = useStore();
   const [pending, setPending] = useState<{ args: RecordArgs; match: DuplicateMatch } | null>(null);
 
-  const write = ({ row, propertyId, category, tenantId }: RecordArgs) => {
-    if (tenantId) {
+  const write = ({ row, propertyId, category, tenantId, billId }: RecordArgs) => {
+    if (billId) {
+      markBillPaid(billId, {
+        paidDate: row.date,
+        amount: row.amount,
+        feedLink: { proposalId: row.proposalId, lineIndex: row.lineIndex },
+      });
+    } else if (tenantId) {
       addLedger({
         tenantId,
         date: row.date,
@@ -256,11 +275,13 @@ function useFeedRecording(rows: FeedRow[]) {
   };
 
   const record = (args: RecordArgs) => {
-    const match = existingRecordFor(args.row, args.tenantId, args.propertyId, state);
+    // Paying an unpaid bill is what a bill suggestion is for — the duplicate check would only
+    // find that same bill.
+    const match = args.billId ? null : existingRecordFor(args.row, args.tenantId, args.propertyId, state);
     if (match) return setPending({ args, match });
     write(args);
     settle([args]);
-    toast.success(args.tenantId ? "Recorded as rent on the tenant's ledger" : "Recorded");
+    toast.success(args.billId ? "Bill marked paid" : args.tenantId ? "Recorded as rent on the tenant's ledger" : "Recorded");
   };
 
   /** "Accept all suggestions" — only lines with nothing already on the books, and skipping any
@@ -268,10 +289,17 @@ function useFeedRecording(rows: FeedRow[]) {
    * day apart both suggested as one tenant's rent), since those don't exist in state yet to check. */
   const recordMany = (list: RecordArgs[]) => {
     const batchLedger: LedgerEntry[] = [];
+    const batchBills = new Set<string>();
     const accepted: RecordArgs[] = [];
     for (const args of list) {
-      const ledger = [...state.ledger, ...batchLedger];
-      if (existingRecordFor(args.row, args.tenantId, args.propertyId, { ...state, ledger })) continue;
+      if (args.billId) {
+        // Two lines matching the same bill — only the first pays it.
+        if (batchBills.has(args.billId)) continue;
+        batchBills.add(args.billId);
+      } else {
+        const ledger = [...state.ledger, ...batchLedger];
+        if (existingRecordFor(args.row, args.tenantId, args.propertyId, { ...state, ledger })) continue;
+      }
       write(args);
       accepted.push(args);
       if (args.tenantId) {
@@ -299,7 +327,11 @@ function useFeedRecording(rows: FeedRow[]) {
         ? `This transaction was recorded ${r.recordedCount} times (once from each overlapping statement). Remove one copy? This deletes one ${what}.`
         : `Revert this transaction back to the feed? This deletes the ${what}.`;
     if (!confirm(msg)) return;
+    // An expense created by paying a bill from the feed is undone by un-paying the bill, which
+    // deletes that expense too — deleting only the expense would leave the bill marked Paid.
+    const paidBill = r.expenseId ? state.bills.find((b) => b.linkedExpenseId === r.expenseId) : undefined;
     if (r.ledgerEntryId) deleteLedger(r.ledgerEntryId);
+    else if (paidBill) unmarkBillPaid(paidBill.id);
     else if (r.expenseId) deleteExpense(r.expenseId);
     toast.success(r.recordedCount > 1 ? "Removed the extra copy" : "Reverted to feed");
   };
@@ -332,14 +364,9 @@ function annotate(rows: FeedRow[], state: ReturnType<typeof useStore>["state"]):
   return rows.map((row) => (row.recorded ? { row, suggestion: null, existing: null } : { row, ...annotateFeedRow(row, state) }));
 }
 
-/** Rows a one-click "Accept" can safely record: a suggestion, and nothing already on the books. */
-function acceptable(a: AnnotatedRow): boolean {
-  return !a.row.recorded && !!a.suggestion && !a.existing;
-}
-
 function argsFromSuggestion(a: AnnotatedRow): RecordArgs {
   const s = a.suggestion!;
-  return { row: a.row, propertyId: s.propertyId, category: s.category, tenantId: s.tenantId };
+  return { row: a.row, propertyId: s.propertyId!, category: s.category, tenantId: s.tenantId, billId: s.billId };
 }
 
 function FeedRowList({
@@ -371,9 +398,17 @@ function FeedRowList({
           : a.existing
             ? existingLabel(a.existing)
             : undefined,
-      suggestion: acceptable(a)
-        ? { label: a.suggestion!.label, reason: a.suggestion!.reason, onAccept: () => onAccept(a) }
-        : undefined,
+      // Flagged even without a known property (it can't be accepted in one click then, but a
+      // property expense on an everyday account is exactly what shouldn't slip past unnoticed).
+      suggestion:
+        a.suggestion && !a.existing && !r.recorded
+          ? {
+              label: a.suggestion.propertyId ? a.suggestion.label : `${a.suggestion.label} · pick property`,
+              reason: a.suggestion.reason,
+              tone: a.suggestion.kind === "rent" ? "rent" : "expense",
+              onAccept: isAcceptable(a) ? () => onAccept(a) : undefined,
+            }
+          : undefined,
     };
   });
   return <CompiledFeedTable rows={tableRows} />;
@@ -387,26 +422,38 @@ function FeedSection({ proposals }: { proposals: AiIntakeProposal[] }) {
   const { record, recordMany, unrecord, dialog } = useFeedRecording(rows);
   const [recording, setRecording] = useState<FeedRow | null>(null);
   const annotated = annotate(rows, state);
-  const suggested = annotated.filter(acceptable);
+  const suggested = annotated.filter(isAcceptable);
+  const flagged = annotated.filter((a) => a.suggestion && !a.existing && !a.row.recorded);
+  const expenseFlags = flagged.filter((a) => a.suggestion!.kind !== "rent").length;
+  const rentFlags = flagged.length - expenseFlags;
 
   return (
     <div className="space-y-2">
-      {suggested.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-primary/30 bg-primary/5 p-2 text-xs">
-          <span className="flex items-center gap-1">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            {suggested.length} line(s) have a suggestion — e.g. rent deposits matched to a tenant.
+      {flagged.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs">
+          <span className="flex flex-wrap items-center gap-1">
+            <Sparkles className="h-3.5 w-3.5 text-amber-600" />
+            {expenseFlags > 0 && (
+              <span className="font-medium text-amber-800 dark:text-amber-300">
+                {expenseFlags} possible property expense(s) to record
+              </span>
+            )}
+            {expenseFlags > 0 && rentFlags > 0 && <span>·</span>}
+            {rentFlags > 0 && <span className="text-primary">{rentFlags} rent deposit(s) matched to a tenant</span>}
+            <span className="text-muted-foreground">— use the "Flagged" filter to see just these.</span>
           </span>
-          <Button
-            size="sm"
-            className="h-6 text-xs"
-            onClick={() => {
-              if (!confirm(`Record all ${suggested.length} suggested line(s) as suggested?`)) return;
-              recordMany(suggested.map(argsFromSuggestion));
-            }}
-          >
-            Accept all suggestions ({suggested.length})
-          </Button>
+          {suggested.length > 0 && (
+            <Button
+              size="sm"
+              className="h-6 text-xs"
+              onClick={() => {
+                if (!confirm(`Record all ${suggested.length} suggested line(s) as suggested?`)) return;
+                recordMany(suggested.map(argsFromSuggestion));
+              }}
+            >
+              Accept all suggestions ({suggested.length})
+            </Button>
+          )}
         </div>
       )}
       <FeedRowList

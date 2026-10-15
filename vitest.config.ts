@@ -24,6 +24,11 @@ import tsconfigPaths from "vite-tsconfig-paths";
  * test file only needs to be dropped in (and, if it imports supabase/functions/** source, added
  * to both lists here) rather than requiring a vitest.config.ts change for the common case.
  */
+// Every test runs on Sydney time — the landlord's own clock, and the one with the daylight-saving
+// changes (first Sunday of October / April) that date-only maths has broken on before. Set here so
+// the test workers (which inherit the env) and CI all see it without anyone exporting TZ by hand.
+process.env.TZ = "Australia/Sydney";
+
 export default defineConfig({
   // Cast needed purely to satisfy TS: this project pins a very new `vite` (^8.0.16); `vitest`
   // bundles its own slightly different nested `vite` copy as a peer dependency, and the two

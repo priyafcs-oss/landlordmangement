@@ -13,6 +13,7 @@ import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh"
 import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { bucketBy } from "@/lib/group";
 import { fmtCurrency } from "@/lib/calculations";
+import { feedTotals } from "@/lib/bankFeed";
 import { Search } from "lucide-react";
 
 export interface CompiledFeedRow {
@@ -34,8 +35,19 @@ export interface CompiledFeedRow {
   note?: string;
   /** Amber line under the description, e.g. a possible duplicate already on the books. */
   warning?: string;
-  /** A one-click way to record a "feed_only" line, shown next to Record. */
-  suggestion?: { label: string; reason: string; onAccept: () => void };
+  /** A flag on a "feed_only" line — what it looks like, with a one-click Accept when it's safe
+   * to record as-is. "expense" is styled to stand out more than "rent". */
+  suggestion?: { label: string; reason: string; tone?: "rent" | "expense"; onAccept?: () => void };
+}
+
+function TotalsText({ rows }: { rows: CompiledFeedRow[] }) {
+  const t = feedTotals(rows);
+  return (
+    <span className="whitespace-nowrap font-normal text-muted-foreground">
+      <span className="text-emerald-600">+{fmtCurrency(t.totalIn)}</span> · <span>−{fmtCurrency(t.totalOut)}</span> · net{" "}
+      <span className={"font-medium " + (t.net < 0 ? "text-destructive" : "text-foreground")}>{fmtCurrency(t.net)}</span>
+    </span>
+  );
 }
 
 type SortField = "date" | "description" | "amount" | "status";
@@ -84,12 +96,22 @@ function RowActions({ r }: { r: CompiledFeedRow }) {
     <div className="flex flex-wrap items-center justify-end gap-2">
       {r.suggestion ? (
         <>
-          <Badge variant="outline" className="border-primary/40 font-normal text-primary" title={r.suggestion.reason}>
+          <Badge
+            variant="outline"
+            className={
+              r.suggestion.tone === "expense"
+                ? "border-amber-500/60 bg-amber-500/10 font-medium text-amber-800 dark:text-amber-300"
+                : "border-primary/40 font-normal text-primary"
+            }
+            title={r.suggestion.reason}
+          >
             {r.suggestion.label}
           </Badge>
-          <Button size="sm" className="h-6 text-xs" onClick={r.suggestion.onAccept}>
-            Accept
-          </Button>
+          {r.suggestion.onAccept && (
+            <Button size="sm" className="h-6 text-xs" onClick={r.suggestion.onAccept}>
+              Accept
+            </Button>
+          )}
         </>
       ) : (
         <Badge variant="outline">Feed only</Badge>
@@ -132,7 +154,13 @@ function FeedTableBody({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.key} className="border-b last:border-0 hover:bg-muted/30">
+            <tr
+              key={r.key}
+              className={
+                "border-b last:border-0 hover:bg-muted/30 " +
+                (r.suggestion?.tone === "expense" ? "border-l-2 border-l-amber-500 bg-amber-500/5" : "")
+              }
+            >
               <td className="whitespace-nowrap px-3 py-2">{r.date}</td>
               <td className="max-w-[320px] px-3 py-2">
                 <div className="truncate" title={r.description}>
@@ -175,12 +203,12 @@ export function CompiledFeedTable({
   includeReferenceFilter?: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"__all__" | CompiledFeedRow["status"]>("__all__");
+  const [status, setStatus] = useState<"__all__" | "flagged" | CompiledFeedRow["status"]>("__all__");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [sort, setSort] = useState<SortState<SortField> | null>(null);
 
   const filtered = rows
-    .filter((r) => status === "__all__" || r.status === status)
+    .filter((r) => status === "__all__" || (status === "flagged" ? !!r.suggestion : r.status === status))
     .filter((r) => !query || r.description.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => {
       if (!sort) return a.date < b.date ? 1 : -1;
@@ -200,6 +228,7 @@ export function CompiledFeedTable({
   const recordedCount = rows.filter((r) => r.status === "recorded").length;
   const feedOnlyCount = rows.filter((r) => r.status === "feed_only").length;
   const referenceCount = rows.filter((r) => r.status === "reference").length;
+  const flaggedCount = rows.filter((r) => r.suggestion).length;
 
   return (
     <div className="space-y-2">
@@ -221,6 +250,7 @@ export function CompiledFeedTable({
             <SelectItem value="__all__">All ({rows.length})</SelectItem>
             <SelectItem value="recorded">Recorded ({recordedCount})</SelectItem>
             <SelectItem value="feed_only">Feed only ({feedOnlyCount})</SelectItem>
+            {flaggedCount > 0 && <SelectItem value="flagged">Flagged ({flaggedCount})</SelectItem>}
             {includeReferenceFilter && referenceCount > 0 && (
               <SelectItem value="reference">Reference only ({referenceCount})</SelectItem>
             )}
@@ -237,6 +267,12 @@ export function CompiledFeedTable({
         </Select>
       </div>
 
+      {filtered.length > 0 && (
+        <div className="flex justify-end text-xs">
+          <span className="mr-1 text-muted-foreground">{filtered.length === rows.length ? "Total" : "Shown"}:</span>
+          <TotalsText rows={filtered} />
+        </div>
+      )}
       {groupBy === "none" || !groups ? (
         <FeedTableBody rows={filtered} sort={sort} onSort={handleSort} />
       ) : (
@@ -251,9 +287,12 @@ export function CompiledFeedTable({
               key={key || "no-date"}
               label={formatMonthLabel(key)}
               summary={
-                <Badge variant="outline" className="font-normal">
-                  {groupRows.length}
-                </Badge>
+                <span className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="font-normal">
+                    {groupRows.length}
+                  </Badge>
+                  <TotalsText rows={groupRows} />
+                </span>
               }
             >
               <FeedTableBody rows={groupRows} sort={sort} onSort={handleSort} />

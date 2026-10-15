@@ -53,7 +53,7 @@ import {
   Lock,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, addDays, addMonths, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -215,7 +215,8 @@ export function ProposalCard({ proposal, onDismiss }: { proposal: AiIntakePropos
   }
 }
 
-/** "12 new of 14 transactions, 3 suggested as rent" for a bank statement filed to an account. */
+/** "12 new of 14 transactions · 2 possible property expenses · 3 suggested as rent" for a bank
+ * statement filed to an account. */
 function BankStatementSummary({ proposal }: { proposal: AiIntakeProposal }) {
   const { state } = useStore();
   const payload = proposal.payload as BankStatementProposalPayload;
@@ -230,6 +231,9 @@ function BankStatementSummary({ proposal }: { proposal: AiIntakeProposal }) {
       </span>
       <span>
         {s.newCount} new of {s.total} transaction(s)
+        {s.expenseFlags > 0 && (
+          <span className="font-medium text-amber-700 dark:text-amber-400"> · {s.expenseFlags} possible property expense(s)</span>
+        )}
         {s.rentSuggestions > 0 && <span className="text-primary"> · {s.rentSuggestions} suggested as rent</span>}
       </span>
     </div>
@@ -2395,7 +2399,7 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
       if (!included[i]) return;
       const match = billMatches[i];
       if (match && matchAsBill[i]) {
-        markBillPaid(match.id, { paidDate: tx.date });
+        markBillPaid(match.id, { paidDate: tx.date, feedLink: { proposalId: proposal.id, lineIndex: i } });
         count++;
         return;
       }
@@ -9163,11 +9167,7 @@ export function DeletePropertyDialog({ property, trigger, onDeleted }: { propert
   );
 }
 
-function computeLeaseEnd(start: string, duration: LeaseDuration | ""): string {
-  if (!start || !duration || duration === "Periodic") return "";
-  const months = duration === "6 Months" ? 6 : 12;
-  return addDays(addMonths(start, months), -1);
-}
+const computeLeaseEnd = leaseEndDate;
 
 /**
  * Shared 12-month rent-increase compliance check (most Australian jurisdictions restrict rent

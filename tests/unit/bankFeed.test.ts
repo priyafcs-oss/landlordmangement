@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildFeedRows, summarizeStatement } from "@/lib/bankFeed";
-import { isRentMultiple, suggestFeedLine } from "@/lib/feedSuggest";
+import { feedTotals } from "@/lib/bankFeed";
 import type { AiIntakeProposal, AppState, Expense, LedgerEntry, Tenant } from "@/lib/types";
 
 type Tx = { date: string; description: string; amount: number; direction: "in" | "out" };
@@ -114,37 +114,56 @@ describe("compiled bank feed across overlapping statements", () => {
       bills: [],
       expenses: [],
     } as unknown as AppState;
-    expect(summarizeStatement(oct, state)).toEqual({ total: 2, newCount: 1, rentSuggestions: 1 });
+    expect(summarizeStatement(oct, state)).toEqual({
+      total: 2,
+      newCount: 1,
+      rentSuggestions: 1,
+      expenseFlags: 0,
+    });
+  });
+
+  it("summary counts flagged expenses, and never counts an internal transfer as rent", () => {
+    const st = statement("s4", [
+      {
+        date: "2026-10-05",
+        description: "Funds transfer From linked account xx7814 - Internal transfer",
+        amount: 2340,
+        direction: "in",
+      },
+      { date: "2026-10-06", description: "BPAY COUNCIL RATES", amount: 480, direction: "out" },
+      rent("2026-10-10"),
+    ]);
+    const state = {
+      aiProposals: [st],
+      tenants: [tenant],
+      providers: [],
+      providerProperties: [],
+      ledger: [],
+      bills: [],
+      expenses: [],
+    } as unknown as AppState;
+    expect(summarizeStatement(st, state)).toEqual({
+      total: 3,
+      newCount: 3,
+      rentSuggestions: 1,
+      expenseFlags: 1,
+    });
   });
 });
 
-describe("rent deposit suggestions", () => {
-  const ctx = { tenants: [tenant], providers: [], providerProperties: [] };
-
-  it("suggests rent when the description names the tenant and the amount is whole weeks", () => {
-    expect(suggestFeedLine({ ...rent("2026-10-03") }, ctx)).toMatchObject({
-      category: "Gross Rent",
-      tenantId: "t1",
-      propertyId: "p1",
-    });
-    expect(suggestFeedLine({ ...rent("2026-10-03"), amount: 2340 }, ctx)?.tenantId).toBe("t1");
-  });
-
-  it("doesn't suggest rent for a named payment that isn't a rent amount", () => {
-    expect(suggestFeedLine({ ...rent("2026-10-03"), amount: 60.23 }, ctx)).toBeNull();
-  });
-
-  it("falls back to the one tenant whose rent fits when the description names nobody", () => {
+describe("feedTotals (month subtotals in the compiled feed)", () => {
+  it("sums money in and out, leaving informational loan reference lines out", () => {
     expect(
-      suggestFeedLine(
-        { date: "2026-10-03", description: "DEPOSIT 88213", amount: 1170, direction: "in" },
-        ctx,
-      )?.tenantId,
-    ).toBe("t1");
+      feedTotals([
+        { amount: 1170, direction: "credit", status: "feed_only" },
+        { amount: 1170, direction: "credit", status: "recorded" },
+        { amount: 480.1, direction: "debit", status: "feed_only" },
+        { amount: 2000, direction: "debit", status: "reference" },
+      ]),
+    ).toEqual({ totalIn: 2340, totalOut: 480.1, net: 1859.9 });
   });
 
-  it("isRentMultiple", () => {
-    expect(isRentMultiple(3510, 1170)).toBe(true);
-    expect(isRentMultiple(1100, 1170)).toBe(false);
+  it("is zero for no rows", () => {
+    expect(feedTotals([])).toEqual({ totalIn: 0, totalOut: 0, net: 0 });
   });
 });

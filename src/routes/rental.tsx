@@ -70,7 +70,7 @@ import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, edgeFunctionErro
 import { DocumentLink } from "@/components/DocumentLink";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateLedgerEntry, ledgerDuplicateAsMatch, type DuplicateMatch } from "@/lib/billMatch";
-import { matchTenantByText } from "@/lib/feedSuggest";
+import { matchTenantByText, nonPropertyReason, parseBankFeedLine } from "@/lib/feedSuggest";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
@@ -1184,15 +1184,9 @@ function BankFeedDialog() {
     const lines = text.split(/\r?\n/).filter(Boolean);
     const found: FeedMatch[] = [];
     for (const line of lines) {
-      // Take the date off first — otherwise "2026-07-01 ... $720" read its amount as 2026.
-      const iso = line.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-      const dmy = iso ? null : line.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
-      const date = iso ? iso[0] : dmy ? `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}` : undefined;
-      const rest = iso ? line.replace(iso[0], " ") : dmy ? line.replace(dmy[0], " ") : line;
-      const moneyMatch = rest.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/) ?? rest.match(/\b(\d[\d,]*(?:\.\d{1,2})?)\b/);
-      if (!moneyMatch) continue;
-      const amount = parseFloat(moneyMatch[1].replace(/,/g, ""));
-      if (!amount) continue;
+      const parsed = parseBankFeedLine(line);
+      if (!parsed || nonPropertyReason(line, "in")) continue;
+      const { amount, date } = parsed;
       const tenant = matchTenant(line, date);
       if (tenant) found.push({ tenant, amount, line, date });
     }
@@ -1225,6 +1219,7 @@ function BankFeedDialog() {
       const found: FeedMatch[] = [];
       for (const t of credits) {
         const line = `${t.date} ${t.description}`;
+        if (nonPropertyReason(t.description, "in")) continue;
         const tenant = matchTenant(t.description, t.date);
         if (tenant) found.push({ tenant, amount: t.amount, line, date: t.date });
       }
