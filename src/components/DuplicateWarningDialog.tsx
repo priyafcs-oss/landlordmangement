@@ -38,7 +38,7 @@ export function DuplicateWarningDialog({
             <p className="text-muted-foreground">This looks like it might already be recorded:</p>
             <div className="space-y-1 rounded border p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{match.kind === "bill" ? "Bill" : "Transaction"}</Badge>
+                <Badge variant="secondary">{match.kind === "bill" ? "Bill" : match.kind === "rent" ? "Rent payment" : "Transaction"}</Badge>
                 <span className="font-medium">{match.label}</span>
                 {match.status && <Badge variant="outline">{match.status}</Badge>}
               </div>
@@ -52,7 +52,7 @@ export function DuplicateWarningDialog({
                   className="h-auto px-0 text-primary"
                   onClick={() => openBillDocument(match.sourceFileName, match.sourceFileData)}
                 >
-                  View existing bill PDF
+                  {match.kind === "bill" ? "View existing bill PDF" : "View source document"}
                 </Button>
               )}
             </div>

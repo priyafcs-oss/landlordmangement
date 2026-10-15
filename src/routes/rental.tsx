@@ -68,6 +68,9 @@ import type { Tenant, Property } from "@/lib/types";
 import { toast } from "sonner";
 import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
+import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
+import { findDuplicateLedgerEntry, ledgerDuplicateAsMatch, type DuplicateMatch } from "@/lib/billMatch";
+import { matchTenantByText } from "@/lib/feedSuggest";
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
@@ -672,10 +675,19 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
   }, [filteredRows, groupBy]);
 
-  const postPayment = () => {
+  // A payment that looks like one already on the ledger (same amount, within a few days) waits
+  // here for the landlord to confirm via DuplicateWarningDialog instead of posting straight away.
+  const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
+
+  const postPayment = (force = false) => {
     const val = parseFloat(amount);
     if (!val || val <= 0) return toast.error("Enter a valid amount");
     if (!paymentDate) return toast.error("Enter the date the payment was received");
+    if (!force) {
+      const dup = findDuplicateLedgerEntry(state.ledger, { tenantId: tenant.id, amount: val, date: paymentDate });
+      if (dup) return setDuplicateMatch(ledgerDuplicateAsMatch(dup));
+    }
+    setDuplicateMatch(null);
     const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
     // 1 week (weekly rent) = 7 days; 9 weeks = 63 days. Never off-by-one.
     const daysCovered = Math.floor(val / rate);
@@ -781,7 +793,12 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
               className="max-w-[180px]"
             />
           </div>
-          <Button onClick={postPayment}>Post Payment</Button>
+          <Button onClick={() => postPayment()}>Post Payment</Button>
+          <DuplicateWarningDialog
+            match={duplicateMatch}
+            onCancel={() => setDuplicateMatch(null)}
+            onSaveAnyway={() => postPayment(true)}
+          />
           <AdjustmentDialog tenant={tenant} />
           <Button variant="outline" className="gap-1" onClick={emailRentReceived} disabled={!tenant.email}>
             <Mail className="h-4 w-4" /> Email Tenant
@@ -1137,6 +1154,14 @@ function LedgerExportButtons({
   );
 }
 
+interface FeedMatch {
+  tenant: Tenant;
+  amount: number;
+  line: string;
+  /** The deposit's date, when the line had one. */
+  date?: string;
+}
+
 interface BankStatementTransaction {
   date: string;
   description: string;
@@ -1149,30 +1174,27 @@ function BankFeedDialog() {
 
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [matches, setMatches] = useState<{ tenant: Tenant; amount: number; line: string }[]>([]);
-  const [confirming, setConfirming] = useState<{ tenant: Tenant; amount: number } | null>(null);
+  const [matches, setMatches] = useState<FeedMatch[]>([]);
+  const [confirming, setConfirming] = useState<FeedMatch | null>(null);
   const [extracting, setExtracting] = useState(false);
 
-  const matchTenant = (line: string): Tenant | undefined => {
-    const lower = line.toLowerCase();
-    return state.tenants.find((t) => {
-      const ref = (t.bankReference ?? "").toLowerCase();
-      if (ref && lower.includes(ref)) return true;
-      const parts = t.name.toLowerCase().split(/\s+/);
-      return parts.some((p) => p.length > 2 && lower.includes(p));
-    });
-  };
+  const matchTenant = (line: string, date?: string): Tenant | undefined => matchTenantByText(state.tenants, line, date)?.tenant;
 
   const parse = () => {
     const lines = text.split(/\r?\n/).filter(Boolean);
-    const found: { tenant: Tenant; amount: number; line: string }[] = [];
+    const found: FeedMatch[] = [];
     for (const line of lines) {
-      const moneyMatch = line.match(/\$?\s*(\d+(?:\.\d{1,2})?)/);
+      // Take the date off first — otherwise "2026-07-01 ... $720" read its amount as 2026.
+      const iso = line.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+      const dmy = iso ? null : line.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+      const date = iso ? iso[0] : dmy ? `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}` : undefined;
+      const rest = iso ? line.replace(iso[0], " ") : dmy ? line.replace(dmy[0], " ") : line;
+      const moneyMatch = rest.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/) ?? rest.match(/\b(\d[\d,]*(?:\.\d{1,2})?)\b/);
       if (!moneyMatch) continue;
-      const amount = parseFloat(moneyMatch[1]);
+      const amount = parseFloat(moneyMatch[1].replace(/,/g, ""));
       if (!amount) continue;
-      const tenant = matchTenant(line);
-      if (tenant) found.push({ tenant, amount, line });
+      const tenant = matchTenant(line, date);
+      if (tenant) found.push({ tenant, amount, line, date });
     }
     if (found.length === 0) toast.error("No matches found");
     setMatches(found);
@@ -1200,11 +1222,11 @@ function BankFeedDialog() {
         return;
       }
       const credits = (data.transactions ?? []).filter((t) => t.direction === "in");
-      const found: { tenant: Tenant; amount: number; line: string }[] = [];
+      const found: FeedMatch[] = [];
       for (const t of credits) {
         const line = `${t.date} ${t.description}`;
-        const tenant = matchTenant(line);
-        if (tenant) found.push({ tenant, amount: t.amount, line });
+        const tenant = matchTenant(t.description, t.date);
+        if (tenant) found.push({ tenant, amount: t.amount, line, date: t.date });
       }
       if (found.length === 0) {
         toast.error(`Read ${credits.length} deposit(s) but couldn't match any to a tenant`);
@@ -1229,12 +1251,22 @@ function BankFeedDialog() {
     toast.success("CSV loaded");
   };
 
-  const post = (m: { tenant: Tenant; amount: number }) => {
+  const confirmingDuplicate = confirming
+    ? findDuplicateLedgerEntry(state.ledger, {
+        tenantId: confirming.tenant.id,
+        amount: confirming.amount,
+        date: confirming.date ?? todayISO(),
+      })
+    : null;
+
+  const post = (m: FeedMatch) => {
     const rate = dailyRentRate(m.tenant.rentAmount, m.tenant.rentFrequency);
     const daysCovered = Math.floor(m.amount / rate);
     addLedger({
       tenantId: m.tenant.id,
-      date: todayISO(),
+      // The deposit's own date when the line had one — stamping today put every imported payment
+      // on the wrong day (and out of reach of the duplicate check).
+      date: m.date ?? todayISO(),
       type: "Rent Payment",
       description: `Bank feed match (${daysCovered} days)`,
       debit: 0,
@@ -1305,13 +1337,23 @@ function BankFeedDialog() {
                 <DialogTitle>Confirm match</DialogTitle>
               </DialogHeader>
               <p className="text-sm">
-                Confirm matching {fmtCurrency(confirming.amount)} to {confirming.tenant.name}?
+                Confirm matching {fmtCurrency(confirming.amount)} to {confirming.tenant.name}
+                {confirming.date ? ` on ${confirming.date}` : ""}?
               </p>
+              {confirmingDuplicate && (
+                <p className="rounded border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                  Possible duplicate — {fmtCurrency(confirmingDuplicate.credit)} rent payment already on this tenant's
+                  ledger dated {confirmingDuplicate.date}
+                  {confirmingDuplicate.description ? ` ("${confirmingDuplicate.description}")` : ""}.
+                </p>
+              )}
               <DialogFooter>
                 <Button variant="outline" onClick={() => setConfirming(null)}>
                   Cancel
                 </Button>
-                <Button onClick={() => post(confirming)}>Confirm</Button>
+                <Button variant={confirmingDuplicate ? "destructive" : "default"} onClick={() => post(confirming)}>
+                  {confirmingDuplicate ? "Post duplicate anyway" : "Confirm"}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

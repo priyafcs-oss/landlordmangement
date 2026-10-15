@@ -67,7 +67,7 @@ export function findMatchingUnpaidBill(bills: PropertyBill[], candidate: BillMat
 }
 
 export interface DuplicateMatch {
-  kind: "bill" | "expense";
+  kind: "bill" | "expense" | "rent";
   id: string;
   label: string;
   amount: number;
@@ -228,6 +228,19 @@ export function findDuplicateLedgerEntry(
         symmetricDateWithinWindow(e.date, candidate.date, LEDGER_DUPLICATE_WINDOW_DAYS),
     ) ?? null
   );
+}
+
+/** findDuplicateLedgerEntry's result in DuplicateWarningDialog's shape. */
+export function ledgerDuplicateAsMatch(e: LedgerEntry): DuplicateMatch {
+  return {
+    kind: "rent",
+    id: e.id,
+    label: e.description || "Rent payment",
+    amount: e.credit,
+    date: e.date,
+    sourceFileName: e.sourceFileName ?? undefined,
+    sourceFileData: e.sourceFileData ?? undefined,
+  };
 }
 
 export interface DepreciationReportDuplicateMatch {

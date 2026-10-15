@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,6 +66,11 @@ export const Route = createFileRoute("/assets")({
       { title: "Assets — Landlord OS" },
       { name: "description", content: "Everything you own — property, gold, ETFs — in one register." },
     ],
+  }),
+  // ?section= opens a specific section directly — e.g. a new bank statement's notice links to
+  // /assets?section=bankaccounts, where its lines are recorded.
+  validateSearch: (search: Record<string, unknown>): { section?: Section } => ({
+    section: NAV.some((n) => n.section === search.section) ? (search.section as Section) : undefined,
   }),
   component: AssetsPage,
 });
@@ -606,7 +611,12 @@ const NAV: { section: Section; label: string; icon: React.ComponentType<{ classN
 
 function AssetsPage() {
   const { state } = useStore();
-  const [section, setSection] = useState<Section>("all");
+  const { section: linkedSection } = Route.useSearch();
+  const [section, setSection] = useState<Section>(linkedSection ?? "all");
+  // Following a ?section= link while already on this page (e.g. from its own approvals list).
+  useEffect(() => {
+    if (linkedSection) setSection(linkedSection);
+  }, [linkedSection]);
   // Same hover-to-open/auto-hide behaviour as AppSidebar and the per-property nav: collapsed to
   // icons until hovered, and a group (e.g. Finance) reveals its items only while hovered.
   const isMobile = useIsMobile();

@@ -15,7 +15,7 @@ import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search, Undo2 } from "lucide-react";
-import { fmtCurrency, todayISO, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { bucketBy } from "@/lib/group";
@@ -73,7 +73,7 @@ export function BillsBoard({
   const [showInsights, toggleInsights] = usePersistedToggle("billsInsightsVisible");
 
   const today = todayISO();
-  const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const in30 = addDays(today, 30);
   const isOverdue = (b: PropertyBill) => b.status === "Unpaid" && b.dueDate < today;
   const assetTypeOf = (b: PropertyBill) => state.assets.find((a) => a.id === b.assetId)?.assetType;
   const propertyLabelOf = (b: PropertyBill) => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore, clearCache } from "@/lib/store";
+import { todayISO } from "@/lib/calculations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -145,7 +146,7 @@ function CurrentUserBadge() {
 
 function AiBudgetBadge() {
   const { state } = useStore();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const used = state.aiConfig.countDate === today ? state.aiConfig.dailyCount : 0;
   const blocked = !state.aiConfig.enabled || used >= state.aiConfig.dailyLimit;
   return (
@@ -183,7 +184,7 @@ function CreatorMasterPanel() {
     }
   };
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const used = state.aiConfig.countDate === today ? state.aiConfig.dailyCount : 0;
 
   return (

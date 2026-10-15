@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, ShieldCheck } from "lucide-react";
-import { fmtCurrency } from "@/lib/calculations";
+import { addMonths, fmtCurrency, todayISO } from "@/lib/calculations";
 import type { BufferScopeType, CashBuffer } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -32,9 +32,7 @@ export const Route = createFileRoute("/buffers")({
 });
 
 function monthlyExpenseEstimate(state: ReturnType<typeof useStore>["state"], scopeType: BufferScopeType, scopeId?: string) {
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 3);
-  const cutoffIso = cutoff.toISOString().slice(0, 10);
+  const cutoffIso = addMonths(todayISO(), -3);
   const relevant = state.expenses.filter((e) => {
     if (e.date < cutoffIso) return false;
     if (scopeType === "Portfolio") return true;

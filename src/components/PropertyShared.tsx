@@ -53,10 +53,11 @@ import {
   Lock,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
+import { summarizeStatement } from "@/lib/bankFeed";
 import {
   verifyAgentFees,
   reconcileFlatFees,
@@ -200,7 +201,11 @@ export function ProposalCard({ proposal, onDismiss }: { proposal: AiIntakePropos
     case "loan_statement":
       return <LoanStatementProposalCard proposal={proposal} onDismiss={onDismiss} />;
     case "bank_statement":
-      return <BankStatementProposalCard proposal={proposal} onDismiss={onDismiss} />;
+      return proposal.bankAccountId ? (
+        <BankStatementNoticeRow proposal={proposal} onDismiss={onDismiss} />
+      ) : (
+        <BankStatementProposalCard proposal={proposal} onDismiss={onDismiss} />
+      );
     case "property_sale":
       return <PropertySaleProposalCard proposal={proposal} onDismiss={onDismiss} />;
     case "agency_agreement":
@@ -208,6 +213,65 @@ export function ProposalCard({ proposal, onDismiss }: { proposal: AiIntakePropos
     default:
       return <RentLedgerProposalCard proposal={proposal} onDismiss={onDismiss} />;
   }
+}
+
+/** "12 new of 14 transactions, 3 suggested as rent" for a bank statement filed to an account. */
+function BankStatementSummary({ proposal }: { proposal: AiIntakeProposal }) {
+  const { state } = useStore();
+  const payload = proposal.payload as BankStatementProposalPayload;
+  const account = state.bankAccounts.find((a) => a.id === proposal.bankAccountId);
+  const s = summarizeStatement(proposal, state);
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Badge variant="secondary">Bank statement</Badge>
+      <span className="font-medium">{account?.accountName || payload.bankName || "Bank account"}</span>
+      <span className="text-muted-foreground">
+        {payload.periodStart || "—"} → {payload.periodEnd || "—"}
+      </span>
+      <span>
+        {s.newCount} new of {s.total} transaction(s)
+        {s.rentSuggestions > 0 && <span className="text-primary"> · {s.rentSuggestions} suggested as rent</span>}
+      </span>
+    </div>
+  );
+}
+
+/** A bank statement filed against one of the bank accounts is recorded line by line from that
+ * account's Compiled bank feed (Assets → Bank Accounts), which shows each transaction once even
+ * across overlapping statements and suggests rent deposits — so the approvals list just points
+ * there, instead of a second full import card for the same lines. The statement stays here until
+ * every line is recorded or it's marked reviewed. */
+function BankStatementNoticeRow({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const { markProposalApplied } = useStore();
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
+      <BankStatementSummary proposal={proposal} />
+      <div className="flex shrink-0 gap-2">
+        <Button size="sm" asChild>
+          <Link to="/assets" search={{ section: "bankaccounts" }}>
+            Review in Bank Accounts
+          </Link>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          title="Done with this statement — any lines left are not being recorded"
+          onClick={() => markProposalApplied(proposal.id)}
+        >
+          Mark reviewed
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            if (confirm("Dismiss this statement? Its transactions are removed from the bank feed.")) onDismiss();
+          }}
+        >
+          Dismiss
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 /** Compact pending-list row for a "bill" proposal — Review opens the real Add Bill dialog
@@ -331,6 +395,36 @@ export function ProposalReviewDialog({
   }
   if (proposal.kind === "expense") {
     return <AddTransactionDialog initialProposal={proposal} open onOpenChange={onOpenChange} />;
+  }
+  // A statement uploaded to a bank account goes into that account's feed — say what it added and
+  // link there, rather than opening a full-screen import card (see BankStatementNoticeRow).
+  if (proposal.kind === "bank_statement" && proposal.bankAccountId) {
+    return (
+      <Dialog open onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Statement added to the bank feed</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <BankStatementSummary proposal={proposal} />
+            <p className="text-xs text-muted-foreground">
+              Record its transactions from the account's Compiled bank feed. Lines already in the feed from an
+              overlapping statement show once, and rent deposits matched to a tenant can be accepted in one click.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+            <Button asChild>
+              <Link to="/assets" search={{ section: "bankaccounts" }} onClick={() => onOpenChange(false)}>
+                Open Bank Accounts
+              </Link>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
   }
 
   return (
@@ -2286,6 +2380,13 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
         ? rentTenantIds[i]
         : defaultRentTenantId
       : "";
+  // A deposit going on a tenant's ledger gets the same check the rent-statement card runs —
+  // duplicateMatches above only ever looked at "out" lines, so the same rent deposit from two
+  // overlapping bank statements was posted to the ledger twice without a word.
+  const rentDuplicates = payload.transactions.map((tx, i) => {
+    const tenantId = rentTenantFor(i);
+    return tenantId ? findDuplicateLedgerEntry(state.ledger, { tenantId, amount: tx.amount, date: tx.date }) : null;
+  });
 
   const confirm = () => {
     if (!propertyId) return toast.error("Select a property first");
@@ -2487,6 +2588,16 @@ function BankStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
                   <span>
                     A matching {fmtCurrency(duplicateMatches[i]!.amount)} {duplicateMatches[i]!.kind} already exists on{" "}
                     {duplicateMatches[i]!.date} — check this isn't the same transaction imported before.
+                  </span>
+                </div>
+              )}
+              {rentDuplicates[i] && (
+                <div className="ml-6 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-1.5 text-xs text-amber-900">
+                  <span>
+                    Possible duplicate — {fmtCurrency(rentDuplicates[i]!.credit)} rent payment already on this tenant's ledger
+                    dated {rentDuplicates[i]!.date}
+                    {rentDuplicates[i]!.description ? ` ("${rentDuplicates[i]!.description}")` : ""} — check this isn't the same
+                    deposit from an overlapping statement.
                   </span>
                 </div>
               )}
@@ -3197,9 +3308,7 @@ function interpolateValueJourney(points: ValuePoint[]): ValuePoint[] {
     for (let m = i === 0 ? 0 : 1; m <= totalMonths; m++) {
       const t = m / totalMonths;
       const value = a.value > 0 && b.value > 0 ? a.value * Math.pow(b.value / a.value, t) : a.value + (b.value - a.value) * t;
-      const d = new Date(aDate);
-      d.setMonth(d.getMonth() + m);
-      out.push({ date: d.toISOString().slice(0, 10), value });
+      out.push({ date: addMonths(a.date, m), value });
     }
   }
   return out;
@@ -9057,10 +9166,7 @@ export function DeletePropertyDialog({ property, trigger, onDeleted }: { propert
 function computeLeaseEnd(start: string, duration: LeaseDuration | ""): string {
   if (!start || !duration || duration === "Periodic") return "";
   const months = duration === "6 Months" ? 6 : 12;
-  const d = new Date(start);
-  d.setMonth(d.getMonth() + months);
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return addDays(addMonths(start, months), -1);
 }
 
 /**
@@ -9153,7 +9259,7 @@ export function IncreaseRentDialog({ tenant, trigger }: { tenant: Tenant; trigge
 export function RenewLeaseDialog({ tenant, trigger }: { tenant: Tenant; trigger?: React.ReactNode }) {
   const { renewLease } = useStore();
   const [open, setOpen] = useState(false);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const [start, setStart] = useState(today);
   const [duration, setDuration] = useState<LeaseDuration | "">((tenant.leaseDuration as LeaseDuration) || "12 Months");
   const [end, setEnd] = useState<string>(computeLeaseEnd(today, "12 Months"));
@@ -9572,7 +9678,7 @@ export function TenantDialog({
               if (!check12Months()) return;
               const rentAmount = parseFloat(form.rentAmount) || 0;
               const defaultPaid = form.leaseStart
-                ? new Date(new Date(form.leaseStart).getTime() - 86400000).toISOString().slice(0, 10)
+                ? addDays(form.leaseStart, -1)
                 : todayISO();
               const payload: Omit<Tenant, "id" | "paidUpToDate"> & { paidUpToDate?: string } = {
                 name: form.name,

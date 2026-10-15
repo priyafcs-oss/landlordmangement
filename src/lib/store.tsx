@@ -52,14 +52,14 @@ import {
   saveSettings,
   subscribeToTable,
 } from "./db";
-import { paidUpToDateFromPayments, todayISO } from "./calculations";
+import { addDays, addMonths, daysBetween, paidUpToDateFromPayments, todayISO } from "./calculations";
 import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
 
 const defaultAi: AiConfig = {
   enabled: true,
   dailyCount: 0,
-  countDate: new Date().toISOString().slice(0, 10),
+  countDate: todayISO(),
   dailyLimit: 10,
 };
 
@@ -389,12 +389,6 @@ function billSourceToExpenseSource(billSource: PropertyBill["source"]): Expense[
   return "manual";
 }
 
-function addMonthsISO(iso: string, months: number): string {
-  const d = new Date(iso);
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
-}
-
 /** Persists a point-in-time value snapshot — called whenever an asset's currentValue or a
  * loan's balance changes, so the Dashboard's trend charts build real history forward from today. */
 function snapshotValuation(assetId: string, value: number): ValuationSnapshot {
@@ -498,9 +492,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (changed) void updateRow(TABLES.properties, p.id, { units });
         return changed ? { ...p, units } : p;
       });
+      // paidUpToDate is persisted, and until the DST fix in addDays it was computed a day short for
+      // any period after a daylight-saving start — re-derive it once here so it corrects itself
+      // without waiting for the next payment. Only a small drift is healed (anything bigger isn't
+      // that bug), and never when the ledger came back empty: selectAll returns [] on a failed
+      // load, which would otherwise wind every tenant back to their lease start.
+      const healedTenants =
+        ledger.length === 0
+          ? tenants
+          : tenants.map((t) => {
+              const derived = paidUpToDateFromPayments(t, ledger, rentChanges);
+              if (!t.paidUpToDate || derived === t.paidUpToDate) return t;
+              if (Math.abs(daysBetween(t.paidUpToDate, derived)) > 3) return t;
+              void updateRow(TABLES.tenants, t.id, { paidUpToDate: derived });
+              return { ...t, paidUpToDate: derived };
+            });
       const next: AppState = {
         properties: propertiesWithUnitIds,
-        tenants,
+        tenants: healedTenants,
         providers,
         providerAgreements,
         providerProperties,
@@ -770,12 +779,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     addTenant: (t) => {
       // Paid-up default = one day BEFORE lease start (so day 1 of lease reads as first due day)
-      let defaultPaidUp = new Date().toISOString().slice(0, 10);
-      if (t.leaseStart) {
-        const d = new Date(t.leaseStart);
-        d.setDate(d.getDate() - 1);
-        defaultPaidUp = d.toISOString().slice(0, 10);
-      }
+      let defaultPaidUp = todayISO();
+      if (t.leaseStart) defaultPaidUp = addDays(t.leaseStart, -1);
       const row: Tenant = { ...t, paidUpToDate: t.paidUpToDate || defaultPaidUp, id: uid("t") };
       void upsertRow(TABLES.tenants, row as unknown as Record<string, unknown>);
       set((s) => ({ ...s, tenants: [...s.tenants, row] }));
@@ -794,7 +799,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             // The landlord-chosen effective date (IncreaseRentDialog always sets this alongside
             // rentAmount) — not "today", which silently backdated every increase to whenever it
             // happened to be clicked rather than the date it was meant to take effect.
-            changeDate: patch.lastRentIncreaseDate ?? new Date().toISOString().slice(0, 10),
+            changeDate: patch.lastRentIncreaseDate ?? todayISO(),
             oldRent: prev.rentAmount,
             newRent: patch.rentAmount,
           };
@@ -1506,7 +1511,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       set((s) => ({ ...s, bills: s.bills.filter((x) => x.id !== id) }));
     },
     markBillPaid: (id, opts) => {
-      const paidDate = opts?.paidDate ?? new Date().toISOString().slice(0, 10);
+      const paidDate = opts?.paidDate ?? todayISO();
       const paymentMethod = opts?.paymentMethod;
       const notes = opts?.notes;
       let result = { status: "Paid" as "Paid" | "Partial", amountApplied: 0, amountOwed: 0 } as ReturnType<StoreCtx["markBillPaid"]>;
@@ -1658,7 +1663,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const next: PropertyBill = {
             ...bill,
             id: uid("bill"),
-            dueDate: addMonthsISO(bill.dueDate, bill.recurrenceMonths),
+            dueDate: addMonths(bill.dueDate, bill.recurrenceMonths),
             status: "Unpaid",
             paidDate: undefined,
             linkedExpenseId: undefined,
@@ -1771,12 +1776,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
     resetAiUsage: () =>
       set((s) => {
-        const aiConfig = { ...s.aiConfig, dailyCount: 0, countDate: new Date().toISOString().slice(0, 10) };
+        const aiConfig = { ...s.aiConfig, dailyCount: 0, countDate: todayISO() };
         void saveSettings({ aiConfig });
         return { ...s, aiConfig };
       }),
     consumeAiBudget: () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       if (!state.aiConfig.enabled) return { ok: false, reason: "AI Assistant APIs are disabled by Creator Master Panel." };
       const currentCount = state.aiConfig.countDate === today ? state.aiConfig.dailyCount : 0;
       if (currentCount >= state.aiConfig.dailyLimit) {

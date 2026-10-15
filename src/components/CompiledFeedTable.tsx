@@ -30,6 +30,12 @@ export interface CompiledFeedRow {
   statusNote?: string;
   onRecord?: () => void;
   onUnrecord?: () => void;
+  /** Muted line under the description, e.g. "On 2 statements". */
+  note?: string;
+  /** Amber line under the description, e.g. a possible duplicate already on the books. */
+  warning?: string;
+  /** A one-click way to record a "feed_only" line, shown next to Record. */
+  suggestion?: { label: string; reason: string; onAccept: () => void };
 }
 
 type SortField = "date" | "description" | "amount" | "status";
@@ -75,10 +81,21 @@ function RowActions({ r }: { r: CompiledFeedRow }) {
     );
   }
   return (
-    <div className="flex items-center justify-end gap-2">
-      <Badge variant="outline">Feed only</Badge>
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {r.suggestion ? (
+        <>
+          <Badge variant="outline" className="border-primary/40 font-normal text-primary" title={r.suggestion.reason}>
+            {r.suggestion.label}
+          </Badge>
+          <Button size="sm" className="h-6 text-xs" onClick={r.suggestion.onAccept}>
+            Accept
+          </Button>
+        </>
+      ) : (
+        <Badge variant="outline">Feed only</Badge>
+      )}
       {r.onRecord && (
-        <Button size="sm" className="h-6 text-xs" onClick={r.onRecord}>
+        <Button size="sm" variant={r.suggestion ? "outline" : "default"} className="h-6 text-xs" onClick={r.onRecord}>
           Record
         </Button>
       )}
@@ -117,8 +134,12 @@ function FeedTableBody({
           {rows.map((r) => (
             <tr key={r.key} className="border-b last:border-0 hover:bg-muted/30">
               <td className="whitespace-nowrap px-3 py-2">{r.date}</td>
-              <td className="max-w-[320px] truncate px-3 py-2" title={r.description}>
-                {r.description}
+              <td className="max-w-[320px] px-3 py-2">
+                <div className="truncate" title={r.description}>
+                  {r.description}
+                </div>
+                {r.note && <div className="text-[10px] text-muted-foreground">{r.note}</div>}
+                {r.warning && <div className="text-[10px] text-amber-700 dark:text-amber-400">{r.warning}</div>}
               </td>
               <td
                 className={

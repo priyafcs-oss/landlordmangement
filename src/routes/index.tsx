@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import {
   daysUntil,
+  localISO,
   todayISO,
   inspectionDueStatus,
   propertyInspectionCadenceDays,
@@ -369,8 +370,8 @@ function HousekeepingWidget() {
       if (due < today) due = new Date(today.getFullYear(), today.getMonth() + 1, day);
       return {
         loan: l,
-        days: daysUntil(due.toISOString().slice(0, 10)),
-        date: due.toISOString().slice(0, 10),
+        days: daysUntil(localISO(due)),
+        date: localISO(due),
       };
     })
     .filter((x) => x.days <= 7)

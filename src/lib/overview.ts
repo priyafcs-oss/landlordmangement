@@ -11,7 +11,7 @@ import type {
   Asset,
   Entity,
 } from "./types";
-import { daysUntil, todayISO } from "./calculations";
+import { addMonths, daysUntil, localISO, todayISO } from "./calculations";
 
 /** Value/debt/equity headline figures for a scope (one property, one entity, or the whole portfolio). */
 export interface OverviewMetrics {
@@ -61,9 +61,10 @@ export function computeCashflowSeries(
   const totalEmis = loans.reduce((s, l) => s + (l.monthlyEmi || 0), 0);
   const months: CashflowMonth[] = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setMonth(d.getMonth() - i);
-    const key = d.toISOString().slice(0, 7);
+    // Day 1 so e.g. 31 Oct minus a month doesn't overflow into 1 Oct; local date, not UTC.
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = localISO(d).slice(0, 7);
     const income = ledger.filter((e) => e.date.startsWith(key)).reduce((s, e) => s + e.credit, 0);
     const opEx = expenses.filter((e) => e.date.startsWith(key)).reduce((s, e) => s + e.cost, 0);
     const outgoing = opEx + totalEmis;
@@ -142,13 +143,14 @@ function perRepaymentAmount(loan: Loan): number {
  * [windowStart, windowEnd] — rolling forward first if `fromISO` is stale (in the past). Bounded so
  * a malformed/very-old date can't loop indefinitely. */
 function occurrencesInWindow(fromISO: string, frequency: Loan["repaymentFrequency"], windowStart: Date, windowEnd: Date): Date[] {
-  let d = new Date(fromISO);
+  let d = new Date(fromISO.slice(0, 10) + "T00:00:00Z");
   if (isNaN(d.getTime())) return [];
+  // UTC steps (and UTC-midnight window bounds below) so a daylight-saving change can't shift a date.
   const step = (date: Date) => {
     const next = new Date(date);
-    if (frequency === "Weekly") next.setDate(next.getDate() + 7);
-    else if (frequency === "Fortnightly") next.setDate(next.getDate() + 14);
-    else next.setMonth(next.getMonth() + 1);
+    if (frequency === "Weekly") next.setUTCDate(next.getUTCDate() + 7);
+    else if (frequency === "Fortnightly") next.setUTCDate(next.getUTCDate() + 14);
+    else next.setUTCMonth(next.getUTCMonth() + 1);
     return next;
   };
   for (let i = 0; d < windowStart && i < 1000; i++) d = step(d);
@@ -164,10 +166,9 @@ function occurrencesInWindow(fromISO: string, frequency: Loan["repaymentFrequenc
  * cash already sitting against it — flags a shortfall where the offset can't cover the instalment.
  * A loan with no `nextRepaymentDate` on file is skipped (nothing to schedule from). */
 export function computeUpcomingRepayments(loans: Loan[], properties: Property[], windowDays: number): UpcomingRepaymentsSummary {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = new Date(todayISO() + "T00:00:00Z");
   const end = new Date(today);
-  end.setDate(end.getDate() + windowDays);
+  end.setUTCDate(end.getUTCDate() + windowDays);
 
   const items: UpcomingRepaymentItem[] = [];
   for (const loan of loans) {
@@ -227,9 +228,7 @@ export interface BufferDetailsSummary {
  * rolled-up percentage computeBufferStatus shows. Same "avg of the trailing 3 months' expenses in
  * scope" estimate as the dedicated Buffers page (see buffers.tsx's monthlyExpenseEstimate). */
 export function computeBufferDetails(buffers: CashBuffer[], expenses: Expense[], assets: Asset[], entities: Entity[]): BufferDetailsSummary {
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 3);
-  const cutoffIso = cutoff.toISOString().slice(0, 10);
+  const cutoffIso = addMonths(todayISO(), -3);
 
   const monthlyExpenseEstimate = (scopeType: CashBuffer["scopeType"], scopeId?: string) => {
     const relevant = expenses.filter((e) => {
@@ -368,9 +367,9 @@ export function computeValueDebtTrend(
   if (range === "12M") {
     const points: ValueDebtPoint[] = [];
     for (let i = 11; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+      const now = new Date();
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = localISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
       const value = properties.reduce((s, p) => {
         if (!p.assetId) return s;
         const snap = latestAtOrBefore(
@@ -402,7 +401,7 @@ export function computeValueDebtTrend(
 
   for (let i = 2; i >= 0; i--) {
     const y = now.getFullYear() - i;
-    const asOf = i === 0 ? now.toISOString().slice(0, 10) : `${y}-12-31`;
+    const asOf = i === 0 ? todayISO() : `${y}-12-31`;
     const value =
       i === 0
         ? properties.reduce((s, p) => s + (p.currentValue || 0), 0)

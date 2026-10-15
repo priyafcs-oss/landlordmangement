@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fmtCurrency } from "@/lib/calculations";
+import { fmtCurrency, localISO, todayISO } from "@/lib/calculations";
 
 export const Route = createFileRoute("/forecasts")({
   head: () => ({
@@ -41,7 +41,7 @@ export function ForecastsContent() {
   const { state } = useStore();
   const [months, setMonths] = useState<3 | 6 | 12>(6);
 
-  const activeTenants = state.tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= new Date().toISOString().slice(0, 10));
+  const activeTenants = state.tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
   const knownMonthlyRent = activeTenants.reduce((s, t) => s + monthlyRent(t.rentAmount, t.rentFrequency), 0);
   const monthlyEmiTotal = state.loans.reduce((s, l) => s + l.monthlyEmi, 0);
 
@@ -52,9 +52,10 @@ export function ForecastsContent() {
   let projectedBalances = state.loans.map((l) => ({ id: l.id, balance: l.totalBalance, rate: l.interestRate, emi: l.monthlyEmi }));
 
   for (let i = 0; i < months; i++) {
-    const d = new Date();
-    d.setMonth(d.getMonth() + i + 1);
-    const key = d.toISOString().slice(0, 7);
+    // Day 1 so the 31st of a month doesn't overflow past a shorter month; local, not UTC.
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1);
+    const key = localISO(d).slice(0, 7);
     const name = d.toLocaleString("en-AU", { month: "short", year: "2-digit" });
 
     const billsDue = state.bills

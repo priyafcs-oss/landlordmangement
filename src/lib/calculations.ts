@@ -227,9 +227,12 @@ export function rentAmountOnDate(tenant: Tenant, rentChanges: RentChange[], date
   return amount;
 }
 
+/** Date-only arithmetic in UTC throughout. Mixing a UTC parse with a local-time setDate lost a
+ * day for every date after a daylight-saving start (e.g. NSW, 4 Oct 2026): 10:00 AEST became
+ * 10:00 AEDT = 23:00 UTC the day before, so a weekly rent cycle read 03 → 08 instead of 03 → 09. */
 export function addDays(iso: string, days: number): string {
-  const d = new Date(iso);
-  d.setDate(d.getDate() + days);
+  const d = new Date(iso.slice(0, 10) + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -239,8 +242,16 @@ export function daysBetween(a: string, b: string): number {
   return Math.round((db - da) / 86400000);
 }
 
+/** Today's LOCAL calendar date — toISOString() is the UTC date, which in Sydney is still
+ * yesterday until 10 or 11am. */
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localISO(new Date());
+}
+
+/** A Date's LOCAL calendar date as YYYY-MM-DD — use instead of toISOString().slice(0, 10) for a
+ * Date built from local fields (new Date(y, m, d), setMonth, ...), which would read back as UTC. */
+export function localISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** Formats a created_at/updatedAt ISO timestamp for "last modified" displays (Transactions,
@@ -646,10 +657,10 @@ export function buildDepreciationSchedule(items: DepreciationItem[]): Depreciati
     .sort((a, b) => (a.fy < b.fy ? -1 : 1));
 }
 
-/** Add whole months and return ISO date */
+/** Add whole months and return ISO date — UTC throughout, same reason as addDays. */
 export function addMonths(iso: string, months: number): string {
-  const d = new Date(iso);
-  d.setMonth(d.getMonth() + months);
+  const d = new Date(iso.slice(0, 10) + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + months);
   return d.toISOString().slice(0, 10);
 }
 

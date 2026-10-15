@@ -3,6 +3,7 @@ import { useStore } from "@/lib/store";
 import { fmtCurrency, expenseCategoryToTaxCategory, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -23,9 +24,19 @@ import { CompiledFeedTable, type CompiledFeedRow } from "@/components/CompiledFe
 import { DocumentLink } from "@/components/DocumentLink";
 import { AddBankAccountDialog } from "@/components/AddBankAccountDialog";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
-import { FileUp, FileText, Pencil } from "lucide-react";
+import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
+import { FileUp, FileText, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/lib/types";
+import {
+  annotateFeedRow,
+  buildFeedRows,
+  existingRecordFor,
+  rowsForStatement,
+  type FeedRow,
+  type FeedRowAnnotation,
+} from "@/lib/bankFeed";
+import type { DuplicateMatch } from "@/lib/billMatch";
 import type {
   AiIntakeProposal,
   BankAccount,
@@ -33,57 +44,6 @@ import type {
   ExpenseCategory,
   LedgerEntry,
 } from "@/lib/types";
-
-interface FeedRow {
-  proposalId: string;
-  lineIndex: number;
-  date: string;
-  description: string;
-  amount: number;
-  direction: "in" | "out";
-  providerId?: string;
-  suggestedProviderName?: string;
-  suggestedPropertyId?: string;
-  sourceFileName?: string;
-  sourceFileData?: string;
-  recorded: boolean;
-  expenseId?: string;
-  /** Set instead of expenseId when the line was recorded as a tenant's rent payment. */
-  ledgerEntryId?: string;
-}
-
-
-function buildFeedRows(
-  proposals: AiIntakeProposal[],
-  expenses: ReturnType<typeof useStore>["state"]["expenses"],
-  ledger: LedgerEntry[],
-): FeedRow[] {
-  const rows: FeedRow[] = [];
-  for (const p of proposals) {
-    const payload = p.payload as BankStatementProposalPayload;
-    payload.transactions.forEach((tx, i) => {
-      const match = expenses.find((e) => e.feedProposalId === p.id && e.feedLineIndex === i);
-      const ledgerMatch = match ? undefined : ledger.find((e) => e.feedProposalId === p.id && e.feedLineIndex === i);
-      rows.push({
-        proposalId: p.id,
-        lineIndex: i,
-        date: tx.date,
-        description: tx.description,
-        amount: tx.amount,
-        direction: tx.direction,
-        providerId: tx.providerId,
-        suggestedProviderName: tx.suggestedProviderName,
-        suggestedPropertyId: p.propertyId,
-        sourceFileName: p.sourceFileName,
-        sourceFileData: p.sourceFileData,
-        recorded: !!match || !!ledgerMatch,
-        expenseId: match?.id,
-        ledgerEntryId: ledgerMatch?.id,
-      });
-    });
-  }
-  return rows.sort((a, b) => (a.date < b.date ? 1 : -1));
-}
 
 /** The record-transaction dialog is identical for a specific account's feed and the unassigned
  * bucket below — factored out once rather than duplicated between BankAccountFeed and
@@ -95,7 +55,7 @@ function RecordTransactionDialog({
 }: {
   recording: FeedRow | null;
   onClose: () => void;
-  onRecord: (row: FeedRow, propertyId: string, category: string, tenantId?: string) => void;
+  onRecord: (args: RecordArgs) => void;
 }) {
   const { state } = useStore();
   const [category, setCategory] = useState<string>("");
@@ -109,16 +69,20 @@ function RecordTransactionDialog({
     : (likelyRentTenantId(state.tenants, state.ledger, propertyId) ?? "");
 
   // Re-seed whenever a different row opens — a stale category/property from the previous row
-  // must never carry over into this one.
+  // must never carry over into this one. The line's own suggestion (e.g. rent from a named
+  // tenant) wins over the generic per-direction default.
   if (recording && category === "" && propertyId === "") {
+    const suggestion = annotateFeedRow(recording, state).suggestion;
     const provider = recording.providerId
       ? state.providers.find((p) => p.id === recording.providerId)
       : undefined;
     setCategory(
-      provider?.defaultCategory ??
+      suggestion?.category ??
+        provider?.defaultCategory ??
         (recording.direction === "in" ? "Other Rental Income" : "Sundry Rental Expenses"),
     );
-    setPropertyId(recording.suggestedPropertyId ?? "");
+    setPropertyId(suggestion?.propertyId ?? recording.suggestedPropertyId ?? "");
+    setTenantId(suggestion?.tenantId ?? "");
   }
 
   const close = () => {
@@ -204,7 +168,12 @@ function RecordTransactionDialog({
             onClick={() => {
               if (!recording) return;
               if (!propertyId) return toast.error("Select which property this belongs to");
-              onRecord(recording, propertyId, category, isRent ? chosenTenantId || undefined : undefined);
+              onRecord({
+                row: recording,
+                propertyId,
+                category,
+                tenantId: isRent ? chosenTenantId || undefined : undefined,
+              });
               close();
             }}
           >
@@ -216,12 +185,22 @@ function RecordTransactionDialog({
   );
 }
 
-/** Recording/unrecording a feed line — shared by a specific account's feed and the unassigned
- * bucket. */
-function useFeedRecording() {
-  const { addExpense, deleteExpense, addLedger, deleteLedger, markProposalApplied } = useStore();
+interface RecordArgs {
+  row: FeedRow;
+  propertyId: string;
+  category: string;
+  /** Set when the line is a rent payment for this tenant's ledger. */
+  tenantId?: string;
+}
 
-  const record = (row: FeedRow, propertyId: string, category: string, tenantId?: string) => {
+/** Recording/unrecording a feed line — shared by a specific account's feed and the unassigned
+ * bucket. `rows` is the whole feed the lines come from, used to tell when a statement has nothing
+ * left to record. Render `dialog` once: it's the duplicate warning a record can stop on. */
+function useFeedRecording(rows: FeedRow[]) {
+  const { state, addExpense, deleteExpense, addLedger, deleteLedger, markProposalApplied, updateProposal } = useStore();
+  const [pending, setPending] = useState<{ args: RecordArgs; match: DuplicateMatch } | null>(null);
+
+  const write = ({ row, propertyId, category, tenantId }: RecordArgs) => {
     if (tenantId) {
       addLedger({
         tenantId,
@@ -258,42 +237,188 @@ function useFeedRecording() {
         feedLineIndex: row.lineIndex,
       });
     }
-    markProposalApplied(row.proposalId, { propertyId });
-    toast.success(tenantId ? "Recorded as rent on the tenant's ledger" : "Recorded");
+  };
+
+  /** A statement stays "pending" (and on the Needs-your-approval list) until every line on it is
+   * recorded or it's marked reviewed — recording its first line used to mark it done outright.
+   * Also files the statement under the property its first recorded line went to, as before. */
+  const settle = (recorded: RecordArgs[]) => {
+    const recordedRows = new Set(recorded.map((a) => a.row));
+    const statementIds = new Set(recorded.flatMap((a) => a.row.copies.map((c) => c.proposalId)));
+    for (const id of statementIds) {
+      const proposal = state.aiProposals.find((p) => p.id === id);
+      if (!proposal) continue;
+      const firstPropertyId = recorded.find((a) => a.row.copies.some((c) => c.proposalId === id))?.propertyId;
+      if (!proposal.propertyId && firstPropertyId) updateProposal(id, { propertyId: firstPropertyId });
+      const open = rowsForStatement(rows, id).filter((r) => !r.recorded && !recordedRows.has(r));
+      if (open.length === 0 && proposal.status === "pending") markProposalApplied(id);
+    }
+  };
+
+  const record = (args: RecordArgs) => {
+    const match = existingRecordFor(args.row, args.tenantId, args.propertyId, state);
+    if (match) return setPending({ args, match });
+    write(args);
+    settle([args]);
+    toast.success(args.tenantId ? "Recorded as rent on the tenant's ledger" : "Recorded");
+  };
+
+  /** "Accept all suggestions" — only lines with nothing already on the books, and skipping any
+   * that would duplicate another line earlier in this same batch (e.g. two same-amount deposits a
+   * day apart both suggested as one tenant's rent), since those don't exist in state yet to check. */
+  const recordMany = (list: RecordArgs[]) => {
+    const batchLedger: LedgerEntry[] = [];
+    const accepted: RecordArgs[] = [];
+    for (const args of list) {
+      const ledger = [...state.ledger, ...batchLedger];
+      if (existingRecordFor(args.row, args.tenantId, args.propertyId, { ...state, ledger })) continue;
+      write(args);
+      accepted.push(args);
+      if (args.tenantId) {
+        batchLedger.push({
+          id: `batch-${batchLedger.length}`,
+          tenantId: args.tenantId,
+          date: args.row.date,
+          type: "Rent Payment",
+          description: args.row.description,
+          debit: 0,
+          credit: args.row.amount,
+        } as LedgerEntry);
+      }
+    }
+    settle(accepted);
+    const skipped = list.length - accepted.length;
+    toast.success(`Recorded ${accepted.length} transaction(s)${skipped ? ` — skipped ${skipped} that looked like duplicates` : ""}`);
   };
 
   const unrecord = (r: FeedRow) => {
     if (!r.expenseId && !r.ledgerEntryId) return;
     const what = r.ledgerEntryId ? "rent payment from the tenant's ledger" : "recorded expense";
-    if (!confirm(`Revert this transaction back to the feed? This deletes the ${what}.`)) return;
+    const msg =
+      r.recordedCount > 1
+        ? `This transaction was recorded ${r.recordedCount} times (once from each overlapping statement). Remove one copy? This deletes one ${what}.`
+        : `Revert this transaction back to the feed? This deletes the ${what}.`;
+    if (!confirm(msg)) return;
     if (r.ledgerEntryId) deleteLedger(r.ledgerEntryId);
     else if (r.expenseId) deleteExpense(r.expenseId);
-    toast.success("Reverted to feed");
+    toast.success(r.recordedCount > 1 ? "Removed the extra copy" : "Reverted to feed");
   };
 
-  return { record, unrecord };
+  const dialog = (
+    <DuplicateWarningDialog
+      match={pending?.match ?? null}
+      onCancel={() => setPending(null)}
+      onSaveAnyway={() => {
+        if (!pending) return;
+        write(pending.args);
+        settle([pending.args]);
+        setPending(null);
+        toast.success("Recorded");
+      }}
+    />
+  );
+
+  return { record, recordMany, unrecord, dialog };
+}
+
+function existingLabel(m: DuplicateMatch): string {
+  const what = m.kind === "rent" ? "rent payment" : m.kind === "bill" ? "bill" : "transaction";
+  return `Possible duplicate — a ${fmtCurrency(m.amount)} ${what} dated ${m.date} is already recorded${m.label ? ` ("${m.label}")` : ""}`;
+}
+
+type AnnotatedRow = FeedRowAnnotation & { row: FeedRow };
+
+function annotate(rows: FeedRow[], state: ReturnType<typeof useStore>["state"]): AnnotatedRow[] {
+  return rows.map((row) => (row.recorded ? { row, suggestion: null, existing: null } : { row, ...annotateFeedRow(row, state) }));
+}
+
+/** Rows a one-click "Accept" can safely record: a suggestion, and nothing already on the books. */
+function acceptable(a: AnnotatedRow): boolean {
+  return !a.row.recorded && !!a.suggestion && !a.existing;
+}
+
+function argsFromSuggestion(a: AnnotatedRow): RecordArgs {
+  const s = a.suggestion!;
+  return { row: a.row, propertyId: s.propertyId, category: s.category, tenantId: s.tenantId };
 }
 
 function FeedRowList({
   rows,
   onRecord,
+  onAccept,
   onUnrecord,
 }: {
-  rows: FeedRow[];
+  rows: AnnotatedRow[];
   onRecord: (r: FeedRow) => void;
+  onAccept: (a: AnnotatedRow) => void;
   onUnrecord: (r: FeedRow) => void;
 }) {
-  const tableRows: CompiledFeedRow[] = rows.map((r) => ({
-    key: `${r.proposalId}-${r.lineIndex}`,
-    date: r.date,
-    description: r.description,
-    amount: r.amount,
-    direction: r.direction === "in" ? "credit" : "debit",
-    status: r.recorded ? "recorded" : "feed_only",
-    onRecord: !r.recorded ? () => onRecord(r) : undefined,
-    onUnrecord: r.recorded && (r.expenseId || r.ledgerEntryId) ? () => onUnrecord(r) : undefined,
-  }));
+  const tableRows: CompiledFeedRow[] = rows.map((a) => {
+    const r = a.row;
+    return {
+      key: `${r.proposalId}-${r.lineIndex}`,
+      date: r.date,
+      description: r.description,
+      amount: r.amount,
+      direction: r.direction === "in" ? "credit" : "debit",
+      status: r.recorded ? "recorded" : "feed_only",
+      onRecord: !r.recorded ? () => onRecord(r) : undefined,
+      onUnrecord: r.recorded && (r.expenseId || r.ledgerEntryId) ? () => onUnrecord(r) : undefined,
+      note: r.copies.length > 1 ? `On ${r.copies.length} overlapping statements — shown once` : undefined,
+      warning:
+        r.recordedCount > 1
+          ? `Recorded ${r.recordedCount} times (once per overlapping statement) — Unrecord removes the extra`
+          : a.existing
+            ? existingLabel(a.existing)
+            : undefined,
+      suggestion: acceptable(a)
+        ? { label: a.suggestion!.label, reason: a.suggestion!.reason, onAccept: () => onAccept(a) }
+        : undefined,
+    };
+  });
   return <CompiledFeedTable rows={tableRows} />;
+}
+
+/** One compiled feed (an account's, or the unassigned bucket's) — the table, its Accept-all
+ * action, the record dialog and the duplicate warning, shared by both. */
+function FeedSection({ proposals }: { proposals: AiIntakeProposal[] }) {
+  const { state } = useStore();
+  const rows = buildFeedRows(proposals, state);
+  const { record, recordMany, unrecord, dialog } = useFeedRecording(rows);
+  const [recording, setRecording] = useState<FeedRow | null>(null);
+  const annotated = annotate(rows, state);
+  const suggested = annotated.filter(acceptable);
+
+  return (
+    <div className="space-y-2">
+      {suggested.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-primary/30 bg-primary/5 p-2 text-xs">
+          <span className="flex items-center gap-1">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            {suggested.length} line(s) have a suggestion — e.g. rent deposits matched to a tenant.
+          </span>
+          <Button
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() => {
+              if (!confirm(`Record all ${suggested.length} suggested line(s) as suggested?`)) return;
+              recordMany(suggested.map(argsFromSuggestion));
+            }}
+          >
+            Accept all suggestions ({suggested.length})
+          </Button>
+        </div>
+      )}
+      <FeedRowList
+        rows={annotated}
+        onRecord={setRecording}
+        onAccept={(a) => record(argsFromSuggestion(a))}
+        onUnrecord={unrecord}
+      />
+      <RecordTransactionDialog recording={recording} onClose={() => setRecording(null)} onRecord={record} />
+      {dialog}
+    </div>
+  );
 }
 
 function relevantBankStatementProposals(
@@ -305,9 +430,11 @@ function relevantBankStatementProposals(
   );
 }
 
-/** One bank account's own uploaded/emailed statements — file name, period, View. */
+/** One bank account's own uploaded/emailed statements — file name, period, View. A statement
+ * stays "New" until every line is recorded or it's marked reviewed here (e.g. the rest are
+ * personal transactions that will never be recorded). */
 function BankAccountStatementFiles({ account }: { account: BankAccount }) {
-  const { state } = useStore();
+  const { state, markProposalApplied } = useStore();
   const proposals = relevantBankStatementProposals(
     state.aiProposals,
     (p) => p.bankAccountId === account.id,
@@ -330,6 +457,24 @@ function BankAccountStatementFiles({ account }: { account: BankAccount }) {
               <span className="text-muted-foreground">
                 {payload.periodStart || "—"} → {payload.periodEnd || "—"}
               </span>
+              {p.status === "pending" ? (
+                <>
+                  <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
+                    New
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-xs"
+                    title="Done with this statement — any lines left are not being recorded"
+                    onClick={() => markProposalApplied(p.id)}
+                  >
+                    Mark reviewed
+                  </Button>
+                </>
+              ) : (
+                <Badge variant="secondary">Reviewed</Badge>
+              )}
               {p.sourceFileData && (
                 <DocumentLink
                   fileName={p.sourceFileName}
@@ -352,25 +497,18 @@ function BankAccountStatementFiles({ account }: { account: BankAccount }) {
  * to (an everyday account routinely pays bills for more than one property). */
 function BankAccountFeed({ account }: { account: BankAccount }) {
   const { state } = useStore();
-  const { record, unrecord } = useFeedRecording();
   const proposals = relevantBankStatementProposals(
     state.aiProposals,
     (p) => p.bankAccountId === account.id,
   );
-  const rows = buildFeedRows(proposals, state.expenses, state.ledger);
-  const [recording, setRecording] = useState<FeedRow | null>(null);
-  if (rows.length === 0) return null;
+  if (proposals.length === 0) return null;
+  const lineCount = buildFeedRows(proposals, state).length;
 
   return (
-    <CollapsibleGroupSection label="Compiled bank feed" summary={<span>{rows.length}</span>}>
+    <CollapsibleGroupSection label="Compiled bank feed" summary={<span>{lineCount}</span>}>
       <div className="p-3">
-        <FeedRowList rows={rows} onRecord={setRecording} onUnrecord={unrecord} />
+        <FeedSection proposals={proposals} />
       </div>
-      <RecordTransactionDialog
-        recording={recording}
-        onClose={() => setRecording(null)}
-        onRecord={record}
-      />
     </CollapsibleGroupSection>
   );
 }
@@ -380,11 +518,8 @@ function BankAccountFeed({ account }: { account: BankAccount }) {
  * recordable rather than silently dropped, but not filed under any one account's own sections. */
 function UnassignedBankFeed() {
   const { state } = useStore();
-  const { record, unrecord } = useFeedRecording();
   const proposals = relevantBankStatementProposals(state.aiProposals, (p) => !p.bankAccountId);
-  const rows = buildFeedRows(proposals, state.expenses, state.ledger);
-  const [recording, setRecording] = useState<FeedRow | null>(null);
-  if (rows.length === 0) return null;
+  if (proposals.length === 0) return null;
 
   return (
     <div className="space-y-2 border-t pt-4">
@@ -395,12 +530,7 @@ function UnassignedBankFeed() {
           account.
         </div>
       </div>
-      <FeedRowList rows={rows} onRecord={setRecording} onUnrecord={unrecord} />
-      <RecordTransactionDialog
-        recording={recording}
-        onClose={() => setRecording(null)}
-        onRecord={record}
-      />
+      <FeedSection proposals={proposals} />
     </div>
   );
 }
