@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFeedRows, summarizeStatement } from "@/lib/bankFeed";
+import { annotateFeedRow, buildFeedRows, isAcceptable, summarizeStatement } from "@/lib/bankFeed";
 import { feedTotals } from "@/lib/bankFeed";
 import type { AiIntakeProposal, AppState, Expense, LedgerEntry, Tenant } from "@/lib/types";
 
@@ -165,5 +165,81 @@ describe("feedTotals (month subtotals in the compiled feed)", () => {
 
   it("is zero for no rows", () => {
     expect(feedTotals([])).toEqual({ totalIn: 0, totalOut: 0, net: 0 });
+  });
+});
+
+describe("recording an expense asks which property (no default from the statement)", () => {
+  const annotateState = {
+    tenants: [tenant],
+    providers: [],
+    providerProperties: [],
+    ledger: [],
+    bills: [],
+    expenses: [],
+  } as unknown as AppState;
+  const strata = {
+    date: "2026-10-06",
+    description: "BPAY STRATA LEVY",
+    amount: 950,
+    direction: "out",
+  } as const;
+
+  it("a bank-account statement's own property (stamped by an earlier rent line) isn't inherited", () => {
+    const st = { ...statement("s5", [strata]), propertyId: "p1" } as AiIntakeProposal;
+    const [row] = buildFeedRows([st], empty);
+    expect(row.suggestedPropertyId).toBeUndefined();
+    expect(annotateFeedRow(row, annotateState).suggestion?.propertyId).toBeUndefined();
+  });
+
+  it("a statement not filed to an account still carries its property", () => {
+    const st = {
+      ...statement("s6", [strata]),
+      bankAccountId: undefined,
+      propertyId: "p1",
+    } as AiIntakeProposal;
+    expect(buildFeedRows([st], empty)[0].suggestedPropertyId).toBe("p1");
+  });
+
+  it("an expense is never one-click — only rent and bill payments are", () => {
+    const [row] = buildFeedRows([statement("s7", [strata])], empty);
+    const base = { row, existing: null };
+    expect(
+      isAcceptable({
+        ...base,
+        suggestion: {
+          kind: "expense",
+          category: "Strata Levies",
+          propertyId: "p1",
+          label: "",
+          reason: "",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isAcceptable({
+        ...base,
+        suggestion: {
+          kind: "bill",
+          category: "Strata Levies",
+          propertyId: "p1",
+          billId: "b1",
+          label: "",
+          reason: "",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isAcceptable({
+        ...base,
+        suggestion: {
+          kind: "rent",
+          category: "Gross Rent",
+          propertyId: "p1",
+          tenantId: "t1",
+          label: "",
+          reason: "",
+        },
+      }),
+    ).toBe(true);
   });
 });

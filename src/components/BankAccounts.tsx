@@ -110,9 +110,9 @@ function RecordTransactionDialog({
               {recording.date} · {recording.description} ·{" "}
               <span className="font-medium text-foreground">{fmtCurrency(recording.amount)}</span>
             </div>
-            <Field label="Property">
+            <Field label="Which property is this for?">
               <Select value={propertyId} onValueChange={setPropertyId}>
-                <SelectTrigger>
+                <SelectTrigger className={propertyId ? "" : "border-amber-500"}>
                   <SelectValue placeholder="Select property" />
                 </SelectTrigger>
                 <SelectContent>
@@ -268,7 +268,10 @@ function useFeedRecording(rows: FeedRow[]) {
       const proposal = state.aiProposals.find((p) => p.id === id);
       if (!proposal) continue;
       const firstPropertyId = recorded.find((a) => a.row.copies.some((c) => c.proposalId === id))?.propertyId;
-      if (!proposal.propertyId && firstPropertyId) updateProposal(id, { propertyId: firstPropertyId });
+      // Never for a bank-account statement — see buildFeedRows' suggestedPropertyId.
+      if (!proposal.bankAccountId && !proposal.propertyId && firstPropertyId) {
+        updateProposal(id, { propertyId: firstPropertyId });
+      }
       const open = rowsForStatement(rows, id).filter((r) => !r.recorded && !recordedRows.has(r));
       if (open.length === 0 && proposal.status === "pending") markProposalApplied(id);
     }

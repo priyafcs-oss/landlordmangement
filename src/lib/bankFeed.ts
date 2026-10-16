@@ -92,7 +92,10 @@ export function buildFeedRows(proposals: AiIntakeProposal[], state: FeedState): 
       direction: tx.direction,
       providerId: tx.providerId,
       suggestedProviderName: tx.suggestedProviderName,
-      suggestedPropertyId: primary.p.propertyId ?? copies.find((c) => c.p.propertyId)?.p.propertyId,
+      // Only a statement NOT filed to a bank account carries a property for its lines: an everyday
+      // account pays for several properties, and a property stamped on its statement (by the first
+      // line recorded from it) made every later line — expenses included — default to that one.
+      suggestedPropertyId: copies.find((c) => !c.p.bankAccountId && c.p.propertyId)?.p.propertyId,
       sourceFileName: primary.p.sourceFileName,
       sourceFileData: primary.p.sourceFileData,
       recorded: recordedCopies.length > 0,
@@ -146,7 +149,9 @@ export function annotateFeedRow(row: FeedRow, state: AnnotateState): FeedRowAnno
 /** A flagged line that's safe to record in one click: a suggestion with a known property, and
  * nothing already on the books for it. */
 export function isAcceptable(a: FeedRowAnnotation & { row: FeedRow }): boolean {
-  return !a.row.recorded && !!a.suggestion?.propertyId && !a.existing;
+  // A plain expense always goes through the Record dialog so the landlord picks its property —
+  // only rent (the tenant fixes the property) and a bill payment (the bill does) are one-click.
+  return !a.row.recorded && a.suggestion?.kind !== "expense" && !!a.suggestion?.propertyId && !a.existing;
 }
 
 /** The duplicate check recording this line would trip: a matching rent payment on the tenant's
