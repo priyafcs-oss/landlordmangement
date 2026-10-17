@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,38 +20,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, Eye, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import {
-  openBillDocument,
-  MAX_AI_UPLOAD_BYTES,
-  formatFileSize,
-  readFileAsBase64,
-  isSupportedDocumentFile,
-  ACCEPTED_DOCUMENT_TYPES_LABEL,
-  ACCEPTED_DOCUMENT_TYPES_ACCEPT,
-  edgeFunctionErrorMessage,
-} from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { Loan } from "@/lib/types";
-
-interface ExtractResult {
-  ok?: boolean;
-  error?: string;
-  lender_name?: string;
-  loan_amount?: number | null;
-  interest_rate?: number | null;
-  monthly_repayment?: number | null;
-  start_date?: string | null;
-  maturity_date?: string | null;
-  next_repayment_date?: string | null;
-  product_type?: string | null;
-  bsb?: string | null;
-  account_number?: string | null;
-  has_offset_account?: boolean | null;
-  confidence?: number;
-}
+import { useAiExtraction } from "@/lib/useAiExtraction";
+import { loanFieldsFromPayload, loanPayloadFromExtract, type LoanExtractResult } from "@/lib/extractMappers";
+import { DocumentDropzone } from "@/components/DocumentDropzone";
 
 /**
  * Manual Add/Edit Loan — previously the only way a Loan record ever came into existence was an
@@ -97,15 +72,10 @@ export function AddLoanDialog({
   // What to prefill the form from — the loan being edited, or (for a refinance) the loan being
   // replaced, since its terms are the sensible starting point for the new one.
   const prefill = loan ?? refinanceFrom;
-  const [busy, setBusy] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [extractOk, setExtractOk] = useState(false);
-  const [extractEmpty, setExtractEmpty] = useState(false);
   const [docExpanded, setDocExpanded] = useState(false);
   // Bumped on every reset so an extraction still in flight when the dialog is closed can tell
   // its own result is stale and skip applying it — same pattern as Add Bill/Transaction/
   // Depreciation Report.
-  const generationRef = useRef(0);
 
   const blankForm = () => ({
     propertyId: prefill?.propertyId ?? lockedPropertyId ?? state.properties[0]?.id ?? "",
@@ -141,11 +111,39 @@ export function AddLoanDialog({
 
   const [form, setForm] = useState(blankForm());
 
+  const reading = useAiExtraction<LoanExtractResult>({
+    fn: "extract-loan-document",
+    onAttach: (sourceFileName, sourceFileData) => setForm((f) => ({ ...f, sourceFileName, sourceFileData })),
+    emptyMessage: "Couldn't find loan details in this file — fill in the fields manually",
+    apply: (data) => {
+      const l = loanFieldsFromPayload(loanPayloadFromExtract(data));
+      const str = (n: number | undefined, fallback: string) => (n != null ? String(n) : fallback);
+      setForm((f) => ({
+        ...f,
+        bankName: l.bankName ?? f.bankName,
+        originalAmount: str(l.originalAmount, f.originalAmount),
+        // A brand-new loan's balance starts at the amount drawn — only filled in while empty, so
+        // reading again never clobbers a balance the landlord has since adjusted.
+        totalBalance: !f.totalBalance ? str(l.totalBalance, f.totalBalance) : f.totalBalance,
+        interestRate: str(l.interestRate, f.interestRate),
+        monthlyEmi: str(l.monthlyEmi, f.monthlyEmi),
+        startDate: l.startDate ?? f.startDate,
+        maturityDate: l.maturityDate ?? f.maturityDate,
+        nextRepaymentDate: l.nextRepaymentDate ?? f.nextRepaymentDate,
+        dueDayOfMonth: str(l.dueDayOfMonth, f.dueDayOfMonth),
+        productType: l.productType ?? f.productType,
+        bsb: l.bsb ?? f.bsb,
+        accountNumber: l.accountNumber ?? f.accountNumber,
+        hasOffsetAccount: l.hasOffsetAccount ?? f.hasOffsetAccount,
+      }));
+      return { empty: !data.lender_name && data.loan_amount == null };
+    },
+  });
+  const busy = reading.busy;
+
   const reset = () => {
-    generationRef.current++;
+    reading.reset();
     setForm(blankForm());
-    setExtractOk(false);
-    setExtractEmpty(false);
     setDocExpanded(false);
   };
 
@@ -153,77 +151,6 @@ export function AddLoanDialog({
     setOpen(o);
     if (o) setForm(blankForm());
     else reset();
-  };
-
-  const extract = async (file: File) => {
-    if (!isSupportedDocumentFile(file)) {
-      return toast.error(`${file.name} isn't a PDF or image — the AI reader (and the preview pane) only support those. Try exporting/saving it as a PDF first.`);
-    }
-    if (file.size > MAX_AI_UPLOAD_BYTES) {
-      return toast.error(
-        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
-      );
-    }
-    const generation = generationRef.current;
-    setBusy(true);
-    setExtractOk(false);
-    setExtractEmpty(false);
-    try {
-      const base64 = await readFileAsBase64(file);
-      if (generationRef.current !== generation) return;
-      setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
-
-      const { data, error } = await supabase.functions.invoke<ExtractResult>("extract-loan-document", {
-        body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
-      });
-      if (generationRef.current !== generation) return;
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Couldn't read this document");
-        return;
-      }
-
-      setForm((f) => ({
-        ...f,
-        bankName: data.lender_name || f.bankName,
-        originalAmount: data.loan_amount != null ? String(data.loan_amount) : f.originalAmount,
-        // A brand-new loan's current balance starts at the amount drawn — only fills this in
-        // when it's still empty, so re-extracting into an already-edited form never clobbers a
-        // balance the landlord has since adjusted.
-        totalBalance: !f.totalBalance && data.loan_amount != null ? String(data.loan_amount) : f.totalBalance,
-        interestRate: data.interest_rate != null ? String(data.interest_rate) : f.interestRate,
-        monthlyEmi: data.monthly_repayment != null ? String(data.monthly_repayment) : f.monthlyEmi,
-        startDate: data.start_date || f.startDate,
-        maturityDate: data.maturity_date || f.maturityDate,
-        nextRepaymentDate: data.next_repayment_date || f.nextRepaymentDate,
-        // Drives the month-on-month "EMI due soon" forecast (HousekeepingWidget on the
-        // Dashboard), which only ever reads dueDayOfMonth — a next_repayment_date with no day-of-
-        // month derived from it would leave that forecast silently empty.
-        dueDayOfMonth: data.next_repayment_date ? String(new Date(data.next_repayment_date).getDate()) : f.dueDayOfMonth,
-        productType: data.product_type || f.productType,
-        bsb: data.bsb || f.bsb,
-        accountNumber: data.account_number || f.accountNumber,
-        hasOffsetAccount: data.has_offset_account ?? f.hasOffsetAccount,
-      }));
-
-      if (!data.lender_name && data.loan_amount == null) {
-        setExtractEmpty(true);
-      } else {
-        setExtractOk(true);
-        toast.success("Extracted — review the fields before saving");
-      }
-    } catch (e) {
-      if (generationRef.current === generation) toast.error(await edgeFunctionErrorMessage(e));
-    } finally {
-      if (generationRef.current === generation) setBusy(false);
-    }
-  };
-
-  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) void extract(f);
   };
 
   const save = () => {
@@ -314,57 +241,17 @@ export function AddLoanDialog({
         >
           {!isEdit && (
             <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
-              <div
-                className={"rounded-md border-2 border-dashed p-6 text-center transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={onDrop}
-              >
-                <div className="flex flex-col items-center gap-2">
-                  <FileUp className="h-8 w-8 text-muted-foreground" />
-                  <div className="text-sm text-muted-foreground">
-                    {busy ? "Reading document…" : "Drop the loan offer/contract here, or choose a file."}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Accepts {ACCEPTED_DOCUMENT_TYPES_LABEL}</div>
-                  <Input
-                    type="file"
-                    accept={ACCEPTED_DOCUMENT_TYPES_ACCEPT}
-                    className="h-8 max-w-[240px] text-xs"
-                    disabled={busy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) void extract(f);
-                    }}
-                  />
-                </div>
-                {form.sourceFileName && (
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
-                    <span className="truncate text-xs">{form.sourceFileName}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 gap-1 text-xs"
-                      onClick={() => openBillDocument(form.sourceFileName, form.sourceFileData)}
-                    >
-                      <Eye className="h-3 w-3" /> View
-                    </Button>
-                  </div>
-                )}
-                {extractOk && (
-                  <div className="mt-2 flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
-                    <CheckCircle2 className="h-3 w-3 shrink-0" /> Extracted — review the fields before saving.
-                  </div>
-                )}
-                {extractEmpty && (
-                  <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                    <AlertTriangle className="h-3 w-3 shrink-0" />
-                    Couldn't find loan details in this file — the document is still attached, fill in the fields manually.
-                  </div>
-                )}
-              </div>
+              <DocumentDropzone
+                prompt="Drop the loan offer/contract here, or choose a file."
+                busy={reading.busy}
+                status={reading.status}
+                fileName={form.sourceFileName}
+                fileData={form.sourceFileData}
+                onFile={(f) => void reading.extract(f)}
+                onReread={() => void reading.reread(form.sourceFileName, form.sourceFileData)}
+                okText="Extracted — review the fields before saving."
+                emptyText="Couldn't find loan details in this file — the document is still attached, fill in the fields manually."
+              />
 
               <BillDocumentViewer
                 fileName={form.sourceFileName}

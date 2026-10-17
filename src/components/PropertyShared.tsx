@@ -17,43 +17,11 @@ import {
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Building2,
-  Pencil,
-  Plus,
-  Trash2,
-  User,
-  ShieldCheck,
-  RefreshCw,
-  FileText,
-  History,
-  Receipt,
-  ExternalLink,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  ChevronRight,
-  UserCog,
-  X,
-  Video as VideoIcon,
-  Sparkles,
-  TrendingUp,
-  TriangleAlert,
-  IdCard,
-  ArrowRight,
-  Search,
-  Calculator,
-  Eye,
-  Landmark,
-  Info,
-  Download,
-  Lock,
-} from "lucide-react";
+import { Building2, Pencil, Plus, Trash2, RefreshCw, FileText, History, Receipt, ExternalLink, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, X, Video as VideoIcon, Sparkles, TrendingUp, TriangleAlert, ArrowRight, Search, Calculator, Eye, Landmark, Info, Download, Lock } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf, defaultMethodForDivision, methodAfterDivisionChange } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -69,48 +37,10 @@ import {
   type FeeCheckResult,
   type AgreementFeeTerms,
 } from "@/lib/feeVerification";
-import type {
-  Property,
-  Tenant,
-  RentFrequency,
-  LeaseDuration,
-  RepaymentFrequency,
-  BillType,
-  BillLineItem,
-  PropertyBill,
-  AiIntakeProposal,
-  TenantLeaseProposalPayload,
-  RentLedgerProposalPayload,
-  PropertyDetailProposalPayload,
-  BillProposalPayload,
-  ExpenseProposalPayload,
-  RentChange,
-  LeaseHistory,
-  ContactPerson,
-  Provider,
-  ProviderAgreement,
-  ProviderRole,
-  FeeFrequency,
-  DepreciationItem,
-  DepreciationReportProposalPayload,
-  UnclassifiedProposalPayload,
-  LoanDocumentProposalPayload,
-  LoanStatementProposalPayload,
-  LoanStatementLineItem,
-  BankStatementProposalPayload,
-  PropertySaleProposalPayload,
-  AgencyAgreementProposalPayload,
-  Loan,
-  Expense,
-  LedgerEntry,
-  PropertyUnit,
-  Entity,
-  ExpenseCategory,
-} from "@/lib/types";
+import type { Property, Tenant, RentFrequency, LeaseDuration, RepaymentFrequency, AiIntakeProposal, TenantLeaseProposalPayload, RentLedgerProposalPayload, PropertyDetailProposalPayload, BillProposalPayload, ExpenseProposalPayload, RentChange, LeaseHistory, ContactPerson, Provider, ProviderAgreement, ProviderRole, FeeFrequency, DepreciationItem, DepreciationReportProposalPayload, UnclassifiedProposalPayload, LoanDocumentProposalPayload, LoanStatementProposalPayload, LoanStatementLineItem, BankStatementProposalPayload, PropertySaleProposalPayload, AgencyAgreementProposalPayload, Loan, Expense, LedgerEntry, PropertyUnit, Entity, ExpenseCategory } from "@/lib/types";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
-import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddBillDialog } from "@/components/AddBillDialog";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { EditLedgerRowDialog } from "@/components/EditLedgerRowDialog";
@@ -120,12 +50,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsDataUrl, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
+import { openBillDocument, readFileAsDataUrl, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { StoredImageLink, StoredVideo } from "@/components/StoredImage";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ProviderPortalPasswordField } from "@/components/ProviderPortalLogin";
 import { annualRentOf, currentTenants, rentPerPeriod } from "@/lib/tenancy";
+import { loanFieldsFromPayload, agreementFieldsFromExtract, type AgencyAgreementExtractResult } from "@/lib/extractMappers";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
 import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type FileFormat } from "@/components/DocumentEntryRow";
@@ -136,6 +67,8 @@ import { planRecharge, rechargeChargeType } from "@/lib/recharge";
 import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
 import { SHARED_UNIT, uid } from "@/lib/constants";
+import { useAiExtraction } from "@/lib/useAiExtraction";
+import { DocumentDropzone } from "@/components/DocumentDropzone";
 
 
 interface DomainSuggestResult {
@@ -1586,10 +1519,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
         purchaseCost: it.cost,
         effectiveLifeYears: it.lifeYears || 1,
         purchaseDate: payload.effectiveFrom || undefined,
-        // Div 43 (capital works) is only ever claimable straight-line under ATO rules — same lock
-        // applied everywhere else a division/method pair gets set (AddDepreciationReportDialog,
-        // NewDepreciationItemDialog).
-        method: it.division === "Div 43" ? "Prime Cost" : "Diminishing Value",
+        method: defaultMethodForDivision(it.division),
         division: it.division,
         // The report's own printed per-year figures, when Gemini found a year-by-year table for
         // this item — the permanent record from here on, not re-derived from cost/life/method on
@@ -1838,23 +1768,14 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
     const property = state.properties.find((p) => p.id === propertyId);
     if (!property) return toast.error("Select a property first");
     addLoan({
+      // Same mapping the Add Loan dialog's upload uses (lib/extractMappers.ts).
+      bankName: payload.lenderName,
+      totalBalance: 0,
+      interestRate: 0,
+      monthlyEmi: 0,
+      ...loanFieldsFromPayload(payload),
       propertyId,
       assetId: property.assetId,
-      bankName: payload.lenderName,
-      totalBalance: payload.loanAmount ?? 0,
-      originalAmount: payload.loanAmount,
-      interestRate: payload.interestRate ?? 0,
-      monthlyEmi: payload.monthlyRepayment ?? 0,
-      startDate: payload.startDate,
-      maturityDate: payload.maturityDate,
-      nextRepaymentDate: payload.nextRepaymentDate,
-      // Drives the month-on-month "EMI due soon" Dashboard forecast, which only reads
-      // dueDayOfMonth — derive it from the extracted next repayment date.
-      dueDayOfMonth: payload.nextRepaymentDate ? new Date(payload.nextRepaymentDate).getDate() : undefined,
-      productType: payload.productType,
-      bsb: payload.bsb,
-      accountNumber: payload.accountNumber,
-      hasOffsetAccount: payload.hasOffsetAccount,
       status: "Active",
     });
     markProposalApplied(proposal.id, { propertyId });
@@ -2727,8 +2648,6 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
   const [form, setForm] = useState<AgreementFormState>(() =>
     agreementFormFrom({ ...payload, contractFileName: proposal.sourceFileName, contractFileData: proposal.sourceFileData }),
   );
-  const [busy, setBusy] = useState(false);
-  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
   const confirm = () => {
     const property = state.properties.find((p) => p.id === propertyId);
@@ -2771,15 +2690,7 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
           </div>
         )}
 
-        <AgreementFields
-          form={form}
-          setForm={setForm}
-          busy={busy}
-          extractSummary={extractSummary}
-          onFileSelected={(file) => {
-            void extractAgreementFile(file, setForm, setBusy, setExtractSummary);
-          }}
-        />
+        <AgreementFields form={form} setForm={setForm} />
 
         <div className="flex flex-wrap gap-2 pt-1">
           <Button size="sm" disabled={!propertyId} onClick={confirm}>
@@ -4081,9 +3992,7 @@ function NewDepreciationItemDialog({ assetId, item, trigger }: { assetId?: strin
 
   const onDivisionChange = (v: NonNullable<DepreciationItem["division"]>) => {
     setDivision(v);
-    // Div 43 (capital works) is only ever claimable straight-line under ATO rules — unlike Div 40,
-    // it has no diminishing-value option, same lock AddDepreciationReportDialog applies per row.
-    if (v === "Div 43") setMethod("Prime Cost");
+    setMethod((m) => methodAfterDivisionChange(v, m));
   };
 
   // Live preview of what this item will actually claim — same math as everywhere else
@@ -6594,38 +6503,6 @@ const PROVIDER_ROLES: ProviderRole[] = [
   "Other",
 ];
 
-interface AgencyAgreementExtractResult {
-  ok?: boolean;
-  error?: string;
-  management_fee_percent?: number | null;
-  management_fee_gst_inclusive?: boolean | null;
-  letting_fee_amount?: number | null;
-  letting_fee_weeks_rent?: number | null;
-  letting_fee_gst_inclusive?: boolean | null;
-  admin_fee_amount?: number | null;
-  admin_fee_frequency?: string | null;
-  admin_fee_gst_inclusive?: boolean | null;
-  lease_renewal_fee_amount?: number | null;
-  lease_renewal_fee_gst_inclusive?: boolean | null;
-  inspection_fee_amount?: number | null;
-  inspection_fee_gst_inclusive?: boolean | null;
-  inspections_per_year?: number | null;
-  advertising_fee_amount?: number | null;
-  advertising_fee_gst_inclusive?: boolean | null;
-  lease_preparation_fee_amount?: number | null;
-  lease_preparation_fee_gst_inclusive?: boolean | null;
-  ncat_fee_amount?: string | null;
-  ncat_fee_gst_inclusive?: boolean | null;
-  agent_pays_water_usage?: boolean | null;
-  agent_pays_land_tax?: boolean | null;
-  agent_pays_council_rates?: boolean | null;
-  notice_period_days?: number | null;
-  agency_name?: string | null;
-  contract_start_date?: string | null;
-  contract_review_date?: string | null;
-  confidence?: number;
-}
-
 const FEE_FREQUENCIES: FeeFrequency[] = ["Per Statement", "Monthly", "Quarterly", "Annually"];
 
 interface AgreementFormState {
@@ -6726,138 +6603,6 @@ function agreementPayloadFrom(form: AgreementFormState) {
   };
 }
 
-/** Shared AI-extraction for a signed management agreement PDF — fills whichever agreement-form
- * fields the extraction found, never overwriting a value already typed in. Used by both
- * ProviderDialog's Agreement section and ProviderAgreementDialog (the provider profile page's
- * add/edit-agreement flow) so both entry points behave identically. Returns the extracted agency
- * name, if any, so a caller creating a brand-new Contact + Agreement together can offer to prefill
- * the contact's own name field too. */
-async function extractAgreementFile(
-  file: File,
-  setForm: React.Dispatch<React.SetStateAction<AgreementFormState>>,
-  setBusy: (v: boolean) => void,
-  setExtractSummary: (v: { fields: number; confidence: number } | null) => void,
-): Promise<string | undefined> {
-  if (file.size > MAX_AI_UPLOAD_BYTES) {
-    toast.error(
-      `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
-    );
-    return undefined;
-  }
-  setBusy(true);
-  setExtractSummary(null);
-  let agencyName: string | undefined;
-  try {
-    const base64 = await readFileAsBase64(file);
-    setForm((f) => ({ ...f, contractFileName: file.name, contractFileData: base64 }));
-
-    const { data, error } = await supabase.functions.invoke<AgencyAgreementExtractResult>("extract-agency-agreement", {
-      body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
-    });
-    if (error) throw error;
-    if (!data?.ok) {
-      toast.error(data?.error || "Couldn't read this document");
-      return undefined;
-    }
-
-    let fieldsFound = 0;
-    agencyName = data.agency_name ?? undefined;
-    setForm((f) => {
-      const next = { ...f };
-      if (data.management_fee_percent !== undefined && data.management_fee_percent !== null) {
-        next.managementFeePercent = String(data.management_fee_percent);
-        next.managementFeeGstInclusive = data.management_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.letting_fee_amount !== undefined && data.letting_fee_amount !== null) {
-        next.lettingFeeAmount = String(data.letting_fee_amount);
-        next.lettingFeeGstInclusive = data.letting_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.letting_fee_weeks_rent !== undefined && data.letting_fee_weeks_rent !== null) {
-        next.lettingFeeWeeksRent = String(data.letting_fee_weeks_rent);
-        next.lettingFeeGstInclusive = data.letting_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.admin_fee_amount !== undefined && data.admin_fee_amount !== null) {
-        next.adminFeeAmount = String(data.admin_fee_amount);
-        next.adminFeeGstInclusive = data.admin_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.admin_fee_frequency) {
-        next.adminFeeFrequency = data.admin_fee_frequency;
-        fieldsFound++;
-      }
-      if (data.lease_renewal_fee_amount !== undefined && data.lease_renewal_fee_amount !== null) {
-        next.leaseRenewalFeeAmount = String(data.lease_renewal_fee_amount);
-        next.leaseRenewalFeeGstInclusive = data.lease_renewal_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.inspection_fee_amount !== undefined && data.inspection_fee_amount !== null) {
-        next.inspectionFeeAmount = String(data.inspection_fee_amount);
-        next.inspectionFeeGstInclusive = data.inspection_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.inspections_per_year !== undefined && data.inspections_per_year !== null) {
-        next.inspectionsPerYear = String(data.inspections_per_year);
-        fieldsFound++;
-      }
-      if (data.advertising_fee_amount !== undefined && data.advertising_fee_amount !== null) {
-        next.advertisingFeeAmount = String(data.advertising_fee_amount);
-        next.advertisingFeeGstInclusive = data.advertising_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.lease_preparation_fee_amount !== undefined && data.lease_preparation_fee_amount !== null) {
-        next.leasePreparationFeeAmount = String(data.lease_preparation_fee_amount);
-        next.leasePreparationFeeGstInclusive = data.lease_preparation_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.ncat_fee_amount !== undefined && data.ncat_fee_amount !== null) {
-        next.ncatFeeAmount = data.ncat_fee_amount;
-        next.ncatFeeGstInclusive = data.ncat_fee_gst_inclusive ?? false;
-        fieldsFound++;
-      }
-      if (data.agent_pays_water_usage !== undefined && data.agent_pays_water_usage !== null) {
-        next.agentPaysWaterUsage = data.agent_pays_water_usage;
-        fieldsFound++;
-      }
-      if (data.agent_pays_land_tax !== undefined && data.agent_pays_land_tax !== null) {
-        next.agentPaysLandTax = data.agent_pays_land_tax;
-        fieldsFound++;
-      }
-      if (data.agent_pays_council_rates !== undefined && data.agent_pays_council_rates !== null) {
-        next.agentPaysCouncilRates = data.agent_pays_council_rates;
-        fieldsFound++;
-      }
-      if (data.notice_period_days !== undefined && data.notice_period_days !== null) {
-        next.noticePeriodDays = String(data.notice_period_days);
-        fieldsFound++;
-      }
-      if (data.contract_start_date) {
-        next.contractStartDate = data.contract_start_date;
-        fieldsFound++;
-      }
-      if (data.contract_review_date) {
-        next.contractReviewDate = data.contract_review_date;
-        fieldsFound++;
-      }
-      return next;
-    });
-
-    if (fieldsFound === 0) {
-      toast.warning("Couldn't find fee terms in this file — the fields below are ready for manual entry");
-    } else {
-      setExtractSummary({ fields: fieldsFound, confidence: data.confidence ?? 0 });
-      toast.success("Extracted — review the fee terms before saving");
-    }
-  } catch (e) {
-    toast.error(await edgeFunctionErrorMessage(e));
-  } finally {
-    setBusy(false);
-  }
-  return agencyName;
-}
-
 /** One fee amount input plus its own "rate already includes GST" checkbox — a management
  * agreement can state some fees as "X% plus GST" and others as "$Y inclusive of GST" in the same
  * document, so each fee needs its own flag rather than one setting for the whole agreement (see
@@ -6902,51 +6647,48 @@ function FeeAmountField({
 function AgreementFields({
   form,
   setForm,
-  busy,
-  extractSummary,
-  onFileSelected,
+  onAgencyName,
 }: {
   form: AgreementFormState;
   setForm: React.Dispatch<React.SetStateAction<AgreementFormState>>;
-  busy: boolean;
-  extractSummary: { fields: number; confidence: number } | null;
-  onFileSelected: (file: File) => void;
+  /** Called with the agency name read off the agreement, e.g. to prefill a new contact's name. */
+  onAgencyName?: (name: string) => void;
 }) {
+  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
+  // The shared upload → read → fill flow (same as every upload dialog): file checks, retry, and a
+  // read still in flight when the dialog closes is ignored.
+  const reading = useAiExtraction<AgencyAgreementExtractResult>({
+    fn: "extract-agency-agreement",
+    onAttach: (contractFileName, contractFileData) => setForm((f) => ({ ...f, contractFileName, contractFileData })),
+    emptyMessage: "Couldn't find fee terms in this file — the fields below are ready for manual entry",
+    apply: (data) => {
+      const { fields, found } = agreementFieldsFromExtract(data);
+      setForm((f) => ({ ...f, ...fields }));
+      if (data.agency_name) onAgencyName?.(data.agency_name);
+      setExtractSummary(found > 0 ? { fields: found, confidence: data.confidence ?? 0 } : null);
+      return { empty: found === 0, message: "Extracted — review the fee terms before saving" };
+    },
+  });
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Input
-          type="file"
-          accept="application/pdf,image/*"
-          className="h-8 text-xs"
-          disabled={busy}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onFileSelected(f);
-          }}
-        />
-        {busy && <span className="text-xs text-muted-foreground">Reading…</span>}
-      </div>
-      {form.contractFileName && (
-        <div className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1 text-xs">
-          <span className="truncate">{form.contractFileName}</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 shrink-0 gap-1 text-xs"
-            onClick={() => openBillDocument(form.contractFileName, form.contractFileData)}
-          >
-            <Eye className="h-3 w-3" /> View
-          </Button>
-        </div>
-      )}
-      {extractSummary && (
-        <div className="flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-900">
-          <CheckCircle2 className="h-3 w-3 shrink-0" />
-          Found {extractSummary.fields} fee term{extractSummary.fields === 1 ? "" : "s"} — review before saving.
-          {extractSummary.confidence < 0.85 && " Low confidence — double-check every field."}
-        </div>
-      )}
+      <DocumentDropzone
+        prompt="Drop the signed management agreement here, or choose a file."
+        busy={reading.busy}
+        status={reading.status}
+        fileName={form.contractFileName || undefined}
+        fileData={form.contractFileData || undefined}
+        onFile={(f) => void reading.extract(f)}
+        onReread={() => void reading.reread(form.contractFileName, form.contractFileData)}
+        emptyText="Couldn't find fee terms in this file — the document is still attached, fill in the fields manually."
+        confidence={extractSummary?.confidence}
+      >
+        {extractSummary && reading.status === "ok" && (
+          <div className="mt-2 flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-1.5 text-left text-xs text-emerald-900">
+            <CheckCircle2 className="h-3 w-3 shrink-0" />
+            Found {extractSummary.fields} fee term{extractSummary.fields === 1 ? "" : "s"} — review before saving.
+          </div>
+        )}
+      </DocumentDropzone>
 
       <div className="grid grid-cols-2 gap-3">
         <FeeAmountField
@@ -7121,7 +6863,6 @@ export function ProviderDialog({
 }) {
   const { addProvider, updateProvider, addProviderAgreement, updateProviderAgreement, ensureProviderProperty, state } = useStore();
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const propertyUnits = state.properties.find((p) => p.id === propertyId)?.units ?? [];
   const buildForm = () => ({
     name: provider?.name ?? "",
@@ -7140,7 +6881,6 @@ export function ProviderDialog({
   });
   const [form, setForm] = useState(buildForm);
   const [agreementForm, setAgreementForm] = useState<AgreementFormState>(() => agreementFormFrom(agreement));
-  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
   const showAgreement = !!propertyId;
 
@@ -7205,7 +6945,6 @@ export function ProviderDialog({
         if (o) {
           setForm(buildForm());
           setAgreementForm(agreementFormFrom(agreement));
-          setExtractSummary(null);
         }
       }}
     >
@@ -7313,13 +7052,7 @@ export function ProviderDialog({
             <AgreementFields
               form={agreementForm}
               setForm={setAgreementForm}
-              busy={busy}
-              extractSummary={extractSummary}
-              onFileSelected={(file) =>
-                void extractAgreementFile(file, setAgreementForm, setBusy, setExtractSummary).then((agencyName) => {
-                  if (agencyName && !form.name.trim()) setForm((f) => ({ ...f, name: agencyName }));
-                })
-              }
+              onAgencyName={(agencyName) => setForm((f) => (f.name.trim() ? f : { ...f, name: agencyName }))}
             />
           </div>
         )}
@@ -7348,10 +7081,8 @@ export function ProviderAgreementDialog({
 }) {
   const { state, addProviderAgreement, updateProviderAgreement } = useStore();
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [propertyId, setPropertyId] = useState(agreement?.propertyId ?? "");
   const [form, setForm] = useState<AgreementFormState>(() => agreementFormFrom(agreement));
-  const [extractSummary, setExtractSummary] = useState<{ fields: number; confidence: number } | null>(null);
 
   const save = () => {
     if (!propertyId) return toast.error("Select a property first");
@@ -7373,7 +7104,6 @@ export function ProviderAgreementDialog({
         if (o) {
           setPropertyId(agreement?.propertyId ?? "");
           setForm(agreementFormFrom(agreement));
-          setExtractSummary(null);
         }
       }}
     >
@@ -7405,13 +7135,7 @@ export function ProviderAgreementDialog({
             </Select>
           )}
         </Field>
-        <AgreementFields
-          form={form}
-          setForm={setForm}
-          busy={busy}
-          extractSummary={extractSummary}
-          onFileSelected={(file) => void extractAgreementFile(file, setForm, setBusy, setExtractSummary)}
-        />
+        <AgreementFields form={form} setForm={setForm} />
         <DialogFooter>
           <Button onClick={save}>Save</Button>
         </DialogFooter>

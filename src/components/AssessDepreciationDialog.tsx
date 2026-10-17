@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency, itemAnnualClaims, taxTreatmentLabel, expenseCategoryToTaxCategory } from "@/lib/calculations";
+import { fmtCurrency, itemAnnualClaims, taxTreatmentLabel, expenseCategoryToTaxCategory, methodAfterDivisionChange } from "@/lib/calculations";
 import { openBillDocument } from "@/lib/files";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import type { DepreciationItem, Expense } from "@/lib/types";
@@ -61,9 +61,7 @@ export function AssessDepreciationDialog({ expense, onClose }: { expense: Expens
   };
   const onDivisionChange = (v: NonNullable<DepreciationItem["division"]>) => {
     setDivision(v);
-    // Div 43 (capital works) is only ever claimable straight-line under ATO rules — same lock the
-    // main depreciation-item dialog applies.
-    if (v === "Div 43") setMethod("Prime Cost");
+    setMethod((m) => methodAfterDivisionChange(v, m));
   };
 
   const previewLife = parseFloat(effectiveLifeYears) || 1;

@@ -615,6 +615,22 @@ export function estimateLoanInterest(input: {
   return (annual * daysInclusive(start, end)) / 365;
 }
 
+/** Division 43 (capital works) is only ever claimable straight-line (Prime Cost) under ATO rules —
+ * unlike Div 40 (plant & equipment) it has no diminishing-value option. The default method for a
+ * division, used wherever a depreciation item is created. */
+export function defaultMethodForDivision(division: DepreciationItem["division"]): NonNullable<DepreciationItem["method"]> {
+  return division === "Div 43" ? "Prime Cost" : "Diminishing Value";
+}
+
+/** The method after switching an item's division: Div 43 forces Prime Cost; otherwise the current
+ * choice is kept. One rule for every depreciation editor. */
+export function methodAfterDivisionChange(
+  division: DepreciationItem["division"],
+  current: NonNullable<DepreciationItem["method"]>,
+): NonNullable<DepreciationItem["method"]> {
+  return division === "Div 43" ? "Prime Cost" : current;
+}
+
 export interface DepreciationScheduleYear {
   fy: string;
   div40: number;

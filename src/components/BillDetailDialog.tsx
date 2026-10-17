@@ -25,9 +25,10 @@ import { billLinesToRows, blankBillLine, lineWantsRecharge, newlyRechargedLines,
 import { emailTenant, rechargeEmail } from "@/lib/tenantEmails";
 import type { ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
-import { extractBillFromStored } from "@/lib/billExtract";
+import { useAiExtraction } from "@/lib/useAiExtraction";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { SHARED_UNIT, uid } from "@/lib/constants";
+import { ExtractBillResult } from "@/lib/types";
 
 
 
@@ -164,18 +165,14 @@ export function BillDetailDialog({
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === selected.propertyId);
-  const [reading, setReading] = useState(false);
 
   /** Re-runs the AI reader on the attached PDF — for a bill saved while the reader was down (e.g.
    * Gemini overloaded), so it isn't stuck as one unsplit total. Only fills the form; nothing is
    * stored until Save, same as any other edit here. */
-  const readWithAi = async () => {
-    if (lineItems.some((li) => li.recharged)) {
-      return toast.error("A line on this bill has already been recharged to the tenant — edit the lines by hand instead");
-    }
-    setReading(true);
-    try {
-      const data = await extractBillFromStored(selected.sourceFileName, selected.sourceFileData);
+  const reading = useAiExtraction<ExtractBillResult>({
+    fn: "extract-bill",
+    fallbackError: "Couldn't read this bill",
+    apply: (data) => {
       if (data.line_items?.length) {
         setLineItems(data.line_items.map((li) => blankBillLine(selected.billType, { description: li.description, amount: String(li.amount) })));
       }
@@ -185,17 +182,20 @@ export function BillDetailDialog({
         bpayBillerCode: f.bpayBillerCode || data.bpay_biller_code || "",
         bpayReference: f.bpayReference || data.bpay_reference || "",
       }));
-      toast.success(
-        (data.line_items?.length ?? 0) > 1
-          ? `Read ${data.line_items!.length} line items — check them and click Save`
-          : "Read the bill, but it has no itemised breakdown — check the fields and click Save",
-      );
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't read this bill");
-    } finally {
-      setReading(false);
+      const n = data.line_items?.length ?? 0;
+      return {
+        empty: !data.vendor && !data.amount,
+        message: n > 1 ? `Read ${n} line items — check them and click Save` : "Read the bill, but it has no itemised breakdown — check the fields and click Save",
+      };
+    },
+  });
+  const readWithAi = () => {
+    if (lineItems.some((li) => li.recharged)) {
+      return toast.error("A line on this bill has already been recharged to the tenant — edit the lines by hand instead");
     }
+    void reading.reread(selected.sourceFileName, selected.sourceFileData);
   };
+
   const hasNewRecharge = newlyRechargedLines(selected.billType, lineItems).length > 0;
   const propertyUnits = state.properties.find((p) => p.id === selected.propertyId)?.units ?? [];
 
@@ -326,9 +326,9 @@ export function BillDetailDialog({
         <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-2")}>
           <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
             {selected.sourceFileData && (
-              <Button size="sm" variant="outline" className="mb-2 h-7 gap-1 text-xs" disabled={reading} onClick={() => void readWithAi()}>
-                <RefreshCw className={"h-3 w-3" + (reading ? " animate-spin" : "")} />
-                {reading ? "Reading…" : "Read with AI"}
+              <Button size="sm" variant="outline" className="mb-2 h-7 gap-1 text-xs" disabled={reading.busy} onClick={readWithAi}>
+                <RefreshCw className={"h-3 w-3" + (reading.busy ? " animate-spin" : "")} />
+                {reading.busy ? "Reading…" : "Read with AI"}
               </Button>
             )}
             <BillDocumentViewer

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,32 +24,24 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory, fmtModified } from "@/lib/calculations";
 import { planRecharge, rechargeChargeType } from "@/lib/recharge";
 import { canRechargeLine, rechargeBlockedReason } from "@/lib/waterSplit";
 import { RechargeControl } from "@/components/RechargeControl";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
-import {
-  openBillDocument,
-  MAX_AI_UPLOAD_BYTES,
-  formatFileSize,
-  readFileAsBase64,
-  isSupportedDocumentFile,
-  ACCEPTED_DOCUMENT_TYPES_LABEL,
-  ACCEPTED_DOCUMENT_TYPES_ACCEPT,
-  edgeFunctionErrorMessage,
-} from "@/lib/files";
+import { openBillDocument, readFileAsBase64 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { AssessDepreciationDialog } from "@/components/AssessDepreciationDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, Expense, ExpenseProposalPayload, ExtractBillResult } from "@/lib/types";
-import { LOW_CONFIDENCE_THRESHOLD, SHARED_UNIT, uid } from "@/lib/constants";
+import { SHARED_UNIT, uid } from "@/lib/constants";
+import { useAiExtraction } from "@/lib/useAiExtraction";
+import { DocumentDropzone } from "@/components/DocumentDropzone";
 
 /** How this transaction was recorded — shown read-only next to the title, separate from the
  * invoice/file section below, so "where did this come from" and "what document backs it" are
@@ -179,14 +171,11 @@ export function AddTransactionDialog({
     else setInternalOpen(o);
   };
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [extractSummary, setExtractSummary] = useState<{ vendor: string; amount: number; date: string; propertyMatched: boolean } | null>(null);
-  const [extractEmpty, setExtractEmpty] = useState(false);
   // Whether the document pane(s) — and this whole dialog — are enlarged. Shared by both the
   // source-statement and invoice viewers so either one's "Enlarge" button grows the same dialog.
   const [docExpanded, setDocExpanded] = useState(false);
@@ -223,19 +212,13 @@ export function AddTransactionDialog({
   // it was read off, only the invoice/receipt being uploaded for it.
   const [sourceDoc, setSourceDoc] = useState<{ fileName?: string; fileData?: string } | null>(null);
   const [sourceDocRemoved, setSourceDocRemoved] = useState(false);
-  // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset can
-  // tell its own result is stale and skip applying it, instead of repopulating a "blank" form
-  // with a previous, unrelated upload's data once the Gemini call finally resolves.
-  const generationRef = useRef(0);
-
   const reset = () => {
-    generationRef.current++;
+    reading.reset();
     setForm(blankForm());
     setLineItems([blankLineItem()]);
     setAdditionalFiles([]);
     setConfidence(null);
     setExtractSummary(null);
-    setExtractEmpty(false);
     setSplitting(false);
     setPeriodOpen(false);
     setNotesOpen(false);
@@ -331,9 +314,8 @@ export function AddTransactionDialog({
     );
     setConfidence(data.confidence ?? null);
 
-    if (!data.vendor && !data.amount) {
-      setExtractEmpty(true);
-    } else {
+    setExtractSummary(null);
+    if (data.vendor || data.amount) {
       setExtractSummary({
         vendor: data.vendor ?? "",
         amount: data.amount ?? 0,
@@ -418,48 +400,20 @@ export function AddTransactionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, expense?.id]);
 
-  const extract = async (file: File) => {
-    if (!isSupportedDocumentFile(file)) {
-      return toast.error(`${file.name} isn't a PDF or image — the AI reader (and the preview pane) only support those. Try exporting/saving it as a PDF first.`);
-    }
-    if (file.size > MAX_AI_UPLOAD_BYTES) {
-      return toast.error(
-        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
-      );
-    }
-    const generation = generationRef.current;
-    setBusy(true);
-    setExtractSummary(null);
-    setExtractEmpty(false);
-    try {
-      const base64 = await readFileAsBase64(file);
-      if (generationRef.current !== generation) return;
-      setForm((f) => ({ ...f, invoiceFileName: file.name, invoiceFileData: base64 }));
+  // The shared upload → read → fill flow (same as every upload dialog), with "Read with AI again".
+  const reading = useAiExtraction<ExtractBillResult>({
+    fn: "extract-bill",
+    onAttach: (invoiceFileName, invoiceFileData) => {
+      setForm((f) => ({ ...f, invoiceFileName, invoiceFileData }));
       setInvoiceRemoved(false);
-
-      const { data, error } = await supabase.functions.invoke<ExtractBillResult>("extract-bill", {
-        body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
-      });
-      if (generationRef.current !== generation) return;
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Couldn't read this document");
-        return;
-      }
-
-      applyExtracted(data, file.name, base64);
-
-      if (!data.vendor && !data.amount) {
-        toast.warning("Couldn't find details in this file — the fields below are ready for manual entry");
-      } else {
-        toast.success("Extracted — review the fields before saving");
-      }
-    } catch (e) {
-      if (generationRef.current === generation) toast.error(await edgeFunctionErrorMessage(e));
-    } finally {
-      if (generationRef.current === generation) setBusy(false);
-    }
-  };
+    },
+    emptyMessage: "Couldn't find details in this file — the fields below are ready for manual entry",
+    apply: (data) => {
+      applyExtracted(data);
+      return { empty: !data.vendor && !data.amount };
+    },
+  });
+  const busy = reading.busy;
 
   /** Suggests (never forces) a category once the payee matches a known Provider — mirrors the
    * "prefill, not force" behaviour the AI bill pipeline already applies server-side from the same
@@ -475,13 +429,6 @@ export function AddTransactionDialog({
     if (li.direction !== "Expense" || li.category !== defaultCategoryFor("Expense")) return;
     setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: matched.defaultCategory! } : r)));
     setCategoryPrefillNote(`Prefilled from ${matched.name}'s usual category`);
-  };
-
-  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) void extract(f);
   };
 
   // Recharge only applies to a single-property expense line, and on water only to usage — the same
@@ -757,40 +704,19 @@ export function AddTransactionDialog({
               </div>
             )}
 
-            <div
-              className={"rounded-md border-2 border-dashed p-6 text-center transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={onDrop}
+            <DocumentDropzone
+              prompt="Drop a receipt here, or choose a file."
+              busy={reading.busy}
+              status={reading.status}
+              fileName={form.invoiceFileName}
+              fileData={form.invoiceFileData}
+              onFile={(f) => void reading.extract(f)}
+              onReread={() => void reading.reread(form.invoiceFileName, form.invoiceFileData)}
+              emptyText="Couldn't find details in this file — the document is still attached, fill in the fields manually."
+              confidence={confidence}
             >
-              <div className="flex flex-col items-center gap-2">
-                <FileUp className="h-8 w-8 text-muted-foreground" />
-                <div className="text-sm text-muted-foreground">{busy ? "Reading document…" : "Drop a receipt here, or choose a file."}</div>
-                <div className="text-xs text-muted-foreground">Accepts {ACCEPTED_DOCUMENT_TYPES_LABEL}</div>
-                <Input
-                  type="file"
-                  accept={ACCEPTED_DOCUMENT_TYPES_ACCEPT}
-                  className="h-8 max-w-[240px] text-xs"
-                  disabled={busy}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void extract(f);
-                  }}
-                />
-              </div>
-              {form.invoiceFileName && (
-                <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
-                  <span className="truncate text-xs">{form.invoiceFileName}</span>
-                  <Button size="sm" variant="ghost" className="h-6 shrink-0 gap-1 text-xs" onClick={() => openBillDocument(form.invoiceFileName, form.invoiceFileData)}>
-                    <Eye className="h-3 w-3" /> View
-                  </Button>
-                </div>
-              )}
-              {extractSummary && (
-                <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
+              {extractSummary && reading.status !== "failed" && (
+                <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-left text-xs text-emerald-900">
                   <div className="flex items-center gap-1 font-medium">
                     <CheckCircle2 className="h-3 w-3" /> Found in this document
                   </div>
@@ -807,19 +733,7 @@ export function AddTransactionDialog({
                   </div>
                 </div>
               )}
-              {extractEmpty && (
-                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  Couldn't find details in this file — the document is still attached, fill in the fields manually.
-                </div>
-              )}
-              {confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD && (
-                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  Low-confidence extraction — double-check every field before saving.
-                </div>
-              )}
-            </div>
+            </DocumentDropzone>
 
             {sourceDoc && <div className="text-xs font-medium text-muted-foreground">Invoice / receipt</div>}
             <BillDocumentViewer

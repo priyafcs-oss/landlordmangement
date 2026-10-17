@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail, RefreshCw } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, CheckCircle2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import {
   fmtCurrency,
@@ -34,7 +34,8 @@ import {
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
-import { extractBill, extractBillFromStored } from "@/lib/billExtract";
+import { useAiExtraction } from "@/lib/useAiExtraction";
+import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { BillLineItemsEditor } from "@/components/BillLineItemsEditor";
 import { InstalmentScheduleEditor } from "@/components/InstalmentScheduleEditor";
 import { instalmentBills, instalmentLabel, newInstalmentRow, validateInstalments, type InstalmentRow } from "@/lib/instalments";
@@ -43,21 +44,12 @@ import { emailTenant, rechargeEmail } from "@/lib/tenantEmails";
 import { ProviderPortalLogin } from "@/components/ProviderPortalLogin";
 import { extractEmailLinks, linkifySegments, pickBillLink, portalOrigin } from "@/lib/emailLinks";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
-import {
-  openBillDocument,
-  MAX_AI_UPLOAD_BYTES,
-  formatFileSize,
-  readFileAsBase64,
-  isSupportedDocumentFile,
-  ACCEPTED_DOCUMENT_TYPES_LABEL,
-  ACCEPTED_DOCUMENT_TYPES_ACCEPT,
-} from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
 import type { BillType, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
-import { BILL_TYPES, LOW_CONFIDENCE_THRESHOLD, SHARED_UNIT, uid } from "@/lib/constants";
+import { BILL_TYPES, SHARED_UNIT, uid } from "@/lib/constants";
 
 
 
@@ -119,10 +111,8 @@ export function AddBillDialog({
     if (onOpenChangeProp) onOpenChangeProp(o);
     else setInternalOpen(o);
   };
-  const [busy, setBusy] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [extractSummary, setExtractSummary] = useState<{
     vendor: string;
     amount: number;
@@ -130,7 +120,6 @@ export function AddBillDialog({
     propertyMatched: boolean;
     instalmentCount: number;
   } | null>(null);
-  const [extractEmpty, setExtractEmpty] = useState(false);
   const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [pendingNotify, setPendingNotify] = useState(false);
   // Whether the document pane — and this whole dialog — is enlarged, so "Enlarge" on the source
@@ -160,23 +149,15 @@ export function AddBillDialog({
   });
 
   const [form, setForm] = useState(blankForm());
-  const [extractFailed, setExtractFailed] = useState(false);
   const [instalments, setInstalments] = useState<InstalmentRow[]>([]);
   const [lineItems, setLineItems] = useState<BillLineRow[]>([blankBillLine("Water")]);
-  // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset can
-  // tell its own result is stale and skip applying it, instead of repopulating a "blank" form
-  // with a previous, unrelated upload's data once the Gemini call finally resolves.
-  const generationRef = useRef(0);
-
   const reset = () => {
-    generationRef.current++;
+    reading.reset();
     setForm(blankForm());
     setInstalments([]);
     setLineItems([blankBillLine(form.billType)]);
     setConfidence(null);
     setExtractSummary(null);
-    setExtractEmpty(false);
-    setExtractFailed(false);
     setDocExpanded(false);
   };
 
@@ -250,9 +231,8 @@ export function AddBillDialog({
     }
     setConfidence(data.confidence ?? null);
 
-    if (!data.vendor && !data.amount) {
-      setExtractEmpty(true);
-    } else {
+    setExtractSummary(null);
+    if (data.vendor || data.amount) {
       setExtractSummary({
         vendor: data.vendor ?? "",
         amount: data.amount ?? 0,
@@ -309,62 +289,19 @@ export function AddBillDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialProposal?.id]);
 
-  const extract = async (file: File) => {
-    if (!isSupportedDocumentFile(file)) {
-      return toast.error(`${file.name} isn't a PDF or image — the AI reader (and the preview pane) only support those. Try exporting/saving it as a PDF first.`);
-    }
-    if (file.size > MAX_AI_UPLOAD_BYTES) {
-      return toast.error(
-        `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
-      );
-    }
-    let base64: string;
-    try {
-      base64 = await readFileAsBase64(file);
-    } catch {
-      return toast.error(`Couldn't open ${file.name}`);
-    }
-    // Attach immediately so the document pane shows the file even if extraction fails below.
-    setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
-    await runExtraction(() => extractBill(base64, file.name, file.type || "application/pdf"), file.name, base64);
-  };
-
-  /** Shared by a fresh upload and "Read with AI again" on an already-attached file — the AI reader
-   * is a Google service that's sometimes overloaded, and a failed read must leave a way to retry
-   * without re-uploading (or saving an unread bill). */
-  const runExtraction = async (read: () => Promise<ExtractBillResult>, fileName?: string, fileData?: string) => {
-    const generation = generationRef.current;
-    setBusy(true);
-    setExtractSummary(null);
-    setExtractEmpty(false);
-    setExtractFailed(false);
-    try {
-      const data = await read();
-      if (generationRef.current !== generation) return;
-      applyExtracted(data, fileName, fileData);
-      if (!data.vendor && !data.amount) {
-        toast.warning("Couldn't find bill details in this file — the fields below are ready for manual entry");
-      } else {
-        toast.success("Extracted — review the fields before saving");
-      }
-    } catch (e) {
-      if (generationRef.current !== generation) return;
-      setExtractFailed(true);
-      toast.error(e instanceof Error ? e.message : "Couldn't read this bill");
-    } finally {
-      if (generationRef.current === generation) setBusy(false);
-    }
-  };
-
-  const rereadAttached = () =>
-    runExtraction(() => extractBillFromStored(form.sourceFileName, form.sourceFileData));
-
-  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) void extract(f);
-  };
+  // A fresh upload, or "Read with AI again" on the attached file (a proposal's stored PDF, a
+  // failed read) — the shared upload → read → fill flow every upload dialog uses.
+  const reading = useAiExtraction<ExtractBillResult>({
+    fn: "extract-bill",
+    fallbackError: "Couldn't read this bill",
+    onAttach: (sourceFileName, sourceFileData) => setForm((f) => ({ ...f, sourceFileName, sourceFileData })),
+    emptyMessage: "Couldn't find bill details in this file — the fields below are ready for manual entry",
+    apply: (data) => {
+      applyExtracted(data);
+      return { empty: !data.vendor && !data.amount };
+    },
+  });
+  const busy = reading.busy;
 
   const emailTenantAboutLineItem = (li: BillLineRow) => {
     const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
@@ -580,67 +517,19 @@ export function AddBillDialog({
 
         <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")}>
           <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
-            <div
-              className={
-                "rounded-md border-2 border-dashed p-6 text-center transition-colors " + (dragOver ? "border-primary bg-primary/5" : "")
-              }
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={onDrop}
+            <DocumentDropzone
+              prompt="Drop a bill here, or choose a file."
+              busy={reading.busy}
+              status={reading.status}
+              fileName={form.sourceFileName}
+              fileData={form.sourceFileData}
+              onFile={(f) => void reading.extract(f)}
+              onReread={() => void reading.reread(form.sourceFileName, form.sourceFileData)}
+              emptyText="Couldn't find bill details in this file — the document is still attached, fill in the fields manually."
+              confidence={confidence}
             >
-              <div className="flex flex-col items-center gap-2">
-                <FileUp className="h-8 w-8 text-muted-foreground" />
-                <div className="text-sm text-muted-foreground">
-                  {busy ? "Reading document…" : "Drop a bill here, or choose a file."}
-                </div>
-                <div className="text-xs text-muted-foreground">Accepts {ACCEPTED_DOCUMENT_TYPES_LABEL}</div>
-                <Input
-                  type="file"
-                  accept={ACCEPTED_DOCUMENT_TYPES_ACCEPT}
-                  className="h-8 max-w-[240px] text-xs"
-                  disabled={busy}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void extract(f);
-                  }}
-                />
-              </div>
-              {form.sourceFileName && (
-                <div className="mt-2 flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1">
-                  <span className="truncate text-xs">{form.sourceFileName}</span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 gap-1 text-xs"
-                    onClick={() => openBillDocument(form.sourceFileName, form.sourceFileData)}
-                  >
-                    <Eye className="h-3 w-3" /> View
-                  </Button>
-                </div>
-              )}
-              {form.sourceFileData && (
-                <Button
-                  size="sm"
-                  variant={extractFailed ? "default" : "outline"}
-                  className="mt-2 h-7 gap-1 text-xs"
-                  disabled={busy}
-                  onClick={() => void rereadAttached()}
-                >
-                  <RefreshCw className={"h-3 w-3" + (busy ? " animate-spin" : "")} />
-                  {busy ? "Reading…" : extractFailed ? "Try reading again" : "Read with AI again"}
-                </Button>
-              )}
-              {extractFailed && (
-                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-left text-xs text-amber-800">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  The AI reader failed, but the document is attached. Try again in a minute, or fill in the fields yourself. You can also re-read it later from the saved bill.
-                </div>
-              )}
-              {extractSummary && (
-                <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
+              {extractSummary && reading.status !== "failed" && (
+                <div className="mt-2 space-y-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-2 text-left text-xs text-emerald-900">
                   <div className="flex items-center gap-1 font-medium">
                     <CheckCircle2 className="h-3 w-3" /> Found in this document
                   </div>
@@ -656,19 +545,7 @@ export function AddBillDialog({
                   </div>
                 </div>
               )}
-              {extractEmpty && (
-                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  Couldn't find bill details in this file — the document is still attached, fill in the fields manually.
-                </div>
-              )}
-              {confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD && (
-                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                  <AlertTriangle className="h-3 w-3 shrink-0" />
-                  Low-confidence extraction — double-check every field before saving.
-                </div>
-              )}
-            </div>
+            </DocumentDropzone>
 
             {!form.sourceFileData && initialProposal?.sourceEmailBody ? (
               // An emailed "your bill is ready" notice often has no PDF at all — show the email it

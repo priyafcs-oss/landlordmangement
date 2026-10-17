@@ -25,48 +25,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Trash2,
-  Plus,
-  Send,
-  Upload,
-  FileUp,
-  Copy,
-  SlidersHorizontal,
-  CalendarClock,
-  FileSignature,
-  Mail,
-  Download,
-  FileDown,
-  TrendingUp,
-  ChevronDown,
-  ChevronUp,
-  History,
-  RefreshCw,
-  IdCard,
-  ShieldCheck,
-  FileText,
-  TriangleAlert,
-  Pencil,
-} from "lucide-react";
-import {
-  buildTenantLedger,
-  fmtCurrency,
-  todayISO,
-  addDays,
-  addMonths,
-  dailyRentRate,
-  paidUpToDetails,
-  ausFinancialYear,
-  fyRange,
-  buildFyOptions,
-  type LedgerRow,
-} from "@/lib/calculations";
+import { Trash2, Plus, Send, Upload, Copy, SlidersHorizontal, CalendarClock, FileSignature, Mail, Download, FileDown, TrendingUp, ChevronDown, ChevronUp, History, RefreshCw, IdCard, ShieldCheck, FileText, TriangleAlert, Pencil } from "lucide-react";
+import { buildTenantLedger, fmtCurrency, todayISO, addDays, dailyRentRate, paidUpToDetails, ausFinancialYear, fyRange, buildFyOptions, type LedgerRow } from "@/lib/calculations";
 import { bucketBy } from "@/lib/group";
 import type { Tenant, Property } from "@/lib/types";
 
 import { toast } from "sonner";
-import { MAX_AI_UPLOAD_BYTES, formatFileSize, readFileAsBase64, edgeFunctionErrorMessage } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateLedgerEntry, ledgerDuplicateAsMatch, type DuplicateMatch } from "@/lib/billMatch";
@@ -74,7 +38,6 @@ import { matchTenantByText, nonPropertyReason, parseBankFeedLine } from "@/lib/f
 import jsPDF from "jspdf";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
-import { supabase } from "@/integrations/supabase/client";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import {
   TenantDialog,
@@ -86,6 +49,7 @@ import {
   LeaseHistoryRow,
 } from "@/components/PropertyShared";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
+import { useAiExtraction } from "@/lib/useAiExtraction";
 
 export const Route = createFileRoute("/rental")({
   head: () => ({
@@ -1178,7 +1142,6 @@ function BankFeedDialog() {
   const [text, setText] = useState("");
   const [matches, setMatches] = useState<FeedMatch[]>([]);
   const [confirming, setConfirming] = useState<FeedMatch | null>(null);
-  const [extracting, setExtracting] = useState(false);
 
   const matchTenant = (line: string, date?: string): Tenant | undefined => matchTenantByText(state.tenants, line, date)?.tenant;
 
@@ -1196,51 +1159,30 @@ function BankFeedDialog() {
     setMatches(found);
   };
 
-  const extractFromDocument = async (f: File) => {
-    if (f.size > MAX_AI_UPLOAD_BYTES) {
-      return toast.error(
-        `This file is ${formatFileSize(f.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
-      );
-    }
-    setExtracting(true);
-    try {
-      const base64 = await readFileAsBase64(f);
-      const { data, error } = await supabase.functions.invoke<{
-        ok: boolean;
-        transactions?: BankStatementTransaction[];
-        error?: string;
-      }>("extract-bank-statement", {
-        body: { fileBase64: base64, fileName: f.name, mimeType: f.type || "application/pdf" },
-      });
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Couldn't read this statement");
-        return;
-      }
+  // A PDF/photo statement goes through the shared AI-read flow (file checks, readable errors, a
+  // read still running when the dialog closes is ignored); the file itself isn't kept.
+  const reading = useAiExtraction<{ transactions?: BankStatementTransaction[] }>({
+    fn: "extract-bank-statement",
+    fallbackError: "Couldn't read this statement",
+    apply: (data) => {
       const credits = (data.transactions ?? []).filter((t) => t.direction === "in");
       const found: FeedMatch[] = [];
       for (const t of credits) {
-        const line = `${t.date} ${t.description}`;
         if (nonPropertyReason(t.description, "in")) continue;
         const tenant = matchTenant(t.description, t.date);
-        if (tenant) found.push({ tenant, amount: t.amount, line, date: t.date });
-      }
-      if (found.length === 0) {
-        toast.error(`Read ${credits.length} deposit(s) but couldn't match any to a tenant`);
-      } else {
-        toast.success(`Matched ${found.length} of ${credits.length} deposit(s)`);
+        if (tenant) found.push({ tenant, amount: t.amount, line: `${t.date} ${t.description}`, date: t.date });
       }
       setMatches(found);
-    } catch (e) {
-      toast.error(await edgeFunctionErrorMessage(e));
-    } finally {
-      setExtracting(false);
-    }
-  };
+      return found.length === 0
+        ? { empty: true, message: `Read ${credits.length} deposit(s) but couldn't match any to a tenant` }
+        : { empty: false, message: `Matched ${found.length} of ${credits.length} deposit(s)` };
+    },
+  });
+  const extracting = reading.busy;
 
   const handleFile = async (f: File) => {
     if (f.type === "application/pdf" || f.type.startsWith("image/")) {
-      await extractFromDocument(f);
+      await reading.extract(f);
       return;
     }
     const t = await f.text();
