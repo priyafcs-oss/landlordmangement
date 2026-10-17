@@ -146,3 +146,9 @@
     color: var(--color-foreground);
   }
 }
+
+/* A modal dialog sets pointer-events: none on <body>, which the toaster (outside the dialog)
+   inherits — leaving an error toast's close button unclickable while a dialog is open. */
+[data-sonner-toaster] {
+  pointer-events: auto;
+}

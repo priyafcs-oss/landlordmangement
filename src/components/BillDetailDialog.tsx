@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CheckCircle2, Trash2, Plus, Pencil, Mail, Undo2 } from "lucide-react";
+import { CheckCircle2, Trash2, Plus, Pencil, Mail, Undo2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
@@ -26,6 +26,7 @@ import { WaterSplitPanel } from "@/components/WaterSplitPanel";
 import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { resolveDocumentBlob } from "@/lib/files";
+import { extractBillFromStored } from "@/lib/billExtract";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 
@@ -192,6 +193,49 @@ export function BillDetailDialog({
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === selected.propertyId);
+  const [reading, setReading] = useState(false);
+
+  /** Re-runs the AI reader on the attached PDF — for a bill saved while the reader was down (e.g.
+   * Gemini overloaded), so it isn't stuck as one unsplit total. Only fills the form; nothing is
+   * stored until Save, same as any other edit here. */
+  const readWithAi = async () => {
+    if (lineItems.some((li) => li.recharged)) {
+      return toast.error("A line on this bill has already been recharged to the tenant — edit the lines by hand instead");
+    }
+    setReading(true);
+    try {
+      const data = await extractBillFromStored(selected.sourceFileName, selected.sourceFileData);
+      if (data.line_items?.length) {
+        setLineItems(
+          data.line_items.map((li) => ({
+            key: uid("li"),
+            description: li.description,
+            category: selected.billType,
+            amount: String(li.amount),
+            gst: "",
+            rechargeToTenant: false,
+            tenantId: "",
+            recharged: false,
+          })),
+        );
+      }
+      setForm((f) => ({
+        ...f,
+        referenceNumber: f.referenceNumber || data.reference_number || data.bpay_reference || "",
+        bpayBillerCode: f.bpayBillerCode || data.bpay_biller_code || "",
+        bpayReference: f.bpayReference || data.bpay_reference || "",
+      }));
+      toast.success(
+        (data.line_items?.length ?? 0) > 1
+          ? `Read ${data.line_items!.length} line items — check them and click Save`
+          : "Read the bill, but it has no itemised breakdown — check the fields and click Save",
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't read this bill");
+    } finally {
+      setReading(false);
+    }
+  };
   // Water bills: recharge only on the usage line (see canRechargeLine).
   const wantsRecharge = (li: LineItemRow) => li.rechargeToTenant && canRechargeLine(selected.billType, li.category, li.description);
   const propertyUnits = state.properties.find((p) => p.id === selected.propertyId)?.units ?? [];
@@ -354,6 +398,12 @@ export function BillDetailDialog({
 
         <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-2")}>
           <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
+            {selected.sourceFileData && (
+              <Button size="sm" variant="outline" className="mb-2 h-7 gap-1 text-xs" disabled={reading} onClick={() => void readWithAi()}>
+                <RefreshCw className={"h-3 w-3" + (reading ? " animate-spin" : "")} />
+                {reading ? "Reading…" : "Read with AI"}
+              </Button>
+            )}
             <BillDocumentViewer
               fileName={selected.sourceFileName}
               fileData={selected.sourceFileData}

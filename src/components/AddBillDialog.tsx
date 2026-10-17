@@ -23,9 +23,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail } from "lucide-react";
+import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import {
   fmtCurrency,
   todayISO,
@@ -37,6 +36,7 @@ import {
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
+import { extractBill, extractBillFromStored } from "@/lib/billExtract";
 import { canRechargeLine, classifyWaterCharge, lastFixedWaterCharge, needsWaterSplit } from "@/lib/waterSplit";
 import { WaterSplitPanel } from "@/components/WaterSplitPanel";
 import { ProviderPortalLogin } from "@/components/ProviderPortalLogin";
@@ -51,7 +51,6 @@ import {
   isSupportedDocumentFile,
   ACCEPTED_DOCUMENT_TYPES_LABEL,
   ACCEPTED_DOCUMENT_TYPES_ACCEPT,
-  edgeFunctionErrorMessage,
 } from "@/lib/files";
 import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
@@ -188,6 +187,7 @@ export function AddBillDialog({
   });
 
   const [form, setForm] = useState(blankForm());
+  const [extractFailed, setExtractFailed] = useState(false);
   const [instalments, setInstalments] = useState<InstalmentRow[]>([]);
   const [lineItems, setLineItems] = useState<LineItemRow[]>([blankLineItem()]);
   // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset can
@@ -203,6 +203,7 @@ export function AddBillDialog({
     setConfidence(null);
     setExtractSummary(null);
     setExtractEmpty(false);
+    setExtractFailed(false);
     setDocExpanded(false);
   };
 
@@ -351,39 +352,46 @@ export function AddBillDialog({
         `This file is ${formatFileSize(file.size)} — the AI reader can only handle files up to ${formatFileSize(MAX_AI_UPLOAD_BYTES)}. Try a lower-resolution scan, or split it into smaller files.`,
       );
     }
+    let base64: string;
+    try {
+      base64 = await readFileAsBase64(file);
+    } catch {
+      return toast.error(`Couldn't open ${file.name}`);
+    }
+    // Attach immediately so the document pane shows the file even if extraction fails below.
+    setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
+    await runExtraction(() => extractBill(base64, file.name, file.type || "application/pdf"), file.name, base64);
+  };
+
+  /** Shared by a fresh upload and "Read with AI again" on an already-attached file — the AI reader
+   * is a Google service that's sometimes overloaded, and a failed read must leave a way to retry
+   * without re-uploading (or saving an unread bill). */
+  const runExtraction = async (read: () => Promise<ExtractBillResult>, fileName?: string, fileData?: string) => {
     const generation = generationRef.current;
     setBusy(true);
     setExtractSummary(null);
     setExtractEmpty(false);
+    setExtractFailed(false);
     try {
-      const base64 = await readFileAsBase64(file);
+      const data = await read();
       if (generationRef.current !== generation) return;
-      // Attach immediately so the document pane shows the file even if extraction fails below.
-      setForm((f) => ({ ...f, sourceFileName: file.name, sourceFileData: base64 }));
-
-      const { data, error } = await supabase.functions.invoke<ExtractBillResult>("extract-bill", {
-        body: { fileBase64: base64, fileName: file.name, mimeType: file.type || "application/pdf" },
-      });
-      if (generationRef.current !== generation) return;
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Couldn't read this bill");
-        return;
-      }
-
-      applyExtracted(data, file.name, base64);
-
+      applyExtracted(data, fileName, fileData);
       if (!data.vendor && !data.amount) {
         toast.warning("Couldn't find bill details in this file — the fields below are ready for manual entry");
       } else {
         toast.success("Extracted — review the fields before saving");
       }
     } catch (e) {
-      if (generationRef.current === generation) toast.error(await edgeFunctionErrorMessage(e));
+      if (generationRef.current !== generation) return;
+      setExtractFailed(true);
+      toast.error(e instanceof Error ? e.message : "Couldn't read this bill");
     } finally {
       if (generationRef.current === generation) setBusy(false);
     }
   };
+
+  const rereadAttached = () =>
+    runExtraction(() => extractBillFromStored(form.sourceFileName, form.sourceFileData));
 
   const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -706,6 +714,24 @@ export function AddBillDialog({
                   >
                     <Eye className="h-3 w-3" /> View
                   </Button>
+                </div>
+              )}
+              {form.sourceFileData && (
+                <Button
+                  size="sm"
+                  variant={extractFailed ? "default" : "outline"}
+                  className="mt-2 h-7 gap-1 text-xs"
+                  disabled={busy}
+                  onClick={() => void rereadAttached()}
+                >
+                  <RefreshCw className={"h-3 w-3" + (busy ? " animate-spin" : "")} />
+                  {busy ? "Reading…" : extractFailed ? "Try reading again" : "Read with AI again"}
+                </Button>
+              )}
+              {extractFailed && (
+                <div className="mt-2 flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-left text-xs text-amber-800">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  The AI reader failed, but the document is attached. Try again in a minute, or fill in the fields yourself. You can also re-read it later from the saved bill.
                 </div>
               )}
               {extractSummary && (

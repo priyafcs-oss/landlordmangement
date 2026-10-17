@@ -46,10 +46,13 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+const isToastTarget = (target: EventTarget | null) =>
+  target instanceof Element && !!target.closest("[data-sonner-toaster]");
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onInteractOutside, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -58,6 +61,12 @@ const DialogContent = React.forwardRef<
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg",
         className,
       )}
+      // Error toasts stay until dismissed, and render outside the dialog — clicking a toast's
+      // close (X) or action must not count as "clicking outside" and close the dialog too.
+      onInteractOutside={(e) => {
+        if (isToastTarget(e.target)) e.preventDefault();
+        onInteractOutside?.(e);
+      }}
       {...props}
     >
       {children}

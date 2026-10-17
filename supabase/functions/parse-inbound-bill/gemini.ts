@@ -26,6 +26,16 @@ const GEMINI_TIMEOUT_MS = 45_000;
 // only for reasons a retry on the same model could never fix (404 retired, 429 quota exhausted).
 const MAX_TRANSIENT_RETRIES = 2;
 
+/** What the landlord sees when every attempt failed — Gemini's raw error body is a JSON blob
+ * ("503 { error: { code: 503, message: 'The model is overloaded...' } }") that means nothing in a
+ * toast. The raw text still goes to the function logs. */
+export function friendlyGeminiError(status: number | undefined): string {
+  if (status === 429) return "The AI reader has hit its usage limit for now. Try again later, or fill in the fields by hand.";
+  if (status !== undefined && status >= 500) return "Google's AI reader is overloaded right now. Wait a minute and try again.";
+  if (status === undefined) return "The AI reader didn't respond in time. Try again in a minute.";
+  return "The AI reader couldn't read this document.";
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -67,6 +77,7 @@ export async function callGeminiJSON<T>(
 
   const candidates = modelCandidates();
   let lastError = "unknown error";
+  let lastStatus: number | undefined;
 
   for (const model of candidates) {
     for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
@@ -80,6 +91,7 @@ export async function callGeminiJSON<T>(
       } catch (e) {
         // AbortError (our own timeout) or a network-level failure — both plausibly transient.
         lastError = e instanceof Error ? e.message : "network error";
+        lastStatus = undefined;
         if (attempt < MAX_TRANSIENT_RETRIES) {
           console.warn(`[parse-inbound-bill] Gemini call to "${model}" failed (${lastError}), retrying (attempt ${attempt + 2})`);
           await sleep(1000 * (attempt + 1));
@@ -101,9 +113,11 @@ export async function callGeminiJSON<T>(
       }
 
       lastError = `${res.status} ${await res.text()}`;
+      lastStatus = res.status;
       if (res.status >= 500 && attempt < MAX_TRANSIENT_RETRIES) {
         console.warn(`[parse-inbound-bill] Gemini call to "${model}" failed (${res.status}), retrying (attempt ${attempt + 2})`);
-        await sleep(1000 * (attempt + 1));
+        // Overload (503) usually clears within seconds, not instantly — back off 2s, then 4s.
+        await sleep(2000 * 2 ** attempt);
         continue;
       }
       // Fall through to the next candidate when the model itself was retired (404), or when THIS
@@ -113,14 +127,16 @@ export async function callGeminiJSON<T>(
       // failure (bad key, malformed request, or a 5xx that outlasted its retries) is either a real
       // bug or something no other candidate would fix either, so it's raised immediately.
       if (res.status !== 404 && res.status !== 429 && res.status < 500) {
-        throw new Error(`Gemini request failed: ${lastError}`);
+        console.error(`[parse-inbound-bill] Gemini request failed: ${lastError}`);
+        throw new Error(friendlyGeminiError(lastStatus));
       }
       break;
     }
     console.warn(`[parse-inbound-bill] Gemini model "${model}" unavailable (${lastError}), trying next candidate`);
   }
 
-  throw new Error(`Gemini request failed on all model candidates: ${lastError}`);
+  console.error(`[parse-inbound-bill] Gemini request failed on all model candidates: ${lastError}`);
+  throw new Error(friendlyGeminiError(lastStatus));
 }
 
 /**

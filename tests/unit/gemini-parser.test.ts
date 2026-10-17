@@ -110,7 +110,7 @@ describe("Gemini document parsing (real production code, mocked fetch)", () => {
   it("does not retry and fails fast on a genuine 4xx (not 404/429) — a real bug, not a transient failure", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response("bad request", { status: 400 }));
 
-    await expect(extractBillFields(SAMPLE_BILL_INPUT)).rejects.toThrow("Gemini request failed: 400");
+    await expect(extractBillFields(SAMPLE_BILL_INPUT)).rejects.toThrow("The AI reader couldn't read this document.");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -121,9 +121,9 @@ describe("Gemini document parsing (real production code, mocked fetch)", () => {
       .mockResolvedValueOnce(geminiResponse({ document_type: "bill", confidence: 0.9 }));
 
     const resultPromise = classifyDocument(SAMPLE_BILL_INPUT);
-    // The retry loop sleeps 1000ms * (attempt + 1) between attempts (gemini.ts's own backoff) —
-    // advance fake time so the test doesn't actually wait a full second.
-    await vi.advanceTimersByTimeAsync(1500);
+    // The retry loop sleeps 2000ms * 2^attempt between attempts (gemini.ts's own backoff) —
+    // advance fake time so the test doesn't actually wait.
+    await vi.advanceTimersByTimeAsync(2500);
 
     await expect(resultPromise).resolves.toEqual({ document_type: "bill", confidence: 0.9 });
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -148,5 +148,15 @@ describe("Gemini document parsing (real production code, mocked fetch)", () => {
 
     await expect(classifyDocument(SAMPLE_BILL_INPUT)).rejects.toThrow("GEMINI_API_KEY is not configured");
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("friendlyGeminiError", () => {
+  it("turns Gemini's raw failures into a message a landlord can act on", async () => {
+    const { friendlyGeminiError } = await import("../../supabase/functions/parse-inbound-bill/gemini.ts");
+    expect(friendlyGeminiError(503)).toMatch(/overloaded/);
+    expect(friendlyGeminiError(429)).toMatch(/usage limit/);
+    expect(friendlyGeminiError(undefined)).toMatch(/didn't respond/);
+    expect(friendlyGeminiError(503)).not.toMatch(/\{/);
   });
 });
