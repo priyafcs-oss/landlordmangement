@@ -23,7 +23,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail, RefreshCw } from "lucide-react";
+import { Plus, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, CheckCircle2, Mail, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   fmtCurrency,
@@ -36,6 +36,8 @@ import {
 } from "@/lib/calculations";
 import { extractBill, extractBillFromStored } from "@/lib/billExtract";
 import { BillLineItemsEditor } from "@/components/BillLineItemsEditor";
+import { InstalmentScheduleEditor } from "@/components/InstalmentScheduleEditor";
+import { instalmentBills, instalmentLabel, newInstalmentRow, validateInstalments, type InstalmentRow } from "@/lib/instalments";
 import { blankBillLine, lineWantsRecharge, newlyRechargedLines, planBillLines, type BillLineRow } from "@/lib/billLines";
 import { emailTenant, rechargeEmail } from "@/lib/tenantEmails";
 import { ProviderPortalLogin } from "@/components/ProviderPortalLogin";
@@ -58,13 +60,6 @@ import type { BillType, AiIntakeProposal, BillProposalPayload, Property, Provide
 import { BILL_TYPES, LOW_CONFIDENCE_THRESHOLD, SHARED_UNIT, uid } from "@/lib/constants";
 
 
-
-interface InstalmentRow {
-  key: string;
-  label: string;
-  dueDate: string;
-  amount: string;
-}
 
 function mapBillType(category?: string): BillType {
   const exact = BILL_TYPES.find((t) => t.toLowerCase() === (category ?? "").trim().toLowerCase());
@@ -244,12 +239,7 @@ export function AddBillDialog({
     );
     if (data.future_instalments?.length) {
       setInstalments(
-        data.future_instalments.map((i, idx) => ({
-          key: uid("inst"),
-          label: `Instalment ${idx + 2}`,
-          dueDate: i.due_date,
-          amount: String(i.amount),
-        })),
+        data.future_instalments.map((i, idx) => newInstalmentRow(idx + 2, { dueDate: i.due_date, amount: String(i.amount) })),
       );
     }
     setConfidence(data.confidence ?? null);
@@ -368,13 +358,6 @@ export function AddBillDialog({
     if (f) void extract(f);
   };
 
-  const addInstalment = () =>
-    setInstalments((rows) => [
-      ...rows,
-      { key: uid("inst"), label: `Instalment ${rows.length + 2}`, dueDate: "", amount: "" },
-    ]);
-  const removeInstalment = (key: string) => setInstalments((rows) => rows.filter((r) => r.key !== key));
-
   const emailTenantAboutLineItem = (li: BillLineRow) => {
     const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
     const property = state.properties.find((p) => p.id === propertyId);
@@ -396,9 +379,8 @@ export function AddBillDialog({
     if (!form.providerName.trim()) return toast.error("Provider name is required");
     if (!form.dueDate) return toast.error("Due date is required");
     if (netTotal <= 0) return toast.error("Add at least one line item with an amount");
-    if (form.hasInstalments && instalments.some((i) => !i.dueDate || !parseFloat(i.amount))) {
-      return toast.error("Every instalment needs a due date and amount");
-    }
+    const scheduleError = form.hasInstalments ? validateInstalments(instalments) : null;
+    if (scheduleError) return toast.error(scheduleError);
     if (lineItems.some((li) => lineWantsRecharge(form.billType, li) && !li.tenantId)) {
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
@@ -509,18 +491,9 @@ export function AddBillDialog({
       ...shared,
       amount: netTotal,
       dueDate: form.dueDate,
-      label: billGroupId ? "Instalment 1" : undefined,
+      label: billGroupId ? instalmentLabel(1) : undefined,
     });
-    if (billGroupId) {
-      for (const inst of instalments) {
-        addBill({
-          ...shared,
-          amount: parseFloat(inst.amount) || 0,
-          dueDate: inst.dueDate,
-          label: inst.label,
-        });
-      }
-    }
+    if (billGroupId) instalmentBills(shared, instalments, billGroupId).forEach(addBill);
 
     if (initialProposal && payload) {
       const annualField = ANNUAL_COST_FIELD[form.billType];
@@ -744,43 +717,7 @@ export function AddBillDialog({
             {form.hasInstalments && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="text-xs font-medium">Payment plan</div>
-                {instalments.map((inst) => (
-                  <div key={inst.key} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
-                    <Field label="Label">
-                      <Input
-                        value={inst.label}
-                        onChange={(e) =>
-                          setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, label: e.target.value } : r)))
-                        }
-                      />
-                    </Field>
-                    <Field label="Due date">
-                      <Input
-                        type="date"
-                        value={inst.dueDate}
-                        onChange={(e) =>
-                          setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, dueDate: e.target.value } : r)))
-                        }
-                      />
-                    </Field>
-                    <Field label="Amount">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={inst.amount}
-                        onChange={(e) =>
-                          setInstalments((rows) => rows.map((r) => (r.key === inst.key ? { ...r, amount: e.target.value } : r)))
-                        }
-                      />
-                    </Field>
-                    <Button size="icon" variant="ghost" onClick={() => removeInstalment(inst.key)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button size="sm" variant="outline" className="gap-1" onClick={addInstalment}>
-                  <Plus className="h-3 w-3" /> Add payment
-                </Button>
+                <InstalmentScheduleEditor rows={instalments} onChange={setInstalments} numberOffset={1} addLabel="Add payment" />
               </div>
             )}
 

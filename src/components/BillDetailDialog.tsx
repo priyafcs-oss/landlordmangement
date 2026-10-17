@@ -15,10 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CheckCircle2, Trash2, Plus, Pencil, Mail, Undo2, RefreshCw } from "lucide-react";
+import { CheckCircle2, Trash2, Pencil, Mail, Undo2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified, billOwed } from "@/lib/calculations";
 import { BillLineItemsEditor } from "@/components/BillLineItemsEditor";
+import { InstalmentScheduleEditor } from "@/components/InstalmentScheduleEditor";
+import { instalmentBills, instalmentLabel, sharedBillFields, validateInstalments, type InstalmentRow } from "@/lib/instalments";
 import { billLinesToRows, blankBillLine, lineWantsRecharge, newlyRechargedLines, planBillLines, type BillLineRow } from "@/lib/billLines";
 import { emailTenant, rechargeEmail } from "@/lib/tenantEmails";
 import type { ExpenseCategory, PropertyBill } from "@/lib/types";
@@ -28,13 +30,6 @@ import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { SHARED_UNIT, uid } from "@/lib/constants";
 
 
-interface InstalmentEditRow {
-  id?: string;
-  key: string;
-  label: string;
-  dueDate: string;
-  amount: string;
-}
 
 /** A saved bill's lines as editable rows — at least one, so there's always a row to type into. */
 const toLineItemRows = (b: PropertyBill): BillLineRow[] => {
@@ -120,7 +115,10 @@ export function BillDetailDialog({
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(bill.id);
   const [editingSchedule, setEditingSchedule] = useState(false);
-  const [scheduleRows, setScheduleRows] = useState<InstalmentEditRow[]>([]);
+  const [scheduleRows, setScheduleRows] = useState<InstalmentRow[]>([]);
+  // Saved instalments removed while editing — only deleted on "Done", not the moment the bin is
+  // clicked, so abandoning the edit doesn't lose them.
+  const [removedIds, setRemovedIds] = useState<string[]>([]);
   // Whether the document pane — and this whole dialog — is enlarged, so "Enlarge" on the source
   // document grows the review window (document + editable fields together), not just the pane.
   const [docExpanded, setDocExpanded] = useState(false);
@@ -263,52 +261,36 @@ export function BillDetailDialog({
       siblings.map((s, idx) => ({
         id: s.id,
         key: s.id,
-        label: s.label ?? (idx === 0 ? "1st instalment" : `Instalment ${idx + 1}`),
+        label: s.label ?? instalmentLabel(idx + 1),
         dueDate: s.dueDate,
         amount: String(s.amount),
       })),
     );
+    setRemovedIds([]);
     setEditingSchedule(true);
   };
 
   const saveSchedule = () => {
+    const error = validateInstalments(scheduleRows);
+    if (error) return toast.error(error);
     const groupId = bill.billGroupId ?? uid("bg");
+    for (const id of removedIds) deleteBill(id);
     for (const row of scheduleRows) {
-      if (row.id) {
-        updateBill(row.id, { label: row.label, dueDate: row.dueDate, amount: parseFloat(row.amount) || 0 });
-      } else {
-        addBill({
-          propertyId: selected.propertyId,
-          assetId: selected.assetId,
-          billType: selected.billType,
-          status: "Unpaid",
-          providerName: selected.providerName,
-          referenceNumber: selected.referenceNumber,
-          bpayBillerCode: selected.bpayBillerCode,
-          bpayReference: selected.bpayReference,
-          periodStart: selected.periodStart,
-          periodEnd: selected.periodEnd,
-          lineItems: selected.lineItems,
-          sourceFileName: selected.sourceFileName,
-          sourceFileData: selected.sourceFileData,
-          billGroupId: groupId,
-          label: row.label,
-          dueDate: row.dueDate,
-          amount: parseFloat(row.amount) || 0,
-        });
-      }
+      if (row.id) updateBill(row.id, { label: row.label, dueDate: row.dueDate, amount: parseFloat(row.amount) || 0 });
     }
+    // New instalments copy every shared field from this bill (category, tax category, provider,
+    // dwelling, …) — the same helper a new bill's schedule uses.
+    instalmentBills(sharedBillFields(selected), scheduleRows.filter((r) => !r.id), groupId).forEach(addBill);
     setEditingSchedule(false);
     toast.success("Payment schedule updated");
   };
 
-  const removeScheduleRow = (key: string) => {
-    const row = scheduleRows.find((r) => r.key === key);
-    if (row?.id) {
-      if (siblings.length <= 1) return toast.error("Can't remove the only instalment — delete the bill instead");
-      deleteBill(row.id);
+  const removeScheduleRow = (row: InstalmentRow) => {
+    if (row.id && scheduleRows.filter((r) => r.id).length <= 1) {
+      return toast.error("Can't remove the only instalment — delete the bill instead");
     }
-    setScheduleRows((rows) => rows.filter((r) => r.key !== key));
+    if (row.id) setRemovedIds((ids) => [...ids, row.id!]);
+    setScheduleRows((rows) => rows.filter((r) => r.key !== row.key));
   };
 
   return (
@@ -368,32 +350,7 @@ export function BillDetailDialog({
                 </div>
 
                 {editingSchedule ? (
-                  <div className="space-y-2">
-                    {scheduleRows.map((row) => (
-                      <div key={row.key} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2">
-                        <Field label="Label">
-                          <Input value={row.label} onChange={(e) => setScheduleRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, label: e.target.value } : r)))} />
-                        </Field>
-                        <Field label="Due date">
-                          <Input type="date" value={row.dueDate} onChange={(e) => setScheduleRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, dueDate: e.target.value } : r)))} />
-                        </Field>
-                        <Field label="Amount">
-                          <Input type="number" step="0.01" value={row.amount} onChange={(e) => setScheduleRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, amount: e.target.value } : r)))} />
-                        </Field>
-                        <Button size="icon" variant="ghost" onClick={() => removeScheduleRow(row.key)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1"
-                      onClick={() => setScheduleRows((rows) => [...rows, { key: uid("inst"), label: `Instalment ${rows.length + 1}`, dueDate: "", amount: "" }])}
-                    >
-                      <Plus className="h-3 w-3" /> Add instalment
-                    </Button>
-                  </div>
+                  <InstalmentScheduleEditor rows={scheduleRows} onChange={setScheduleRows} onRemove={removeScheduleRow} />
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {siblings.map((s, idx) => (
@@ -408,7 +365,7 @@ export function BillDetailDialog({
                       >
                         <div className="flex items-center gap-1 font-medium">
                           {s.status === "Paid" && <CheckCircle2 className="h-3 w-3 text-emerald-600" />}
-                          {s.label ?? (idx === 0 ? "1st instalment" : `Instalment ${idx + 1}`)}
+                          {s.label ?? instalmentLabel(idx + 1)}
                         </div>
                         <div className="text-muted-foreground">
                           Due {s.dueDate} · {fmtCurrency(s.amount)} · {s.status}
