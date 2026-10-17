@@ -52,7 +52,7 @@ import {
   saveSettings,
   subscribeToTable,
 } from "./db";
-import { addDays, addMonths, healPaidUpDates, paidUpToDateFromPayments, todayISO } from "./calculations";
+import { addDays, addMonths, billOwed, healPaidUpDates, paidUpToDateFromPayments, todayISO } from "./calculations";
 import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
 
@@ -1534,7 +1534,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // opts.amount is what's being paid in THIS transaction, not a running total — so a
         // top-up on a bill already left "Partial" from an earlier payment is compared against
         // what's still actually owed, not the bill's full original amount.
-        const remainingOwed = bill.amount - (bill.status === "Partial" ? bill.paidAmount ?? 0 : 0);
+        const remainingOwed = billOwed(bill);
         const appliedAmount = opts?.amount ?? remainingOwed;
 
         type Affected = { bill: PropertyBill; newlyApplied: number; cumulativePaid: number; status: "Paid" | "Partial" };
@@ -1552,7 +1552,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
           for (const sibling of siblings) {
             if (excess <= 0.005) break;
-            const owedOnSibling = sibling.amount - (sibling.status === "Partial" ? sibling.paidAmount ?? 0 : 0);
+            const owedOnSibling = billOwed(sibling);
             const appliedToSibling = Math.min(excess, owedOnSibling);
             affected.push({ bill: sibling, newlyApplied: appliedToSibling, ...computeBillPatch(sibling, appliedToSibling) });
             excess -= appliedToSibling;

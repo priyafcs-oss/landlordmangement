@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency, todayISO } from "@/lib/calculations";
+import { fmtCurrency, todayISO, billOwed } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
 
 const PAYMENT_METHODS: NonNullable<PropertyBill["paymentMethod"]>[] = [
@@ -47,7 +47,7 @@ export function MarkBillPaidDialog({
   const open = controlled ? openProp : openState;
   // Already partially paid? Default to what's actually still owed, not the bill's original full
   // amount — this dialog reopens for "pay the remainder" too, not just a fresh payment.
-  const remainingOwed = bill.status === "Partial" ? bill.amount - (bill.paidAmount ?? 0) : bill.amount;
+  const remainingOwed = billOwed(bill) || bill.amount;
   const [paidDate, setPaidDate] = useState(todayISO());
   const [paymentMethod, setPaymentMethod] = useState<NonNullable<PropertyBill["paymentMethod"]>>("Bank Transfer");
   const [amount, setAmount] = useState(String(remainingOwed));

@@ -15,7 +15,7 @@ import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search, Undo2 } from "lucide-react";
-import { fmtCurrency, todayISO, addDays, CATEGORY_GROUPS, taxTreatmentLabel } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, CATEGORY_GROUPS, taxTreatmentLabel, billOwed, isBillOverdue } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { bucketBy } from "@/lib/group";
@@ -74,7 +74,7 @@ export function BillsBoard({
 
   const today = todayISO();
   const in30 = addDays(today, 30);
-  const isOverdue = (b: PropertyBill) => b.status === "Unpaid" && b.dueDate < today;
+  const isOverdue = (b: PropertyBill) => isBillOverdue(b, today);
   const assetTypeOf = (b: PropertyBill) => state.assets.find((a) => a.id === b.assetId)?.assetType;
   const propertyLabelOf = (b: PropertyBill) => {
     const p = state.properties.find((pr) => pr.id === b.propertyId);
@@ -159,16 +159,12 @@ export function BillsBoard({
   const handleSort = (f: SortField) => setSort((s) => toggleSort(s, f));
 
   const outstanding = scopedBills.filter((b) => b.status !== "Paid");
-  // What's actually still owed, not the original billed amount — a Partial instalment has
-  // already had some of its amount paid, so counting the full amount here overstates how much
-  // is genuinely outstanding.
-  const owedOn = (b: PropertyBill) => Math.max(0, b.amount - (b.paidAmount ?? 0));
-  const outstandingTotal = outstanding.reduce((s, b) => s + owedOn(b), 0);
-  const overdueTotal = outstanding.filter(isOverdue).reduce((s, b) => s + owedOn(b), 0);
-  const due30Total = outstanding.filter((b) => !isOverdue(b) && b.dueDate <= in30).reduce((s, b) => s + owedOn(b), 0);
+  const outstandingTotal = outstanding.reduce((s, b) => s + billOwed(b), 0);
+  const overdueTotal = outstanding.filter(isOverdue).reduce((s, b) => s + billOwed(b), 0);
+  const due30Total = outstanding.filter((b) => !isOverdue(b) && b.dueDate <= in30).reduce((s, b) => s + billOwed(b), 0);
   const laterTotal = outstandingTotal - overdueTotal - due30Total;
   const byType = outstanding.reduce<Record<string, number>>((acc, b) => {
-    acc[b.billType] = (acc[b.billType] ?? 0) + owedOn(b);
+    acc[b.billType] = (acc[b.billType] ?? 0) + billOwed(b);
     return acc;
   }, {});
   const maxByType = Math.max(1, ...Object.values(byType));
@@ -528,7 +524,7 @@ function BillsTableBody({
             // What's still owed across the whole instalment schedule, not just this row's own
             // billed amount — a landlord glancing at the Bills list wants to know how much of a
             // multi-instalment bill is left to pay, not the full original total every time.
-            const pending = group.reduce((s, b) => s + Math.max(0, b.amount - (b.paidAmount ?? 0)), 0);
+            const pending = group.reduce((s, b) => s + billOwed(b), 0);
             const paidCount = group.filter((b) => b.status === "Paid").length;
             const allPaid = paidCount === group.length;
             const anyOverdue = group.some(isOverdue);

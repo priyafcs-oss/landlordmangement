@@ -27,6 +27,7 @@ import {
   inspectionDueStatus,
   propertyInspectionCadenceDays,
   fmtCurrency,
+  billOwed,
 } from "@/lib/calculations";
 import {
   AlertTriangle,
@@ -398,7 +399,7 @@ function HousekeepingWidget() {
             >
               <div>
                 <div className="font-medium">
-                  {bill.billType} — {fmtCurrency(bill.amount)}
+                  {bill.billType} — {fmtCurrency(billOwed(bill))}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {prop?.address} • due {bill.dueDate}

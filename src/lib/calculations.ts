@@ -9,6 +9,7 @@ import type {
   RentChange,
   Expense,
   Loan,
+  PropertyBill,
   AiIntakeProposal,
   BillType,
   DepreciationItem,
@@ -572,6 +573,20 @@ export function buildFyOptions(spanBack = 3): string[] {
  * otherwise overstate the figure for a year still in progress. */
 export function daysInclusive(startISO: string, endISO: string): number {
   return Math.round((new Date(endISO).getTime() - new Date(startISO).getTime()) / 86_400_000) + 1;
+}
+
+/** What's still owed on a bill — nothing once Paid; for a Partial instalment, the amount less
+ * what's already been paid (paidAmount only counts while Partial, same rule markBillPaid uses).
+ * Dashboards and forecasts summing raw `amount` overstated partly-paid bills. */
+export function billOwed(b: Pick<PropertyBill, "amount" | "status" | "paidAmount">): number {
+  if (b.status === "Paid") return 0;
+  return Math.max(0, b.amount - (b.status === "Partial" ? (b.paidAmount ?? 0) : 0));
+}
+
+/** A bill still owing money past its due date — Partial included (the old `status === "Unpaid"`
+ * check never flagged a part-paid bill as overdue). */
+export function isBillOverdue(b: Pick<PropertyBill, "amount" | "status" | "paidAmount" | "dueDate">, today = todayISO()): boolean {
+  return b.dueDate < today && billOwed(b) > 0.005;
 }
 
 /** A loan's interest for a full year at its current balance and rate — the estimate used when no

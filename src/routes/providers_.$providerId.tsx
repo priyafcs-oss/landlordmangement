@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ArrowLeft, Pencil, Trash2, Eye, Plus, Receipt, FileWarning, FolderOpen, FileSignature } from "lucide-react";
-import { fmtCurrency, daysUntil } from "@/lib/calculations";
+import { fmtCurrency, daysUntil, billOwed, isBillOverdue } from "@/lib/calculations";
 import { openBillDocument, readFileAsDataUrl } from "@/lib/files";
 import { ProviderDialog, ProviderRow, ProviderAgreementDialog } from "@/components/PropertyShared";
 import { agreementsForProvider } from "@/lib/providerAgreements";
@@ -413,14 +413,14 @@ function ProviderProfilePage() {
                 <div key={b.id} className="flex items-center justify-between gap-2 rounded border p-2 text-xs">
                   <div className="min-w-0">
                     <div className="font-medium">
-                      {b.billType} — {fmtCurrency(b.amount)}
+                      {b.billType} — {fmtCurrency(billOwed(b))}
                     </div>
                     <div className="text-muted-foreground">
                       {prop?.alias || prop?.address || "Unassigned"} · Due {b.dueDate}
                     </div>
                   </div>
-                  <Badge variant={b.status === "Overdue" ? "destructive" : "outline"} className="shrink-0 text-[10px]">
-                    {b.status}
+                  <Badge variant={isBillOverdue(b) ? "destructive" : "outline"} className="shrink-0 text-[10px]">
+                    {isBillOverdue(b) ? "Overdue" : b.status}
                   </Badge>
                 </div>
               );

@@ -28,7 +28,7 @@ import {
   Activity as ActivityIcon,
   ShieldCheck,
 } from "lucide-react";
-import { buildActivityFeed, daysUntil, fmtCurrency } from "@/lib/calculations";
+import { buildActivityFeed, daysUntil, fmtCurrency, billOwed } from "@/lib/calculations";
 import {
   computeOverviewMetrics,
   computeCashflowSeries,
@@ -256,7 +256,7 @@ export function OverviewSection({
                         className="flex items-center justify-between gap-2 text-xs"
                       >
                         <span className="min-w-0 flex-1 truncate">
-                          {bill.billType} — {fmtCurrency(bill.amount)}
+                          {bill.billType} — {fmtCurrency(billOwed(bill))}
                         </span>
                         <Badge variant={days < 0 ? "destructive" : "outline"} className="shrink-0">
                           {days < 0 ? `${Math.abs(days)}d overdue` : `${days}d`}

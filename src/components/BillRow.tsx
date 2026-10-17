@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, ExternalLink, Paperclip, Receipt, Trash2, Undo2 } from "lucide-react";
-import { fmtCurrency, todayISO, fmtModified } from "@/lib/calculations";
+import { fmtCurrency, fmtModified, isBillOverdue } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { openBillDocument } from "@/lib/files";
@@ -21,7 +21,7 @@ export function BillRow({
   /** When set (e.g. on a portfolio-wide list), shown alongside the due date so bills aren't ambiguous. */
   propertyLabel?: string;
 }) {
-  const overdue = bill.status === "Unpaid" && bill.dueDate < todayISO();
+  const overdue = isBillOverdue(bill);
   return (
     <div className="rounded-md border p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">

@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CheckCircle2, Trash2, Plus, Pencil, Mail, Undo2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified } from "@/lib/calculations";
+import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified, billOwed } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
 import { canRechargeLine, classifyWaterCharge, lastFixedWaterCharge, needsWaterSplit } from "@/lib/waterSplit";
 import { WaterSplitPanel } from "@/components/WaterSplitPanel";
@@ -98,7 +98,7 @@ function PayStatusControl({ bill }: { bill: PropertyBill }) {
   );
 
   if (bill.status === "Partial") {
-    const owed = bill.amount - (bill.paidAmount ?? 0);
+    const owed = billOwed(bill);
     return (
       <div className="flex items-center gap-2">
         <div className="text-right text-xs text-amber-700">

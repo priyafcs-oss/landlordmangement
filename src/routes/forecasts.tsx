@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fmtCurrency, localISO } from "@/lib/calculations";
+import { fmtCurrency, localISO, billOwed } from "@/lib/calculations";
 import { currentTenantsAll, rentPerPeriod } from "@/lib/tenancy";
 
 export const Route = createFileRoute("/forecasts")({
@@ -54,7 +54,7 @@ export function ForecastsContent() {
 
     const billsDue = state.bills
       .filter((b) => b.status !== "Paid" && b.dueDate.startsWith(key))
-      .reduce((s, b) => s + b.amount, 0);
+      .reduce((s, b) => s + billOwed(b), 0);
 
     cashflowRows.push({
       name,
