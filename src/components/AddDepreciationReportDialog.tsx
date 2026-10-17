@@ -35,8 +35,8 @@ import {
 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import type { DepreciationItem } from "@/lib/types";
+import { uid } from "@/lib/constants";
 
-const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
 type Division = NonNullable<DepreciationItem["division"]>;
 type Method = NonNullable<DepreciationItem["method"]>;

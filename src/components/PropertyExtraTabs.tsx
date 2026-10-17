@@ -40,12 +40,12 @@ import type {
   PropertyNote,
 } from "@/lib/types";
 import { COMPLIANCE_CERT_TYPES } from "@/lib/types";
+import { SHARED_UNIT } from "@/lib/constants";
 
-const SHARED_UNIT = "__shared__";
 
 /** Premises/dwelling scope select, shared by every dialog in this file — only rendered when the
  * property actually has units on file, same "shared vs a specific dwelling" pattern used across
- * ExpenseDialog/AddTransactionDialog. */
+ * AddTransactionDialog. */
 function UnitScopeField({ prop, unitId, onChange }: { prop: Property; unitId: string; onChange: (v: string) => void }) {
   if (!prop.units || prop.units.length === 0) return null;
   return (

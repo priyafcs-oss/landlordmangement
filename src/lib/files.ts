@@ -275,7 +275,7 @@ export function isSupportedDocumentFile(file: File): boolean {
 
 /**
  * Different upload paths in this app inconsistently store either a full data URL
- * (`data:application/pdf;base64,...`, e.g. ExpenseDialog/tenant document uploads) or the raw
+ * (`data:application/pdf;base64,...`, e.g. older expense invoices, tenant document uploads) or the raw
  * base64 payload alone with the prefix already stripped (e.g. AddBillDialog/AddTransactionDialog) —
  * strip a "data:...;base64," prefix here if present so every caller works either way. Raw base64
  * never legitimately contains a comma, so splitting on the first one is safe.

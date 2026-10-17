@@ -28,23 +28,21 @@ import { toast } from "sonner";
 import {
   fmtCurrency,
   todayISO,
-  billTypeToChargeType,
   billTypeToDefaultCategory,
   mapExpenseCategory,
   expenseCategoryToTaxCategory,
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
-import { buildRechargeInvoice } from "@/lib/recharge";
 import { extractBill, extractBillFromStored } from "@/lib/billExtract";
-import { canRechargeLine, classifyWaterCharge, lastFixedWaterCharge, needsWaterSplit } from "@/lib/waterSplit";
-import { WaterSplitPanel } from "@/components/WaterSplitPanel";
+import { BillLineItemsEditor } from "@/components/BillLineItemsEditor";
+import { blankBillLine, lineWantsRecharge, newlyRechargedLines, planBillLines, type BillLineRow } from "@/lib/billLines";
+import { emailTenant, rechargeEmail } from "@/lib/tenantEmails";
 import { ProviderPortalLogin } from "@/components/ProviderPortalLogin";
 import { extractEmailLinks, linkifySegments, pickBillLink, portalOrigin } from "@/lib/emailLinks";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import {
   openBillDocument,
-  resolveDocumentBlob,
   MAX_AI_UPLOAD_BYTES,
   formatFileSize,
   readFileAsBase64,
@@ -52,36 +50,20 @@ import {
   ACCEPTED_DOCUMENT_TYPES_LABEL,
   ACCEPTED_DOCUMENT_TYPES_ACCEPT,
 } from "@/lib/files";
-import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
-import type { BillType, BillLineItem, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
+import type { BillType, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
+import { BILL_TYPES, LOW_CONFIDENCE_THRESHOLD, SHARED_UNIT, uid } from "@/lib/constants";
 
-const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"];
-const LOW_CONFIDENCE_THRESHOLD = 0.85;
-/** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
- * an empty string, and shared/whole-property genuinely needs its own selectable option. */
-const SHARED_UNIT = "__shared__";
 
-const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
 interface InstalmentRow {
   key: string;
   label: string;
   dueDate: string;
   amount: string;
-}
-
-interface LineItemRow {
-  key: string;
-  description: string;
-  category: BillType;
-  amount: string;
-  gst: string;
-  rechargeToTenant: boolean;
-  tenantId: string;
 }
 
 function mapBillType(category?: string): BillType {
@@ -176,20 +158,10 @@ export function AddBillDialog({
     sourceFileData: undefined as string | undefined,
   });
 
-  const blankLineItem = (category: BillType = "Water"): LineItemRow => ({
-    key: uid("li"),
-    description: "",
-    category,
-    amount: "",
-    gst: "",
-    rechargeToTenant: false,
-    tenantId: "",
-  });
-
   const [form, setForm] = useState(blankForm());
   const [extractFailed, setExtractFailed] = useState(false);
   const [instalments, setInstalments] = useState<InstalmentRow[]>([]);
-  const [lineItems, setLineItems] = useState<LineItemRow[]>([blankLineItem()]);
+  const [lineItems, setLineItems] = useState<BillLineRow[]>([blankBillLine("Water")]);
   // Bumped on every reset() so an extraction still in flight when the dialog is closed/reset can
   // tell its own result is stale and skip applying it, instead of repopulating a "blank" form
   // with a previous, unrelated upload's data once the Gemini call finally resolves.
@@ -199,7 +171,7 @@ export function AddBillDialog({
     generationRef.current++;
     setForm(blankForm());
     setInstalments([]);
-    setLineItems([blankLineItem(form.billType)]);
+    setLineItems([blankBillLine(form.billType)]);
     setConfidence(null);
     setExtractSummary(null);
     setExtractEmpty(false);
@@ -211,10 +183,6 @@ export function AddBillDialog({
   // A "your bill is ready" email with no PDF — its "View bill" link is the way to the actual bill.
   const emailBillLink = pickBillLink(extractEmailLinks(initialProposal?.sourceEmailBody));
   const emailPortalUrl = emailBillLink ? portalOrigin(emailBillLink.url) : undefined;
-  // On a water bill only the usage line can go to the tenant — a box ticked on a line later
-  // retyped as a fixed charge is ignored rather than silently billing the tenant for it.
-  const rechargeable = (li: LineItemRow) => canRechargeLine(form.billType, li.category, li.description);
-  const wantsRecharge = (li: LineItemRow) => li.rechargeToTenant && rechargeable(li);
 
   const propertyId = form.propertyId || lockedPropertyId || "";
   const providersForProperty = (() => {
@@ -271,8 +239,8 @@ export function AddBillDialog({
     const category = mapBillType(data.bill_category);
     setLineItems(
       data.line_items?.length
-        ? data.line_items.map((li) => ({ ...blankLineItem(category), description: li.description, amount: String(li.amount) }))
-        : [{ ...blankLineItem(category), description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" }],
+        ? data.line_items.map((li) => blankBillLine(category, { description: li.description, amount: String(li.amount) }))
+        : [blankBillLine(category, { description: data.vendor ?? "", amount: data.amount ? String(data.amount) : "" })],
     );
     if (data.future_instalments?.length) {
       setInstalments(
@@ -407,24 +375,20 @@ export function AddBillDialog({
     ]);
   const removeInstalment = (key: string) => setInstalments((rows) => rows.filter((r) => r.key !== key));
 
-  const addLineItem = () => setLineItems((rows) => [...rows, blankLineItem(form.billType)]);
-  const removeLineItem = (key: string) => setLineItems((rows) => rows.filter((r) => r.key !== key));
-
-  const emailTenantAboutLineItem = async (li: LineItemRow) => {
+  const emailTenantAboutLineItem = (li: BillLineRow) => {
     const tenant = tenantsForProperty.find((t) => t.id === li.tenantId);
-    if (!tenant) return toast.error("Select a tenant for this line item first");
-    const amount = parseFloat(li.amount) || 0;
     const property = state.properties.find((p) => p.id === propertyId);
-    const subject = `${form.billType} — ${li.description || "usage charge"} (${fmtCurrency(amount)})`;
-    const body = `Hi ${tenant.name},\n\nThe ${property?.alias || property?.address || "property"} ${form.billType.toLowerCase()} bill has come in. It includes a usage charge of ${fmtCurrency(amount)} for "${li.description}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nThanks`;
-    const blob = form.sourceFileData ? await resolveDocumentBlob(form.sourceFileName, form.sourceFileData) : null;
-    if (blob) {
-      downloadPdfAndEmailViaGmail({ blob, fileName: form.sourceFileName || "bill.pdf", to: tenant.email, subject, body });
-      toast.success("Bill downloaded — attach it in the Gmail draft that just opened");
-    } else {
-      openGmailCompose(tenant.email, subject, body);
-      toast("No source document on this bill — compose opened without an attachment");
-    }
+    return emailTenant(
+      tenant,
+      rechargeEmail({
+        tenantName: tenant?.name ?? "",
+        propertyLabel: property?.alias || property?.address,
+        billType: form.billType,
+        description: li.description,
+        amount: parseFloat(li.amount) || 0,
+      }),
+      { fileName: form.sourceFileName, fileData: form.sourceFileData },
+    );
   };
 
   const attemptSave = (notify: boolean) => {
@@ -435,7 +399,7 @@ export function AddBillDialog({
     if (form.hasInstalments && instalments.some((i) => !i.dueDate || !parseFloat(i.amount))) {
       return toast.error("Every instalment needs a due date and amount");
     }
-    if (lineItems.some((li) => wantsRecharge(li) && !li.tenantId)) {
+    if (lineItems.some((li) => lineWantsRecharge(form.billType, li) && !li.tenantId)) {
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
@@ -459,32 +423,9 @@ export function AddBillDialog({
 
   const commitSave = (notify: boolean) => {
     setDuplicateMatch(null);
-    const finalLineItems: BillLineItem[] = lineItems
-      .filter((li) => parseFloat(li.amount) > 0)
-      .map((li) => {
-        const amount = parseFloat(li.amount) || 0;
-        const recharge = !!(wantsRecharge(li) && li.tenantId);
-        if (recharge) {
-          addInvoice(
-            buildRechargeInvoice({
-              tenantId: li.tenantId,
-              chargeType: billTypeToChargeType(form.billType),
-              amount,
-              date: form.issueDate || todayISO(),
-              description: li.description || form.billType,
-            }),
-          );
-        }
-        return {
-          description: li.description || form.billType,
-          category: li.category,
-          amount,
-          gst: li.gst ? parseFloat(li.gst) : undefined,
-          rechargeToTenant: wantsRecharge(li) || undefined,
-          tenantId: wantsRecharge(li) ? li.tenantId : undefined,
-          recharged: recharge || undefined,
-        };
-      });
+    const toNotify = newlyRechargedLines(form.billType, lineItems);
+    const { lineItems: finalLineItems, invoices } = planBillLines(lineItems, { billType: form.billType, date: form.issueDate || todayISO() });
+    invoices.forEach(addInvoice);
 
     // Bills never create an Expense at intake, from any source -- P&L only ever gets a record
     // once a bill is actually marked Paid (markBillPaid), which posts it using the taxCategory
@@ -601,9 +542,7 @@ export function AddBillDialog({
     // not before, since the landlord shouldn't be emailing a tenant about a bill that turned out
     // to be a duplicate or that they cancelled partway through.
     if (notify) {
-      for (const li of lineItems) {
-        if (wantsRecharge(li) && li.tenantId) emailTenantAboutLineItem(li);
-      }
+      for (const li of toNotify) void emailTenantAboutLineItem(li);
     }
 
     setOpen(false);
@@ -629,17 +568,7 @@ export function AddBillDialog({
     toast.success("Invoice attached to the existing transaction");
   };
 
-  const hasRecharge = lineItems.some((li) => wantsRecharge(li) && li.tenantId);
-  const showWaterSplit = needsWaterSplit(form.billType, lineItems);
-
-  /** Replaces the bill's lines with a fixed line and a usage line — the usage line is the one the
-   * recharge option shows on, with the property's tenant pre-picked when there's only one. */
-  const applyWaterSplit = (lines: { description: string; amount: number; kind: "fixed" | "usage" }[]) => {
-    const soleTenant = tenantsForProperty.length === 1 ? tenantsForProperty[0].id : "";
-    setLineItems(
-      lines.map((l) => ({ ...blankLineItem("Water"), description: l.description, amount: l.amount.toFixed(2), tenantId: l.kind === "usage" ? soleTenant : "" })),
-    );
-  };
+  const hasRecharge = newlyRechargedLines(form.billType, lineItems).length > 0;
 
   return (
     <>
@@ -994,116 +923,15 @@ export function AddBillDialog({
               </div>
             </div>
 
-            <div className="space-y-2 rounded-md border p-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-medium">Line items</div>
-                <div className="text-xs text-muted-foreground">Net: {fmtCurrency(netTotal)}</div>
-              </div>
-              {lineItems.map((li) => (
-                <div key={li.key} className="space-y-1 border-b pb-2 last:border-0 last:pb-0">
-                  <div className="grid grid-cols-[2fr_1fr_1fr_1fr_auto] items-end gap-2">
-                    <Field label="Description">
-                      <Input
-                        value={li.description}
-                        onChange={(e) =>
-                          setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, description: e.target.value } : r)))
-                        }
-                      />
-                    </Field>
-                    <Field label="Category">
-                      <Select
-                        value={li.category}
-                        onValueChange={(v) =>
-                          setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, category: v as BillType } : r)))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {BILL_TYPES.map((t) => (
-                            <SelectItem key={t} value={t}>
-                              {t}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="Amount">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={li.amount}
-                        onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, amount: e.target.value } : r)))}
-                      />
-                    </Field>
-                    <Field label="GST">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={li.gst}
-                        onChange={(e) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, gst: e.target.value } : r)))}
-                      />
-                    </Field>
-                    <Button size="icon" variant="ghost" onClick={() => removeLineItem(li.key)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  {rechargeable(li) ? (
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={li.rechargeToTenant}
-                      onCheckedChange={(v) =>
-                        setLineItems((rows) =>
-                          rows.map((r) =>
-                            r.key === li.key
-                              ? { ...r, rechargeToTenant: v === true, tenantId: r.tenantId || (tenantsForProperty.length === 1 ? tenantsForProperty[0].id : "") }
-                              : r,
-                          ),
-                        )
-                      }
-                    />
-                    <Label className="cursor-pointer text-xs font-normal text-muted-foreground">Recharge to tenant</Label>
-                    {li.rechargeToTenant && (
-                      <Select
-                        value={li.tenantId}
-                        onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, tenantId: v } : r)))}
-                      >
-                        <SelectTrigger className="h-7 w-[160px] text-xs">
-                          <SelectValue placeholder="Select tenant" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {tenantsForProperty.map((t) => (
-                            <SelectItem key={t.id} value={t.id}>
-                              {t.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {li.rechargeToTenant && li.tenantId && (
-                      <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => emailTenantAboutLineItem(li)}>
-                        <Mail className="h-3 w-3" /> Email tenant
-                      </Button>
-                    )}
-                  </div>
-                  ) : classifyWaterCharge(li.description) === "fixed" ? (
-                    <div className="text-xs text-muted-foreground">Fixed charge — paid by the landlord, can't be recharged</div>
-                  ) : null}
-                </div>
-              ))}
-              {showWaterSplit && (
-                <WaterSplitPanel
-                  total={netTotal}
-                  lastFixed={lastFixedWaterCharge(state.bills, propertyId)}
-                  hasDocument={!!form.sourceFileData}
-                  onSplit={applyWaterSplit}
-                />
-              )}
-              <Button size="sm" variant="outline" className="gap-1" onClick={addLineItem}>
-                <Plus className="h-3 w-3" /> Add line item
-              </Button>
-            </div>
+            <BillLineItemsEditor
+              rows={lineItems}
+              onChange={setLineItems}
+              billType={form.billType}
+              tenants={tenantsForProperty}
+              propertyId={propertyId}
+              hasDocument={!!form.sourceFileData}
+              onEmailTenant={emailTenantAboutLineItem}
+            />
 
             <div>
               <button

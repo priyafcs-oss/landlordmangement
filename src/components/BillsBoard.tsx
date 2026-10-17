@@ -22,9 +22,9 @@ import { bucketBy } from "@/lib/group";
 import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { usePersistedToggle } from "@/lib/hooks";
 import { toast } from "sonner";
+import { BILL_TYPES } from "@/lib/constants";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
-const BILL_TYPES: BillType[] = ["Water", "Council Rates", "Land Tax", "Strata", "Insurance", "Electricity", "Gas", "Other"];
 const TYPE_COLORS = ["bg-sky-500", "bg-violet-500", "bg-amber-500", "bg-emerald-500", "bg-rose-500", "bg-cyan-500", "bg-slate-500"];
 
 type SortField = "dueDate" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount";

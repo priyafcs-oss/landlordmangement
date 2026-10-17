@@ -20,12 +20,30 @@ export function classifyWaterCharge(description: string): WaterChargeKind {
  * so the recharge option is offered on a water bill's usage lines only. Non-water bills keep it on
  * every line (a tenant-caused repair, say, is rechargeable whatever it's called). */
 export function canRechargeLine(
-  billType: string,
+  billType: string | undefined,
   lineCategory: string | undefined,
   description: string,
 ): boolean {
-  const isWater = billType === "Water" || lineCategory === "Water";
-  return !isWater || classifyWaterCharge(description) === "usage";
+  return !isWaterLine(billType, lineCategory) || classifyWaterCharge(description) === "usage";
+}
+
+/** A water bill line or a "Water Charges" expense. */
+function isWaterLine(billType: string | undefined, lineCategory: string | undefined): boolean {
+  return billType === "Water" || lineCategory === "Water" || lineCategory === "Water Charges";
+}
+
+/** Why a line can't be recharged, for showing in place of the checkbox — undefined when it can, or
+ * when there's nothing useful to say (an un-itemised water bill shows the split prompt instead). */
+export function rechargeBlockedReason(
+  billType: string | undefined,
+  lineCategory: string | undefined,
+  description: string,
+  { unknownHint }: { unknownHint?: string } = {},
+): string | undefined {
+  if (canRechargeLine(billType ?? "", lineCategory, description)) return undefined;
+  return classifyWaterCharge(description) === "fixed"
+    ? "Fixed charge — paid by the landlord, can't be recharged"
+    : unknownHint;
 }
 
 /** A water bill whose lines don't say which part is usage — the review dialog then offers to split

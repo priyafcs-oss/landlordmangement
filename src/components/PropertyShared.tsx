@@ -53,7 +53,7 @@ import {
   Lock,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -132,14 +132,11 @@ import { DocumentsSection, DocumentsPanel, fileFormatOf, FILE_FORMATS, type File
 import { buildDocumentEntries } from "@/lib/documents";
 import { bucketBy } from "@/lib/group";
 import { downloadCsv } from "@/lib/csv";
-import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
+import { planRecharge, rechargeChargeType } from "@/lib/recharge";
 import { latestAgreementFor } from "@/lib/providerAgreements";
 import { FileSignature } from "lucide-react";
+import { SHARED_UNIT, uid } from "@/lib/constants";
 
-const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
-/** Sentinel for "no specific dwelling" in a Dwelling Select — Radix Select item values can't be
- * an empty string, and shared/whole-property genuinely needs its own selectable option. */
-const SHARED_UNIT = "__shared__";
 
 interface DomainSuggestResult {
   ok?: boolean;
@@ -1032,7 +1029,14 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
       const lineProviderId = e.vendor.trim() ? findOrCreateProvider(e.vendor.trim(), propertyId || undefined, lineCategory) : undefined;
       const lineTenantId = expTenantIds[i];
       const realTenantId = lineTenantId && lineTenantId !== SHARED_EXPENSE_TENANT ? lineTenantId : undefined;
-      const recharge = rechargeIncluded[i] && !!realTenantId;
+      const recharge = planRecharge({
+        wanted: rechargeIncluded[i],
+        tenantId: realTenantId,
+        chargeType: rechargeChargeType(lineCategory),
+        amount: e.amount,
+        date: e.date,
+        description: e.vendor,
+      });
       addExpense({
         itemName: e.description.trim() || e.vendor,
         cost: e.amount,
@@ -1050,8 +1054,10 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         // match runs on this once the line becomes a plain Expense row (see feeVerification.ts).
         notes: e.category || undefined,
         hasWarranty: false,
-        rechargeToTenant: recharge,
+        rechargeToTenant: recharge.rechargeToTenant,
         tenantId: realTenantId,
+        // Without this, editing the expense later invoiced the tenant a second time.
+        recharged: recharge.recharged || undefined,
         status: "approved",
         source: "agent_statement",
         rawPropertyAddress: proposal.rawPropertyAddress,
@@ -1060,17 +1066,9 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
         sourceFileName: proposal.sourceFileName,
         sourceFileData: proposal.sourceFileData,
       });
-      if (recharge) {
+      if (recharge.invoice) {
         rechargedCount++;
-        addInvoice(
-          buildRechargeInvoice({
-            tenantId: realTenantId!,
-            chargeType: chargeTypeForCategory(lineCategory),
-            amount: e.amount,
-            date: e.date,
-            description: e.vendor,
-          }),
-        );
+        addInvoice(recharge.invoice);
       }
     });
     markProposalApplied(proposal.id, { propertyId });

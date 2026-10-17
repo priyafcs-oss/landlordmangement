@@ -55,6 +55,7 @@ import {
 import { addDays, addMonths, billOwed, healPaidUpDates, paidUpToDateFromPayments, todayISO } from "./calculations";
 import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
+import { uid } from "@/lib/constants";
 
 const defaultAi: AiConfig = {
   enabled: true,
@@ -387,7 +388,6 @@ interface StoreCtx {
 
 const Ctx = createContext<StoreCtx | null>(null);
 
-const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
 
 /** Maps a Bill's own origin onto the Expense it becomes at payment time (markBillPaid), so a
  * bill that came in by email still shows as email-sourced in Transactions instead of "Manual". */

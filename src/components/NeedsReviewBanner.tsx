@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Check, Copy, DollarSign, FileText, Mail, Pencil, Trash2, TriangleAlert } from "lucide-react";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
-import { ExpenseDialog } from "@/components/ExpenseDialog";
+import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { DocumentLink } from "@/components/DocumentLink";
 
 function DocumentViewLinks({
@@ -167,7 +167,7 @@ export function NeedsReviewBanner() {
                   >
                     <DollarSign className="h-3.5 w-3.5" /> Mark Paid
                   </Button>
-                  <ExpenseDialog
+                  <AddTransactionDialog
                     expense={e}
                     trigger={
                       <Button size="icon" variant="ghost">

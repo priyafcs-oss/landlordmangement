@@ -19,10 +19,6 @@ import type {
 } from "./types";
 import { categoryGroupOf } from "./types";
 
-/** Maps a bill's type onto the tenant-invoice charge-type enum, for recharging a bill line item to a tenant. */
-export function billTypeToChargeType(billType: BillType): TenantInvoice["chargeType"] {
-  return billType === "Water" ? "Water Usage" : "Other";
-}
 
 /** Which Property annual-running-cost column each bill type feeds, if any — mirrors
  * ANNUAL_COST_FIELD in supabase/functions/parse-inbound-bill/parse-bill.ts. Duplicated there

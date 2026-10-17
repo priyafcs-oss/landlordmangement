@@ -28,7 +28,9 @@ import { Plus, Trash2, FileUp, AlertTriangle, ChevronDown, ChevronRight, Eye, Ch
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory, fmtModified } from "@/lib/calculations";
-import { chargeTypeForCategory, buildRechargeInvoice } from "@/lib/recharge";
+import { planRecharge, rechargeChargeType } from "@/lib/recharge";
+import { canRechargeLine, rechargeBlockedReason } from "@/lib/waterSplit";
+import { RechargeControl } from "@/components/RechargeControl";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
 import {
@@ -47,8 +49,8 @@ import { AssessDepreciationDialog } from "@/components/AssessDepreciationDialog"
 import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, Expense, ExpenseProposalPayload, ExtractBillResult } from "@/lib/types";
+import { LOW_CONFIDENCE_THRESHOLD, SHARED_UNIT, uid } from "@/lib/constants";
 
-const LOW_CONFIDENCE_THRESHOLD = 0.85;
 /** How this transaction was recorded — shown read-only next to the title, separate from the
  * invoice/file section below, so "where did this come from" and "what document backs it" are
  * never conflated into one field. */
@@ -58,10 +60,6 @@ const EXPENSE_SOURCE_LABELS: Record<Expense["source"], string> = {
   email_auto: "Email",
   agent_statement: "Agent statement",
 };
-const uid = (p: string) => p + "_" + Math.random().toString(36).slice(2, 10);
-/** Sentinel for "no specific dwelling" in the Dwelling Select — Radix Select item values can't be
- * an empty string, and shared/whole-property genuinely needs its own selectable option. */
-const SHARED_UNIT = "__shared__";
 
 const PRICE_SPIKE_MULTIPLIER = 1.4;
 
@@ -484,12 +482,19 @@ export function AddTransactionDialog({
     if (f) void extract(f);
   };
 
+  // Recharge only applies to a single-property expense line, and on water only to usage — the same
+  // rule (canRechargeLine) the bill dialogs use. A box ticked before the line changed into
+  // something that can't be recharged is ignored rather than invoicing the tenant.
+  const lineRechargeText = (li: LineItemRow) => li.description || form.payee;
+  const wantsRecharge = (li: LineItemRow) =>
+    li.direction === "Expense" && !splitting && li.rechargeToTenant && canRechargeLine(undefined, li.category, lineRechargeText(li));
+
   const attemptSave = () => {
     const properties = [form.propertyId, splitting ? form.secondPropertyId : ""].filter(Boolean);
     if (properties.length === 0) return toast.error("Property is required");
     if (!form.payee.trim()) return toast.error("Payee / vendor is required");
     if (netTotal === 0) return toast.error("Add at least one line item with an amount");
-    if (lineItems.some((li) => li.rechargeToTenant && !li.tenantId)) {
+    if (lineItems.some((li) => wantsRecharge(li) && !li.tenantId)) {
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
@@ -520,17 +525,16 @@ export function AddTransactionDialog({
     const providerId = form.payee.trim()
       ? findOrCreateProvider(form.payee.trim(), form.propertyId, li.direction === "Expense" ? (li.category as ExpenseCategory) : undefined)
       : undefined;
-    if (li.rechargeToTenant && li.tenantId && !expense.recharged) {
-      addInvoice(
-        buildRechargeInvoice({
-          tenantId: li.tenantId,
-          chargeType: chargeTypeForCategory(li.category),
-          amount,
-          date: form.date,
-          description: li.description || form.payee,
-        }),
-      );
-    }
+    const recharge = planRecharge({
+      wanted: wantsRecharge(li),
+      tenantId: li.tenantId,
+      alreadyRecharged: expense.recharged,
+      chargeType: rechargeChargeType(li.category),
+      amount,
+      date: form.date,
+      description: li.description || form.payee,
+    });
+    if (recharge.invoice) addInvoice(recharge.invoice);
     updateExpense(expense.id, {
       itemName: li.description || form.payee,
       cost: amount,
@@ -545,13 +549,13 @@ export function AddTransactionDialog({
       direction: li.direction === "Income" ? "Income" : undefined,
       hasWarranty: li.hasWarranty,
       warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
-      rechargeToTenant: !!(li.rechargeToTenant && li.tenantId),
+      rechargeToTenant: recharge.rechargeToTenant,
       // Only clear tenantId when an existing recharge was just cancelled (unchecked). A tenantId
       // that got here some other way (e.g. an agent-statement deduction posted against a specific
       // tenancy) has nothing to do with the recharge checkbox and shouldn't disappear just because
       // this dialog doesn't expose that reason with its own field.
-      tenantId: !li.rechargeToTenant && li.tenantIdIsRecharge ? undefined : li.tenantId || undefined,
-      recharged: li.rechargeToTenant && li.tenantId ? true : expense.recharged,
+      tenantId: !recharge.rechargeToTenant && li.tenantIdIsRecharge && !recharge.recharged ? undefined : li.tenantId || undefined,
+      recharged: recharge.recharged || undefined,
       referenceNumber: form.referenceNumber || undefined,
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
@@ -606,8 +610,8 @@ export function AddTransactionDialog({
               taxCategory: expenseCategoryToTaxCategory(li.category),
               hasWarranty: li.hasWarranty,
               warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
-              rechargeToTenant: li.rechargeToTenant || undefined,
-              tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+              rechargeToTenant: wantsRecharge(li) || undefined,
+              tenantId: wantsRecharge(li) ? li.tenantId : undefined,
             },
             sourceFileName: form.invoiceFileName,
             sourceFileData: form.invoiceFileData,
@@ -615,17 +619,15 @@ export function AddTransactionDialog({
           continue;
         }
 
-        if (li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1) {
-          addInvoice(
-            buildRechargeInvoice({
-              tenantId: li.tenantId,
-              chargeType: chargeTypeForCategory(li.category),
-              amount,
-              date: form.date,
-              description: itemName,
-            }),
-          );
-        }
+        const recharge = planRecharge({
+          wanted: wantsRecharge(li) && perPropertyDivisor === 1,
+          tenantId: li.tenantId,
+          chargeType: rechargeChargeType(li.category),
+          amount,
+          date: form.date,
+          description: itemName,
+        });
+        if (recharge.invoice) addInvoice(recharge.invoice);
         const newExpenseId = addExpense({
           itemName,
           cost: amount,
@@ -640,9 +642,9 @@ export function AddTransactionDialog({
           direction: li.direction === "Income" ? "Income" : undefined,
           hasWarranty: li.hasWarranty,
           warrantyExpiry: li.hasWarranty ? li.warrantyExpiry || undefined : undefined,
-          rechargeToTenant: !!(li.rechargeToTenant && li.tenantId && perPropertyDivisor === 1),
-          tenantId: li.rechargeToTenant && perPropertyDivisor === 1 ? li.tenantId : undefined,
-          recharged: li.rechargeToTenant && perPropertyDivisor === 1 ? true : undefined,
+          rechargeToTenant: recharge.rechargeToTenant,
+          tenantId: recharge.rechargeToTenant ? li.tenantId : undefined,
+          recharged: recharge.recharged || undefined,
           referenceNumber: form.referenceNumber || undefined,
           periodStart: form.periodStart || undefined,
           periodEnd: form.periodEnd || undefined,
@@ -1056,25 +1058,17 @@ export function AddTransactionDialog({
                   )}
                   {li.direction === "Expense" && !splitting && (
                     <div className="flex flex-wrap items-center gap-2">
-                      <Checkbox
+                      <RechargeControl
                         checked={li.rechargeToTenant}
-                        onCheckedChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, rechargeToTenant: v === true } : r)))}
+                        tenantId={li.tenantId}
+                        tenants={tenantsForProperty}
+                        canRecharge={canRechargeLine(undefined, li.category, lineRechargeText(li))}
+                        blockedReason={rechargeBlockedReason(undefined, li.category, lineRechargeText(li), {
+                          unknownHint: "Only water usage can be recharged — name this line as usage (e.g. \"Water usage\") to recharge it",
+                        })}
+                        recharged={!!expense?.recharged && li.tenantIdIsRecharge}
+                        onChange={(next) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, ...next } : r)))}
                       />
-                      <Label className="cursor-pointer text-xs font-normal text-muted-foreground">Recharge to tenant</Label>
-                      {li.rechargeToTenant && (
-                        <Select value={li.tenantId} onValueChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, tenantId: v } : r)))}>
-                          <SelectTrigger className="h-7 w-[160px] text-xs">
-                            <SelectValue placeholder="Select tenant" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {tenantsForProperty.map((t) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                {t.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
                       <Checkbox
                         checked={li.hasWarranty}
                         onCheckedChange={(v) => setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, hasWarranty: v === true } : r)))}

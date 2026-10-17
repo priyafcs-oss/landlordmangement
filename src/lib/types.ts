@@ -1303,7 +1303,7 @@ export interface BillProposalPayload {
 
 /** A manually-entered one-off transaction flagged by the same duplicate/price-spike guardrails
  * bills use, checked client-side against state.expenses at save time. Mirrors the fields
- * ExpenseDialog already collects. */
+ * AddTransactionDialog collects. */
 export interface ExpenseProposalPayload {
   itemName: string;
   cost: number;
