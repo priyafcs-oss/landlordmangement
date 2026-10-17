@@ -56,6 +56,7 @@ import { addDays, addMonths, billOwed, healPaidUpDates, paidUpToDateFromPayments
 import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
 import { uid } from "@/lib/constants";
+import { ASSET_CHILDREN, LOAN_CHILDREN, TENANT_CHILDREN, assetBufferIds, withoutChildren, type ChildRecords } from "./cascade";
 
 const defaultAi: AiConfig = {
   enabled: true,
@@ -630,6 +631,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return { ...t, paidUpToDate: next };
     });
 
+  // Deleting a parent removes what hangs off it — the child lists live in lib/cascade.ts (one list
+  // per parent, shared by its own delete and deleteProperty). Each returns the database deletes
+  // and the matching local-state filter.
+  const cascade = (children: ChildRecords[], ids: string[]) => ({
+    db: () => {
+      for (const c of children) void deleteWhereIn(TABLES[c.key], c.column, ids);
+    },
+    local: (s: AppState): AppState => withoutChildren(s, children, ids),
+  });
+  const tenantCascade = (ids: string[]) => cascade(TENANT_CHILDREN, ids);
+  const loanCascade = (ids: string[]) => cascade(LOAN_CHILDREN, ids);
+  const assetCascade = (id: string) => {
+    const base = cascade(ASSET_CHILDREN, [id]);
+    return {
+      db: () => {
+        base.db();
+        void deleteWhereIn(TABLES.buffers, "id", assetBufferIds(state, id));
+      },
+      local: (s: AppState): AppState => {
+        const bufferIds = new Set(assetBufferIds(s, id));
+        return { ...base.local(s), buffers: s.buffers.filter((buf) => !bufferIds.has(buf.id)) };
+      },
+    };
+  };
+
   const value: StoreCtx = {
     state,
     loading,
@@ -728,13 +754,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       // Financial/paperwork trail — always purged, in both modes.
       void deleteWhere(TABLES.loans, "propertyId", id);
-      void deleteWhereIn(TABLES.loanBalanceSnapshots, "loanId", loanIds);
-      void deleteWhereIn(TABLES.loanStatements, "loanId", loanIds);
+      loanCascade(loanIds).db();
       void deleteWhere(TABLES.expenses, "propertyId", id);
       void deleteWhere(TABLES.inspections, "propertyId", id);
       void deleteWhere(TABLES.maintenanceRequests, "propertyId", id);
       void deleteWhere(TABLES.bills, "propertyId", id);
-      void deleteWhere(TABLES.providers, "propertyId", id);
+      // Providers are portfolio-wide (shared across properties) — only this property's agreements
+      // and tags go. (This used to delete providers by their deprecated propertyId column too.)
       void deleteWhere(TABLES.providerAgreements, "propertyId", id);
       void deleteWhere(TABLES.providerProperties, "propertyId", id);
       void deleteWhere(TABLES.aiProposals, "propertyId", id);
@@ -742,41 +768,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void deleteWhere(TABLES.maintenanceItems, "propertyId", id);
       void deleteWhere(TABLES.complianceCertificates, "propertyId", id);
       void deleteWhere(TABLES.propertyNotes, "propertyId", id);
-      if (assetId) {
-        void deleteWhere(TABLES.depreciationItems, "assetId", assetId);
-        void deleteWhere(TABLES.valuationSnapshots, "assetId", assetId);
-      }
+      if (assetId) assetCascade(assetId).db();
 
       // The property itself, and its tenants' rent-received history — kept when keepRentalHub.
       if (!keepRentalHub) {
         void deleteRow(TABLES.properties, id);
         if (assetId) void deleteRow(TABLES.assets, assetId);
         void deleteWhere(TABLES.tenants, "propertyId", id);
-        void deleteWhereIn(TABLES.ledger, "tenantId", tenantIds);
-        void deleteWhereIn(TABLES.invoices, "tenantId", tenantIds);
-        void deleteWhereIn(TABLES.rentChanges, "tenantId", tenantIds);
-        void deleteWhereIn(TABLES.leaseHistory, "tenantId", tenantIds);
+        tenantCascade(tenantIds).db();
       }
 
-      set((s) => ({
+      set((s0) => {
+        let s = loanCascade(loanIds).local(s0);
+        if (assetId) s = assetCascade(assetId).local(s);
+        if (!keepRentalHub) s = tenantCascade(tenantIds).local(s);
+        return {
         ...s,
         properties: keepRentalHub ? s.properties : s.properties.filter((x) => x.id !== id),
         assets: keepRentalHub ? s.assets : s.assets.filter((a) => a.id !== assetId),
         tenants: keepRentalHub ? s.tenants : s.tenants.filter((t) => t.propertyId !== id),
-        ledger: keepRentalHub ? s.ledger : s.ledger.filter((e) => !tenantIds.includes(e.tenantId)),
-        invoices: keepRentalHub ? s.invoices : s.invoices.filter((i) => !tenantIds.includes(i.tenantId)),
-        rentChanges: keepRentalHub ? s.rentChanges : s.rentChanges.filter((r) => !tenantIds.includes(r.tenantId)),
-        leaseHistory: keepRentalHub ? s.leaseHistory : s.leaseHistory.filter((h) => !tenantIds.includes(h.tenantId)),
-        depreciationItems: s.depreciationItems.filter((d) => d.assetId !== assetId),
-        valuationSnapshots: s.valuationSnapshots.filter((v) => v.assetId !== assetId),
-        loanBalanceSnapshots: s.loanBalanceSnapshots.filter((ls) => !loanIds.includes(ls.loanId)),
-        loanStatements: s.loanStatements.filter((ls) => !loanIds.includes(ls.loanId)),
         loans: s.loans.filter((l) => l.propertyId !== id),
         expenses: s.expenses.filter((e) => e.propertyId !== id),
         inspections: s.inspections.filter((i) => i.propertyId !== id),
         maintenanceRequests: s.maintenanceRequests.filter((m) => m.propertyId !== id),
         bills: s.bills.filter((b) => b.propertyId !== id),
-        providers: s.providers.filter((p) => p.propertyId !== id),
         providerAgreements: s.providerAgreements.filter((a) => a.propertyId !== id),
         providerProperties: s.providerProperties.filter((pp) => pp.propertyId !== id),
         aiProposals: s.aiProposals.filter((p) => p.propertyId !== id),
@@ -784,7 +799,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         maintenanceItems: s.maintenanceItems.filter((m) => m.propertyId !== id),
         complianceCertificates: s.complianceCertificates.filter((c) => c.propertyId !== id),
         propertyNotes: s.propertyNotes.filter((n) => n.propertyId !== id),
-      }));
+        };
+      });
     },
 
     addTenant: (t) => {
@@ -828,18 +844,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }),
     deleteTenant: (id) => {
       void deleteRow(TABLES.tenants, id);
-      void deleteWhere(TABLES.ledger, "tenantId", id);
-      void deleteWhere(TABLES.invoices, "tenantId", id);
-      void deleteWhere(TABLES.rentChanges, "tenantId", id);
-      void deleteWhere(TABLES.leaseHistory, "tenantId", id);
-      set((s) => ({
-        ...s,
-        tenants: s.tenants.filter((x) => x.id !== id),
-        ledger: s.ledger.filter((e) => e.tenantId !== id),
-        invoices: s.invoices.filter((i) => i.tenantId !== id),
-        rentChanges: s.rentChanges.filter((r) => r.tenantId !== id),
-        leaseHistory: s.leaseHistory.filter((r) => r.tenantId !== id),
-      }));
+      tenantCascade([id]).db();
+      set((s) => tenantCascade([id]).local({ ...s, tenants: s.tenants.filter((x) => x.id !== id) }));
     },
 
     renewLease: (tenantId, args) =>
@@ -1000,14 +1006,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     deleteLoan: (id) => {
       void deleteRow(TABLES.loans, id);
-      void deleteWhere(TABLES.loanBalanceSnapshots, "loanId", id);
-      void deleteWhere(TABLES.loanStatements, "loanId", id);
-      set((s) => ({
-        ...s,
-        loans: s.loans.filter((x) => x.id !== id),
-        loanBalanceSnapshots: s.loanBalanceSnapshots.filter((ls) => ls.loanId !== id),
-        loanStatements: s.loanStatements.filter((ls) => ls.loanId !== id),
-      }));
+      loanCascade([id]).db();
+      set((s) => loanCascade([id]).local({ ...s, loans: s.loans.filter((x) => x.id !== id) }));
     },
     addLoanStatement: (ls) => {
       const row: LoanStatement = { ...ls, id: uid("lst") };
@@ -1331,22 +1331,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     deleteAsset: (id) => {
       void deleteRow(TABLES.assets, id);
-      void deleteWhere(TABLES.depreciationItems, "assetId", id);
-      void deleteWhere(TABLES.valuationSnapshots, "assetId", id);
-      void deleteWhere(TABLES.goldDetails, "assetId", id);
-      void deleteWhere(TABLES.etfDetails, "assetId", id);
-      void deleteWhere(TABLES.expenses, "assetId", id);
-      void deleteWhere(TABLES.bills, "assetId", id);
-      set((s) => ({
-        ...s,
-        assets: s.assets.filter((a) => a.id !== id),
-        goldDetails: s.goldDetails.filter((g) => g.assetId !== id),
-        etfDetails: s.etfDetails.filter((e) => e.assetId !== id),
-        depreciationItems: s.depreciationItems.filter((d) => d.assetId !== id),
-        valuationSnapshots: s.valuationSnapshots.filter((v) => v.assetId !== id),
-        expenses: s.expenses.filter((e) => e.assetId !== id),
-        bills: s.bills.filter((b) => b.assetId !== id),
-      }));
+      assetCascade(id).db();
+      set((s) => assetCascade(id).local({ ...s, assets: s.assets.filter((a) => a.id !== id) }));
     },
 
     addDepreciationItem: (d) => {
