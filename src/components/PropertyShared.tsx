@@ -53,7 +53,7 @@ import {
   Lock,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, daysUntil, daysInclusive, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, daysUntil, buildDepreciationSchedule, itemAnnualClaims, billTypeToChargeType, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -3185,7 +3185,9 @@ export function PropertySummaryTab({
 
   const annualRent = activeTenant ? annualRentOf(activeTenant) : 0;
   const ytdExpenses = expenses.filter((e) => e.date >= start && e.date <= end).reduce((s, e) => s + e.cost, 0);
-  const loanInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
+  // Full-year estimate across every loan on the property, unless real interest is already in
+  // ytdExpenses (then it'd be counted twice).
+  const loanInterest = estimateLoanInterest({ loans: state.loans, expenses, propertyId: prop.id, start, end });
   const grossYield = prop.currentValue > 0 ? (annualRent / prop.currentValue) * 100 : 0;
   const netYield = prop.currentValue > 0 ? ((annualRent - ytdExpenses - loanInterest) / prop.currentValue) * 100 : 0;
   const cashInvested = (prop.deposit ?? 0) + (prop.stampDuty ?? 0);
@@ -4635,7 +4637,7 @@ function computeAnnualBaseline(prop: Property, loan: Loan | undefined, tenants: 
   if (prop.pmFeePercent) opExLines.push(["Property management fee (est.)", pmFee]);
   const opEx = opExLines.reduce((s, [, amount]) => s + amount, 0);
 
-  const annualInterest = loan ? (loan.totalBalance * loan.interestRate) / 100 : 0;
+  const annualInterest = loan ? annualInterestOf(loan) : 0;
   const annualEmiTotal = loan ? loan.monthlyEmi * 12 : 0;
   const annualPrincipal = loan && loan.loanType !== "Interest Only" ? Math.max(0, annualEmiTotal - annualInterest) : 0;
   const totalLoanRepayments = loan ? annualInterest + annualPrincipal : 0;
@@ -4682,11 +4684,7 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
     const cat = e.category ?? "Other";
     expenseByCategory[cat] = (expenseByCategory[cat] ?? 0) + e.cost;
   }
-  // Only estimate interest when no actual "Interest on Loan" expenses were posted for the period —
-  // otherwise this double-counts against the real, statement-derived expense already in the list.
-  const hasActualLoanInterest = (expenseByCategory["Interest on Loan"] ?? 0) !== 0;
-  const loanInterest =
-    !hasActualLoanInterest && loan ? (((loan.totalBalance * loan.interestRate) / 100) * daysInclusive(start, end)) / 365 : 0;
+  const loanInterest = estimateLoanInterest({ loans: state.loans, expenses, propertyId: prop.id, start, end });
   if (loanInterest > 0) expenseByCategory["Loan Interest (est.)"] = loanInterest;
   const expenseLines = Object.entries(expenseByCategory).sort((a, b) => b[1] - a[1]);
   const totalExpenses = expenseLines.reduce((s, [, amount]) => s + amount, 0);

@@ -75,12 +75,12 @@ function CopilotPage() {
       // Current tenants only — summing every tenant ever recorded overstated the yield.
       const annualRent = currentTenants(state.tenants, p.id).reduce((s, t) => s + annualRentOf(t), 0);
       const yieldPct = p.purchasePrice ? (annualRent / p.purchasePrice) * 100 : 0;
-      const loan = state.loans.find((l) => l.propertyId === p.id);
       return {
         address: p.address,
         purchasePrice: p.purchasePrice,
         currentValue: p.currentValue,
-        loanBalance: loan?.totalBalance ?? 0,
+        // Every loan on the property, not just the first one found.
+        loanBalance: state.loans.filter((l) => l.propertyId === p.id && l.status !== "Paid Off").reduce((s, l) => s + l.totalBalance, 0),
         annualRentEstimate: annualRent,
         grossYieldPct: yieldPct,
       };

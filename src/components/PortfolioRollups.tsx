@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO, daysInclusive, buildFyOptions } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, buildFyOptions, estimateLoanInterest } from "@/lib/calculations";
 
 /** Portfolio-wide Cost Base — same estimate PropertyCostBaseTab computes per property
  * (purchase price + stamp duty + capital-works expenses), summed across every property. */
@@ -155,8 +155,7 @@ export function PortfolioPnLTab() {
     const extraIncome = periodExpenses.filter((e) => e.direction === "Income");
     const totalIncome = grossRent + extraIncome.reduce((s, e) => s + e.cost, 0);
 
-    const loan = state.loans.find((l) => l.propertyId === p.id);
-    const loanInterest = loan ? (((loan.totalBalance * loan.interestRate) / 100) * daysInclusive(start, end)) / 365 : 0;
+    const loanInterest = estimateLoanInterest({ loans: state.loans, expenses: state.expenses, propertyId: p.id, start, end });
     const totalExpenses = outgoing.reduce((s, e) => s + e.cost, 0) + loanInterest;
 
     return { property: p, grossRent, extraIncome, outgoing, loanInterest, totalIncome, totalExpenses, net: totalIncome - totalExpenses };

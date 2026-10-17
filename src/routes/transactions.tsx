@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Download, Pencil, Receipt, Search, SlidersHorizontal, Trash2, TriangleAlert, FileText, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions, fmtModified, ledgerTypeToIncomeCategory } from "@/lib/calculations";
+import { fmtCurrency, ausFinancialYear, fyRange, todayISO, categoryGroupOf, taxTreatmentLabel, buildFyOptions, fmtModified, ledgerTypeToIncomeCategory, estimateLoanInterest } from "@/lib/calculations";
 import { downloadCsv } from "@/lib/csv";
 import { bucketBy } from "@/lib/group";
 import { usePersistedToggle, usePersistedState } from "@/lib/hooks";
@@ -1047,8 +1047,10 @@ function EofyReport() {
         // (Capital) and Non-Deductible spending is real cash out but not a current-year deduction.
         if (group === "Running Expenses") totalExp += e.cost;
       }
-      const loan = state.loans.find((l) => l.propertyId === prop.id);
-      if (loan) interest += (loan.totalBalance * loan.interestRate) / 100;
+      // Estimated only where no real interest was posted (it's already in totalExp), and only up
+      // to today for a year still in progress.
+      const today = todayISO();
+      interest += estimateLoanInterest({ loans: state.loans, expenses: state.expenses, propertyId: prop.id, start, end: end < today ? end : today });
 
       const agentProviderIds = new Set(
         state.providerProperties.filter((pp) => pp.propertyId === prop.id).map((pp) => pp.providerId),

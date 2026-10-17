@@ -8,6 +8,7 @@ import type {
   Property,
   RentChange,
   Expense,
+  Loan,
   AiIntakeProposal,
   BillType,
   DepreciationItem,
@@ -571,6 +572,36 @@ export function buildFyOptions(spanBack = 3): string[] {
  * otherwise overstate the figure for a year still in progress. */
 export function daysInclusive(startISO: string, endISO: string): number {
   return Math.round((new Date(endISO).getTime() - new Date(startISO).getTime()) / 86_400_000) + 1;
+}
+
+/** A loan's interest for a full year at its current balance and rate — the estimate used when no
+ * real interest has been posted from a loan statement. */
+export function annualInterestOf(loan: Pick<Loan, "totalBalance" | "interestRate">): number {
+  return (loan.totalBalance * loan.interestRate) / 100;
+}
+
+/**
+ * Estimated loan interest for one property over a period: every non-paid-off loan on it, pro-rated
+ * to the period's length. Returns 0 when real "Interest on Loan" expenses were already posted for
+ * that property in the period — adding the estimate on top double-counted interest (the tax
+ * summary did exactly that, and charged a full year even for a year still in progress).
+ */
+export function estimateLoanInterest(input: {
+  loans: Pick<Loan, "propertyId" | "totalBalance" | "interestRate" | "status">[];
+  expenses: Pick<Expense, "propertyId" | "category" | "cost" | "date" | "direction">[];
+  propertyId: string;
+  start: string;
+  end: string;
+}): number {
+  const { loans, expenses, propertyId, start, end } = input;
+  const hasRealInterest = expenses.some(
+    (e) => e.propertyId === propertyId && e.category === "Interest on Loan" && e.direction !== "Income" && e.cost !== 0 && e.date >= start && e.date <= end,
+  );
+  if (hasRealInterest) return 0;
+  const annual = loans
+    .filter((l) => l.propertyId === propertyId && l.status !== "Paid Off")
+    .reduce((s, l) => s + annualInterestOf(l), 0);
+  return (annual * daysInclusive(start, end)) / 365;
 }
 
 export interface DepreciationScheduleYear {
