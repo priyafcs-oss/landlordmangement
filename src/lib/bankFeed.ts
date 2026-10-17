@@ -6,6 +6,7 @@ import {
 } from "@/lib/billMatch";
 import { suggestFeedLine, type FeedSuggestion } from "@/lib/feedSuggest";
 import type { AiIntakeProposal, AppState, BankStatementProposalPayload } from "@/lib/types";
+import { round2 } from "@/lib/calculations";
 
 /** One copy of a transaction line on one uploaded statement. */
 export interface FeedLineRef {
@@ -248,6 +249,5 @@ export function feedTotals(
     if (r.direction === "credit") totalIn += r.amount;
     else totalOut += r.amount;
   }
-  const round = (n: number) => Math.round(n * 100) / 100;
-  return { totalIn: round(totalIn), totalOut: round(totalOut), net: round(totalIn - totalOut) };
+  return { totalIn: round2(totalIn), totalOut: round2(totalOut), net: round2(totalIn - totalOut) };
 }

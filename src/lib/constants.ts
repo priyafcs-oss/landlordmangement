@@ -20,3 +20,12 @@ export const SHARED_UNIT = "__shared__";
 
 /** A short random id with a type prefix, e.g. uid("li") → "li_k3j9x0q2". */
 export const uid = (prefix: string) => prefix + "_" + Math.random().toString(36).slice(2, 10);
+
+/** How far ahead (in days) each kind of expiry starts showing as an alert — one set of numbers for
+ * the Dashboard, Copilot's context, the Overview and the insurance/provider-document badges. */
+export const ALERT_WINDOW_DAYS = {
+  leaseExpiry: 60,
+  warrantyExpiry: 90,
+  insuranceRenewal: 30,
+  documentExpiry: 30,
+} as const;

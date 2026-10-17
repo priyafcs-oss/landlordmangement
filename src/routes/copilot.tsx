@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Sparkles, Send, User, Bot } from "lucide-react";
-import { buildTenantLedger, fmtCurrency, daysUntil } from "@/lib/calculations";
+import { buildTenantLedger, daysUntil, isDueWithin } from "@/lib/calculations";
 import { toast } from "sonner";
 import { AiPlanStepList } from "@/components/AiPlanStepList";
 import { normalizeSteps, type AiPlanStep, type RawPlanStep } from "@/lib/aiPlanTypes";
 import { annualRentOf, currentTenants } from "@/lib/tenancy";
+import { ALERT_WINDOW_DAYS } from "@/lib/constants";
 
 export const Route = createFileRoute("/copilot")({
   head: () => ({
@@ -86,10 +87,10 @@ function CopilotPage() {
       };
     });
     const warrantiesSoon = state.expenses
-      .filter((e) => e.hasWarranty && e.warrantyExpiry && daysUntil(e.warrantyExpiry) <= 90 && daysUntil(e.warrantyExpiry) >= 0)
+      .filter((e) => e.hasWarranty && isDueWithin(e.warrantyExpiry, ALERT_WINDOW_DAYS.warrantyExpiry))
       .map((e) => ({ item: e.itemName, expires: e.warrantyExpiry }));
     const leasesSoon = state.tenants
-      .filter((t) => !!t.leaseExpiry && daysUntil(t.leaseExpiry) <= 60 && daysUntil(t.leaseExpiry) >= 0)
+      .filter((t) => isDueWithin(t.leaseExpiry, ALERT_WINDOW_DAYS.leaseExpiry))
       .map((t) => ({ tenant: t.name, expires: t.leaseExpiry }));
     return { tenants: tenantsSummary, properties: propertiesSummary, warrantiesSoon, leasesSoon };
   };

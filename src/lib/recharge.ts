@@ -1,4 +1,5 @@
 import type { TenantInvoice } from "@/lib/types";
+import { addDays } from "@/lib/calculations";
 
 /** The tenant-invoice charge type for a recharge — the only distinction it carries is water usage
  * vs anything else. Takes either a bill's type ("Water") or an expense's category ("Water
@@ -61,7 +62,7 @@ export function buildRechargeInvoice(input: {
     chargeType: input.chargeType,
     amountDue: input.amount,
     dateIssued: input.date,
-    dueDate: new Date(new Date(input.date).getTime() + 14 * 86400000).toISOString().slice(0, 10),
+    dueDate: addDays(input.date, 14),
     status: "Unpaid",
     description: input.description,
   };

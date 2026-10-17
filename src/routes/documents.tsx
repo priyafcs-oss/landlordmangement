@@ -7,11 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   DocTable,
   DocGroupSection,
-  formatDocMonthLabel,
   FILE_FORMATS,
   useDocumentFilters,
 } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries, type DocumentEntry } from "@/lib/documents";
+import { formatMonthLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/documents")({
   head: () => ({
@@ -201,7 +201,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
                 {groups.map(([key, groupRows]) => (
                   <DocGroupSection
                     key={key}
-                    label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatDocMonthLabel(key) : `FY ${key}`}
+                    label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
                     rows={groupRows}
                     showProperty={!lockedPropertyId}
                   />

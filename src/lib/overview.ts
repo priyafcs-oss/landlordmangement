@@ -1,5 +1,6 @@
 import type { Property, Loan, Expense, LedgerEntry, CashBuffer, InsurancePolicy, ValuationSnapshot, LoanBalanceSnapshot, Asset, Entity } from "./types";
 import { addMonths, daysUntil, localISO, todayISO } from "./calculations";
+import { ALERT_WINDOW_DAYS } from "@/lib/constants";
 
 /** Value/debt/equity headline figures for a scope (one property, one entity, or the whole portfolio). */
 export interface OverviewMetrics {
@@ -289,7 +290,7 @@ export function computeInsuranceAlerts(
     for (const ip of active) {
       if (!ip.coverEnd) continue;
       const d = daysUntil(ip.coverEnd);
-      if (d >= 0 && d <= 30) {
+      if (d >= 0 && d <= ALERT_WINDOW_DAYS.insuranceRenewal) {
         alerts.push({
           id: `exp_${ip.id}`,
           label: `${ip.insurer} policy renews in ${d} day${d === 1 ? "" : "s"}${suffix}`,

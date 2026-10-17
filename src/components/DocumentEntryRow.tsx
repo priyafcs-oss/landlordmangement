@@ -11,6 +11,7 @@ import { useStore } from "@/lib/store";
 import { daysUntil, fmtCurrency, ausFinancialYear, fyRange, buildFyOptions } from "@/lib/calculations";
 import { bucketBy } from "@/lib/group";
 import { matchesDocumentQuery, type DocumentEntry } from "@/lib/documents";
+import { formatMonthLabel } from "@/lib/format";
 
 /**
  * Small reusable "Documents" section for a single property tab (Tenancy, Purchase & Acquisition,
@@ -140,11 +141,6 @@ export function estimateFileSize(dataUrl?: string): string {
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function formatDocMonthLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
 export function DocTable({
@@ -496,7 +492,7 @@ export function DocumentsPanel({
                 {groups.map(([key, groupRows]) => (
                   <DocGroupSection
                     key={key}
-                    label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatDocMonthLabel(key) : `FY ${key}`}
+                    label={key === "unknown" ? "Unknown date" : groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
                     rows={groupRows}
                     showProperty={false}
                     onEdit={onEdit}

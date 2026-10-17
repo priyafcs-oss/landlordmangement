@@ -15,6 +15,7 @@ import { bucketBy } from "@/lib/group";
 import { fmtCurrency } from "@/lib/calculations";
 import { feedTotals } from "@/lib/bankFeed";
 import { Search } from "lucide-react";
+import { formatMonthLabel } from "@/lib/format";
 
 export interface CompiledFeedRow {
   key: string;
@@ -52,12 +53,6 @@ function TotalsText({ rows }: { rows: CompiledFeedRow[] }) {
 
 type SortField = "date" | "description" | "amount" | "status";
 type GroupBy = "none" | "month";
-
-function formatMonthLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  if (!y || !m) return "No date";
-  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
-}
 
 function sortValue(r: CompiledFeedRow, field: SortField): string | number {
   switch (field) {

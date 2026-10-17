@@ -34,6 +34,7 @@ import {
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
   mapBillType,
+  round2,
 } from "@/lib/calculations";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
@@ -400,7 +401,7 @@ export function AddBillDialog({
           annual = netTotal + instalments.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
         }
         if (annual !== null) {
-          updateProperty(propertyId, { [annualField]: Math.round(annual * 100) / 100 } as Partial<Property>);
+          updateProperty(propertyId, { [annualField]: round2(annual) } as Partial<Property>);
         }
       }
       markProposalApplied(initialProposal.id, { propertyId });

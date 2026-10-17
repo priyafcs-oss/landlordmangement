@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Trash2, AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { todayISO, fmtCurrency, itemAnnualClaims, ausFinancialYear, fyRange, defaultMethodForDivision, methodAfterDivisionChange } from "@/lib/calculations";
+import { todayISO, fmtCurrency, itemAnnualClaims, ausFinancialYear, fyRange, defaultMethodForDivision, methodAfterDivisionChange, round2 } from "@/lib/calculations";
 import { suggestEffectiveLife } from "@/lib/atoEffectiveLife";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
@@ -359,8 +359,8 @@ export function AddDepreciationReportDialog({
     // Materialized once, at save time, from the (possibly hand-corrected) Annual Deductions
     // table — denormalized onto every item below, same as quantitySurveyor/reportDate/etc.
     const reportAnnualSummary = annualRows.map((r) => ({
-      div40: Math.round(r.div40 * 100) / 100,
-      div43: Math.round(r.div43 * 100) / 100,
+      div40: round2(r.div40),
+      div43: round2(r.div43),
     }));
 
     // A row removed from the list during this edit session (its existingId no longer present)
@@ -386,7 +386,7 @@ export function AddDepreciationReportDialog({
         division: it.division,
         // Materialized now, at save time, so this item's schedule is locked in from here on —
         // see the annualClaims field doc on DepreciationItem for why.
-        annualClaims: preview.claims.map((c) => Math.round(c * 100) / 100),
+        annualClaims: preview.claims.map((c) => round2(c)),
         reportAnnualSummary,
         reportId,
         quantitySurveyor: form.quantitySurveyor || undefined,

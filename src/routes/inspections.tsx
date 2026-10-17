@@ -43,6 +43,7 @@ import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Propert
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
 import { DocumentLink } from "@/components/DocumentLink";
 import { currentTenant } from "@/lib/tenancy";
+import { formatTime12h } from "@/lib/format";
 
 export const Route = createFileRoute("/inspections")({
   head: () => ({
@@ -53,16 +54,6 @@ export const Route = createFileRoute("/inspections")({
   }),
   component: InspectionsPage,
 });
-
-/** "14:30" -> "2:30 PM". Falls back to the raw value if it's not a plain HH:MM string. */
-function formatTime12h(time: string): string {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
-  if (!match) return time;
-  const hour24 = Number(match[1]);
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${match[2]} ${period}`;
-}
 
 function InspectionsPage() {
   const { state } = useStore();

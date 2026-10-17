@@ -40,7 +40,7 @@ import type {
   PropertyNote,
 } from "@/lib/types";
 import { COMPLIANCE_CERT_TYPES } from "@/lib/types";
-import { SHARED_UNIT } from "@/lib/constants";
+import { SHARED_UNIT, ALERT_WINDOW_DAYS } from "@/lib/constants";
 
 
 /** Premises/dwelling scope select, shared by every dialog in this file — only rendered when the
@@ -294,7 +294,7 @@ function InsurancePolicyRow({ policy }: { policy: InsurancePolicy }) {
               {t}
             </Badge>
           ))}
-          {expiring !== undefined && expiring <= 30 && (
+          {expiring !== undefined && expiring <= ALERT_WINDOW_DAYS.insuranceRenewal && (
             <Badge variant={expiring < 0 ? "destructive" : "outline"} className="text-[10px]">
               {expiring < 0 ? "Expired" : `Expires in ${expiring}d`}
             </Badge>

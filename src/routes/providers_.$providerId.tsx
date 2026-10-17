@@ -24,6 +24,7 @@ import { rowBelongsToProvider } from "@/lib/providerMatch";
 import { toast } from "sonner";
 import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
 import { PROVIDER_ROLE_LABELS } from "@/lib/types";
+import { ALERT_WINDOW_DAYS } from "@/lib/constants";
 
 export const Route = createFileRoute("/providers_/$providerId")({
   head: () => ({
@@ -122,7 +123,7 @@ function ProviderDocumentRow({ doc }: { doc: ProviderDocument }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{doc.docType || "Document"}</span>
-          {expiring !== undefined && expiring <= 30 && (
+          {expiring !== undefined && expiring <= ALERT_WINDOW_DAYS.documentExpiry && (
             <Badge variant={expiring < 0 ? "destructive" : "outline"} className="text-[10px]">
               {expiring < 0 ? "Expired" : `Expires in ${expiring}d`}
             </Badge>

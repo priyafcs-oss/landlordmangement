@@ -34,6 +34,7 @@ import { EditLedgerRowDialog } from "@/components/EditLedgerRowDialog";
 import { verifyAgentFees, reconcileFlatFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
 import { rentCollected } from "@/lib/tenancy";
+import { formatMonthLabel } from "@/lib/format";
 
 function pdfSafe(s: string): string {
   return s.replace(/−/g, "-").replace(/ /g, " ");
@@ -128,11 +129,6 @@ interface TxRow {
    * falling back to createdAt when a row has never been edited since it was added. */
   createdAt?: string;
   updatedAt?: string;
-}
-
-function formatMonthLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 }
 
 type TxSortField = "date" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount" | "modified";
@@ -1174,15 +1170,15 @@ function EofyReport() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from({ length: 5 }).map((_, i) => {
-                    const y = new Date().getFullYear() - 2 + i;
-                    const v = `${y}-${y + 1}`;
-                    return (
+                  {/* Same year list as the P&L tabs: up to the current FY, newest first. */}
+                  {buildFyOptions(7)
+                    .filter((y) => y <= currentFY)
+                    .reverse()
+                    .map((v) => (
                       <SelectItem key={v} value={v}>
                         FY {v}
                       </SelectItem>
-                    );
-                  })}
+                    ))}
                 </SelectContent>
               </Select>
             </Field>

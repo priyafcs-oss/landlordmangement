@@ -1,4 +1,5 @@
 import type { PropertyBill } from "@/lib/types";
+import { round2 } from "@/lib/calculations";
 
 export type WaterChargeKind = "usage" | "fixed" | "unknown";
 
@@ -57,7 +58,6 @@ export function needsWaterSplit(
   return priced.length > 0 && !priced.some((l) => classifyWaterCharge(l.description) === "usage");
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Splits a water bill total into its fixed and usage parts from the usage figure the landlord
  * read off the bill. Returns null when the usage figure isn't a positive amount within the total. */

@@ -50,6 +50,7 @@ import {
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { emailTenant, rentReceivedEmail, ledgerEmail } from "@/lib/tenantEmails";
+import { formatMonthLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/rental")({
   head: () => ({
@@ -471,11 +472,6 @@ const SOURCE_LABELS: Record<string, string> = {
   bank_feed: "Bank feed",
   agent_statement: "Agent statement",
 };
-
-function formatMonthLabel(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", { month: "long", year: "numeric" });
-}
 
 function LedgerRowsTable({
   rows,

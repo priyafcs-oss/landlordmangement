@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Building2, Pencil, Plus, Trash2, RefreshCw, FileText, History, Receipt, ExternalLink, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, X, Video as VideoIcon, Sparkles, TrendingUp, TriangleAlert, ArrowRight, Search, Calculator, Eye, Landmark, Info, Download, Lock } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf, defaultMethodForDivision, methodAfterDivisionChange } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf, defaultMethodForDivision, methodAfterDivisionChange, daysBetween } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -72,6 +72,7 @@ import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { useReparse } from "@/lib/useReparse";
 import { findProvider } from "@/lib/providerMatch";
 import { emailTenant, leaseEmail } from "@/lib/tenantEmails";
+import { fmtCompactCurrency, fmtCurrencyWhole } from "@/lib/format";
 
 
 interface DomainSuggestResult {
@@ -3041,14 +3042,6 @@ const BUYING_COST_CATEGORIES: ExpenseCategory[] = [
   "Building / Pest Inspection (Purchase)",
 ];
 
-function fmtCompactCurrency(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1000)}k`;
-  return `${sign}${fmtCurrency(abs)}`;
-}
-
 /**
  * Bisection IRR solver over a simplified annual cashflow model — a lump initial outflow, the
  * recorded net cashflow spread evenly across the (possibly fractional) years held, and a terminal
@@ -4776,18 +4769,6 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
 
 const FORECAST_YEARS = 40;
 
-function fmtWhole(n: number): string {
-  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(n);
-}
-
-function fmtAxisDollars(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}m`;
-  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1000)}k`;
-  return `${sign}$${Math.round(abs)}`;
-}
-
 function forecastAssumptionsDefaults(prop: Property, loan?: Loan) {
   return {
     rentGrowth: "3",
@@ -4995,7 +4976,7 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
               {cashflowNeutralYear !== null && cashflowNeutralYear > FORECAST_YEARS
                 ? `Beyond the ${FORECAST_YEARS}-year chart · `
                 : ""}
-              Current annual cashflow: {fmtWhole(year0.netCF)}
+              Current annual cashflow: {fmtCurrencyWhole(year0.netCF)}
             </div>
           </CardContent>
         </Card>
@@ -5005,9 +4986,9 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold">{fmtWhole(year40.propertyValue)}</div>
+            <div className="text-2xl font-semibold">{fmtCurrencyWhole(year40.propertyValue)}</div>
             <div className="text-xs text-muted-foreground">
-              +{fmtWhole(valueGrowth)} ({valueGrowthPct.toFixed(1)}%)
+              +{fmtCurrencyWhole(valueGrowth)} ({valueGrowthPct.toFixed(1)}%)
             </div>
           </CardContent>
         </Card>
@@ -5017,9 +4998,9 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
             <Landmark className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-destructive">{fmtWhole(year40.debt)}</div>
+            <div className="text-2xl font-semibold text-destructive">{fmtCurrencyWhole(year40.debt)}</div>
             <div className="text-xs text-muted-foreground">
-              {openingBalance > 0 ? `${fmtWhole(debtPaidOff)} paid off` : "No loan on this property"}
+              {openingBalance > 0 ? `${fmtCurrencyWhole(debtPaidOff)} paid off` : "No loan on this property"}
             </div>
           </CardContent>
         </Card>
@@ -5048,7 +5029,7 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
                 axisLine={false}
                 fontSize={11}
                 width={56}
-                tickFormatter={fmtAxisDollars}
+                tickFormatter={(n: number) => fmtCompactCurrency(n, { axis: true })}
               />
               <YAxis
                 yAxisId="right"
@@ -5057,7 +5038,7 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
                 axisLine={false}
                 fontSize={11}
                 width={56}
-                tickFormatter={fmtAxisDollars}
+                tickFormatter={(n: number) => fmtCompactCurrency(n, { axis: true })}
               />
               <ChartTooltip
                 content={
@@ -5066,7 +5047,7 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
                     formatter={(value, name, item) => (
                       <div className="flex w-full items-center justify-between gap-3">
                         <span className="text-muted-foreground">{FORECAST_CHART_CONFIG[item.dataKey as string]?.label ?? name}</span>
-                        <span className="font-mono font-medium tabular-nums text-foreground">{fmtWhole(value as number)}</span>
+                        <span className="font-mono font-medium tabular-nums text-foreground">{fmtCurrencyWhole(value as number)}</span>
                       </div>
                     )}
                   />
@@ -5105,11 +5086,11 @@ export function PropertyForecastsTab({ prop, loan, tenants }: { prop: Property; 
                 return (
                   <tr key={y} className="border-b last:border-0">
                     <td className="py-1.5 font-medium">Year {y}</td>
-                    <td className="py-1.5">{fmtWhole(row.propertyValue)}</td>
-                    <td className="py-1.5">{fmtWhole(row.debt)}</td>
-                    <td className="py-1.5">{fmtWhole(row.rent)}</td>
-                    <td className="py-1.5 text-destructive">{fmtWhole(row.expenses)}</td>
-                    <td className={`py-1.5 ${row.netCF < 0 ? "text-destructive" : "text-emerald-600"}`}>{fmtWhole(row.netCF)}</td>
+                    <td className="py-1.5">{fmtCurrencyWhole(row.propertyValue)}</td>
+                    <td className="py-1.5">{fmtCurrencyWhole(row.debt)}</td>
+                    <td className="py-1.5">{fmtCurrencyWhole(row.rent)}</td>
+                    <td className="py-1.5 text-destructive">{fmtCurrencyWhole(row.expenses)}</td>
+                    <td className={`py-1.5 ${row.netCF < 0 ? "text-destructive" : "text-emerald-600"}`}>{fmtCurrencyWhole(row.netCF)}</td>
                   </tr>
                 );
               })}
@@ -8636,7 +8617,7 @@ function checkRentIncreaseCompliance(tenant: Tenant, newRent: number, rentChange
     .sort((a, b) => (a.changeDate < b.changeDate ? 1 : -1))[0];
   const baseDate = last?.changeDate ?? tenant.lastRentIncreaseDate ?? tenant.leaseStart ?? "";
   if (!baseDate) return true;
-  const daysSince = Math.round((Date.now() - new Date(baseDate).getTime()) / 86400000);
+  const daysSince = daysBetween(baseDate, todayISO());
   if (daysSince < 365) {
     return confirm(
       "Compliance Notice: Rent increases are legally restricted to once every 12 months in most Australian jurisdictions. Continue anyway?",

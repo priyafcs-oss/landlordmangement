@@ -103,6 +103,11 @@ export function ledgerTypeToIncomeCategory(type: LedgerType): IncomeCategory {
   }
 }
 
+/** Rounds to whole cents — the one copy (was written out inline in a dozen places). */
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 /** Sensible starting category for a bill based on its recurring billType, used to default the
  * new ATO Category field when a bill type is chosen/extracted — the two fields are otherwise
  * independent (billType drives auto-matching/annual-cost tracking; category drives tax
@@ -312,13 +317,13 @@ export function buildTenantLedger(
         for (let d = cursor; d <= cycleEnd; d = addDays(d, 1)) {
           sum += dailyRentRate(rentAmountOnDate(tenant, rentChanges, d), tenant.rentFrequency);
         }
-        cycleAmount = Math.round(sum * 100) / 100;
+        cycleAmount = round2(sum);
       }
       rows.push({
         id: `due-${tenant.id}-${cursor}`,
         date: cursor,
         description: `Rent Due: ${cursor} → ${cycleEnd}`,
-        debit: Math.round(cycleAmount * 100) / 100,
+        debit: round2(cycleAmount),
         credit: 0,
         balance: 0,
         isDue: true,
@@ -372,12 +377,12 @@ export function buildTenantLedger(
   let running = 0;
   for (const r of rows) {
     running += r.debit - r.credit;
-    r.balance = Math.round(running * 100) / 100;
+    r.balance = round2(running);
   }
 
   const outstandingInvoices = unpaidInvoiceTotal(tenant.id, invoices);
   const outstandingRent = Math.max(0, running - outstandingInvoices);
-  const total = Math.round(running * 100) / 100;
+  const total = round2(running);
   const nextDue = addDays(tenant.paidUpToDate, 1);
 
   return { rows, outstandingRent, outstandingInvoices, total, nextDue };
@@ -471,6 +476,13 @@ export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[],
 
 export function daysUntil(dateISO: string): number {
   return daysBetween(todayISO(), dateISO);
+}
+
+/** A date from today up to `days` ahead (not already past). */
+export function isDueWithin(dateISO: string | undefined, days: number): boolean {
+  if (!dateISO) return false;
+  const d = daysUntil(dateISO);
+  return d >= 0 && d <= days;
 }
 
 export function fmtCurrency(n: number): string {
@@ -667,8 +679,8 @@ export function buildDepreciationSchedule(items: DepreciationItem[]): Depreciati
   return Array.from(byFy.entries())
     .map(([fy, v]) => ({
       fy,
-      div40: Math.round(v.div40 * 100) / 100,
-      div43: Math.round(v.div43 * 100) / 100,
+      div40: round2(v.div40),
+      div43: round2(v.div43),
       total: Math.round((v.div40 + v.div43) * 100) / 100,
     }))
     .sort((a, b) => (a.fy < b.fy ? -1 : 1));

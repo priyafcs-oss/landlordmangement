@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { daysUntil, todayISO, inspectionDueStatus, propertyInspectionCadenceDays, fmtCurrency, billOwed } from "@/lib/calculations";
+import { daysUntil, todayISO, inspectionDueStatus, propertyInspectionCadenceDays, fmtCurrency, billOwed, isDueWithin } from "@/lib/calculations";
 import {
   AlertTriangle,
   ShieldCheck,
@@ -38,20 +38,13 @@ import { toast } from "sonner";
 import { AiProposalsSection } from "@/components/PropertyShared";
 import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 
-/** "14:30" -> "2:30 PM". Falls back to the raw value if it's not a plain HH:MM string. */
-function formatTime12h(time: string): string {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
-  if (!match) return time;
-  const hour24 = Number(match[1]);
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${match[2]} ${period}`;
-}
 import { WaterRebillBanner } from "@/components/WaterRebillBanner";
 import { OverviewSection } from "@/components/OverviewSection";
 import { StoredImage, StoredVideo } from "@/components/StoredImage";
 import { computeUpcomingRepayments } from "@/lib/overview";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
+import { formatTime12h } from "@/lib/format";
+import { ALERT_WINDOW_DAYS } from "@/lib/constants";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -113,18 +106,10 @@ function DashboardPage() {
     .filter((a) => entityScope === "__all__" || a.ownerEntityId === entityScope)
     .reduce((s, a) => s + a.currentValue, 0);
 
-  const leaseAlerts = state.tenants.filter((t) => {
-    if (!scopedPropertyIds.has(t.propertyId)) return false;
-    if (!t.leaseExpiry) return false;
-    const d = daysUntil(t.leaseExpiry);
-    return d >= 0 && d <= 60;
-  });
-
-  const warrantyAlerts = scopedExpenses.filter((e) => {
-    if (!e.hasWarranty || !e.warrantyExpiry) return false;
-    const d = daysUntil(e.warrantyExpiry);
-    return d >= 0 && d <= 90;
-  });
+  const leaseAlerts = state.tenants.filter(
+    (t) => scopedPropertyIds.has(t.propertyId) && isDueWithin(t.leaseExpiry, ALERT_WINDOW_DAYS.leaseExpiry),
+  );
+  const warrantyAlerts = scopedExpenses.filter((e) => e.hasWarranty && isDueWithin(e.warrantyExpiry, ALERT_WINDOW_DAYS.warrantyExpiry));
 
   const complianceAlerts = scopedProperties.filter(
     (p) => inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p)).overdue,
@@ -205,7 +190,7 @@ function DashboardPage() {
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-500" />
-                  Lease renewals (60 days)
+                  Lease renewals ({ALERT_WINDOW_DAYS.leaseExpiry} days)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
@@ -240,7 +225,7 @@ function DashboardPage() {
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                  Asset warranties (90 days)
+                  Asset warranties ({ALERT_WINDOW_DAYS.warrantyExpiry} days)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
