@@ -345,8 +345,10 @@ export function AddTransactionDialog({
 
   // Universal Upload's client-side guardrail already flagged this exact entry once — reuse it
   // instead of asking the landlord to re-type or re-upload.
+  // On every open, not just when the proposal changes — closing resets the form, and this dialog
+  // stays mounted, so reopening the same record used to show it blank.
   useEffect(() => {
-    if (!initialProposal) return;
+    if (!initialProposal || !open) return;
     const payload = initialProposal.payload as ExpenseProposalPayload;
     setForm((f) => ({
       ...f,
@@ -369,7 +371,7 @@ export function AddTransactionDialog({
       },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialProposal?.id]);
+  }, [open, initialProposal?.id]);
 
   // Editing an existing transaction — pre-fill everything from it, including its own invoice/
   // receipt file (left-pane preview) and any additional files already attached. The statement this
@@ -378,7 +380,7 @@ export function AddTransactionDialog({
   // silently dropped from this dialog entirely, making it look like a source link had vanished
   // whenever an expense only had a statement and no invoice yet.
   useEffect(() => {
-    if (!expense) return;
+    if (!expense || !open) return;
     setForm((f) => ({
       ...f,
       propertyId: expense.propertyId ?? f.propertyId,
@@ -414,7 +416,7 @@ export function AddTransactionDialog({
     if (expense.periodStart || expense.periodEnd) setPeriodOpen(true);
     if (expense.notes) setNotesOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expense?.id]);
+  }, [open, expense?.id]);
 
   const extract = async (file: File) => {
     if (!isSupportedDocumentFile(file)) {

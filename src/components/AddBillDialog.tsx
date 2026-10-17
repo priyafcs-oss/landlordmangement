@@ -112,7 +112,13 @@ export function AddBillDialog({
   } = useStore();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
-  const setOpen = (o: boolean) => (onOpenChangeProp ? onOpenChangeProp(o) : setInternalOpen(o));
+  // Every close resets the form, however it closes (X, Dismiss, Review later, Save) — the same
+  // rule AddTransactionDialog uses — and the hydrate effect below refills it on every open.
+  const setOpen = (o: boolean) => {
+    if (!o) reset();
+    if (onOpenChangeProp) onOpenChangeProp(o);
+    else setInternalOpen(o);
+  };
   const [busy, setBusy] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -259,8 +265,10 @@ export function AddBillDialog({
 
   // Universal Upload already classified+extracted this document once — reuse that result
   // instead of running Gemini again on the same file.
+  // Runs on every open, not just when the proposal changes: the dialog stays mounted in its list
+  // row, so closing (which resets) then reopening the same proposal used to show a blank form.
   useEffect(() => {
-    if (!initialProposal) return;
+    if (!initialProposal || !open) return;
     const payload = initialProposal.payload as BillProposalPayload;
     applyExtracted(
       {
@@ -299,7 +307,7 @@ export function AddBillDialog({
       setExtractSummary((s) => (s ? { ...s, propertyMatched: true } : s));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialProposal?.id]);
+  }, [open, initialProposal?.id]);
 
   const extract = async (file: File) => {
     if (!isSupportedDocumentFile(file)) {
@@ -519,7 +527,6 @@ export function AddBillDialog({
     }
 
     setOpen(false);
-    reset();
     toast.success(billGroupId ? "Bill added with scheduled instalments" : "Bill added");
   };
 
@@ -537,7 +544,6 @@ export function AddBillDialog({
     if (initialProposal) markProposalApplied(initialProposal.id, { propertyId });
     setDuplicateMatch(null);
     setOpen(false);
-    reset();
     toast.success("Invoice attached to the existing transaction");
   };
 
@@ -547,10 +553,7 @@ export function AddBillDialog({
     <>
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) reset();
-      }}
+      onOpenChange={setOpen}
     >
       {!initialProposal && (
         <DialogTrigger asChild>
