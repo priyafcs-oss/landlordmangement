@@ -20,7 +20,7 @@ import { Users2, Plus, ChevronRight, GitMerge, Receipt, FileText, Eye } from "lu
 import { ProviderDialog } from "@/components/PropertyShared";
 import type { AppState, Provider } from "@/lib/types";
 import { PROVIDER_ROLE_LABELS } from "@/lib/types";
-import { matchProviderByName } from "@/lib/providerMatch";
+import { rowBelongsToProvider } from "@/lib/providerMatch";
 import { openBillDocument } from "@/lib/files";
 import { toast } from "sonner";
 
@@ -58,8 +58,7 @@ export function linkedPropertyIds(state: AppState, providerId: string): string[]
  * same providerId-FK-or-fuzzy-name logic the provider's own profile page uses for its payment
  * history, so what's summarized here always agrees with what that page shows in full. */
 function latestInvoiceAndStatement(state: AppState, provider: Provider) {
-  const belongs = (row: { providerId?: string; providerName?: string }): boolean =>
-    row.providerId === provider.id || (!!row.providerName && !!matchProviderByName([provider], row.providerName));
+  const belongs = (row: { providerId?: string; providerName?: string }): boolean => rowBelongsToProvider(row, provider);
 
   const invoice = [
     ...state.expenses

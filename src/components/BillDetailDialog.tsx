@@ -113,7 +113,7 @@ export function BillDetailDialog({
   propertyLabel?: string;
   trigger: React.ReactNode;
 }) {
-  const { state, updateBill, deleteBill, addBill, unmarkBillPaid, addInvoice } = useStore();
+  const { state, updateBill, deleteBill, addBill, addInvoice, findOrCreateProvider } = useStore();
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(bill.id);
   const [editingSchedule, setEditingSchedule] = useState(false);
@@ -231,6 +231,12 @@ export function BillDetailDialog({
 
     const patch = {
       providerName: form.providerName || undefined,
+      // A renamed provider is re-matched (same shared rule as everywhere else) — the bill used to
+      // keep pointing at the old provider record after its name was edited here.
+      providerId:
+        form.providerName.trim() && form.providerName.trim() !== (selected.providerName ?? "").trim()
+          ? findOrCreateProvider(form.providerName, selected.propertyId, form.category)
+          : selected.providerId,
       referenceNumber: form.referenceNumber || undefined,
       bpayBillerCode: form.bpayBillerCode || undefined,
       bpayReference: form.bpayReference || undefined,

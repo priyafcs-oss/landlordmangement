@@ -20,7 +20,7 @@ import { openBillDocument, readFileAsDataUrl } from "@/lib/files";
 import { ProviderDialog, ProviderRow, ProviderAgreementDialog } from "@/components/PropertyShared";
 import { agreementsForProvider } from "@/lib/providerAgreements";
 import { hasFeeTerms } from "@/lib/feeVerification";
-import { matchProviderByName } from "@/lib/providerMatch";
+import { rowBelongsToProvider } from "@/lib/providerMatch";
 import { toast } from "sonner";
 import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
 import { PROVIDER_ROLE_LABELS } from "@/lib/types";
@@ -278,8 +278,7 @@ function ProviderProfilePage() {
   // name (same word-boundary logic findOrCreateProvider itself uses) when it isn't — most
   // Expense/Bill creation paths only ever wrote the plain-text providerName, never the FK, so a
   // provider's whole payment history went missing here despite being right there in Transactions.
-  const belongsToProvider = (row: { providerId?: string; providerName?: string }): boolean =>
-    row.providerId === provider.id || (!!row.providerName && !!matchProviderByName([provider], row.providerName));
+  const belongsToProvider = (row: { providerId?: string; providerName?: string }): boolean => rowBelongsToProvider(row, provider);
 
   const payments: PaymentRow[] = [
     ...state.expenses

@@ -168,6 +168,18 @@ const empty: AppState = {
   reportHistory: [],
 };
 
+/** Extra matching/fill-in for findOrCreateProvider. */
+export interface FindOrCreateProviderOptions {
+  /** Match on ABN first (and never match a same-named provider with a different ABN). */
+  abn?: string;
+  /** Fields to set on the provider (e.g. a portal login the landlord just typed). */
+  set?: Partial<Provider>;
+  /** Fields to fill in only where the provider has none (e.g. contact details read off a bill). */
+  fillGaps?: Partial<Provider>;
+  /** Role for a newly created provider (default "Other"). */
+  role?: Provider["role"];
+}
+
 interface StoreCtx {
   state: AppState;
   loading: boolean;
@@ -283,7 +295,7 @@ interface StoreCtx {
   /** Case-insensitive match-or-create against the Provider directory, scoped to one property —
    * used wherever a payee/provider name is typed on a Transaction or Expense so it lands in the
    * Providers list the same way a Bill's provider always has. */
-  findOrCreateProvider: (name: string, propertyId?: string, defaultCategory?: ExpenseCategory) => string;
+  findOrCreateProvider: (name: string, propertyId?: string, defaultCategory?: ExpenseCategory, opts?: FindOrCreateProviderOptions) => string;
 
   /** Generic asset CRUD — used for Gold/ETF (and anything added later). Property manages its own
    * mirrored asset row automatically via addProperty/updateProperty/deleteProperty. */
@@ -1240,21 +1252,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
      * properties reuses one Provider row instead of creating a duplicate identity. When called
      * with a propertyId, also ensures a `provider_properties` tag exists for that pair, so the
      * provider shows up on that property's Providers tab. */
-    findOrCreateProvider: (name, propertyId, defaultCategory) => {
+    findOrCreateProvider: (name, propertyId, defaultCategory, opts = {}) => {
       const trimmed = name.trim();
-      const existing = matchProviderByName(state.providers, trimmed);
+      const definedOnly = (o: Partial<Provider> = {}) =>
+        Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== "")) as Partial<Provider>;
+      const setFields = definedOnly(opts.set);
+      const gapFields = definedOnly(opts.fillGaps);
+      const existing = matchProviderByName(state.providers, trimmed, opts.abn ?? gapFields.abn);
       const id = existing ? existing.id : uid("prov");
       if (!existing) {
-        const row: Provider = { id, name: trimmed, role: "Other", defaultCategory };
+        const row: Provider = { id, name: trimmed, role: opts.role ?? "Other", ...gapFields, ...setFields, defaultCategory };
         void upsertRow(TABLES.providers, row as unknown as Record<string, unknown>);
         set((s) => ({ ...s, providers: [...s.providers, row] }));
         if (defaultCategory) toast.success(`New provider "${trimmed}" — default category set to "${defaultCategory}"`);
-      } else if (!existing.defaultCategory && defaultCategory) {
-        // Fills a gap on an existing provider record the same way AddBillDialog already backfills
-        // a missing email/phone/website/ABN from a newly-confirmed bill — never overwrites a
-        // category the landlord (or a prior transaction) already set deliberately.
-        value.updateProvider(existing.id, { defaultCategory });
-        toast.success(`New provider "${trimmed}" — default category set to "${defaultCategory}"`);
+      } else {
+        // Fill gaps on the existing record (contact details off a bill, a default category) but
+        // never overwrite what the landlord already set; `set` fields are ones they just typed.
+        const patch: Partial<Provider> = { ...setFields };
+        for (const [k, v] of Object.entries(gapFields) as [keyof Provider, unknown][]) {
+          if (!existing[k] && patch[k] === undefined) (patch as Record<string, unknown>)[k] = v;
+        }
+        if (!existing.defaultCategory && defaultCategory) patch.defaultCategory = defaultCategory;
+        if (Object.keys(patch).length > 0) value.updateProvider(existing.id, patch);
+        if (patch.defaultCategory) toast.success(`${existing.name} — default category set to "${patch.defaultCategory}"`);
       }
       if (propertyId) value.ensureProviderProperty(id, propertyId);
       return id;

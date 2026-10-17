@@ -70,6 +70,7 @@ import { SHARED_UNIT, uid } from "@/lib/constants";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { useReparse } from "@/lib/useReparse";
+import { findProvider } from "@/lib/providerMatch";
 
 
 interface DomainSuggestResult {
@@ -6797,19 +6798,13 @@ export function ProviderDialog({
       passwordNote: form.passwordNote.trim() || undefined,
       defaultCategory: (form.defaultCategory || undefined) as ExpenseCategory | undefined,
     };
-    // Creating a brand-new contact still dedups portfolio-wide by exact name (+ ABN, when both
-    // sides have one) before creating a fresh identity row — the same real-world business added
+    // Creating a brand-new contact still dedups portfolio-wide (the shared findProvider rule: ABN,
+    // exact name, word tokens; never a same-named provider with a different ABN) before creating a
+    // fresh identity row — the same real-world business added
     // from two different properties' Providers tabs should land on one Provider, not two. A found
     // match's existing identity fields are left untouched (only editing via the `provider` prop
     // updates them) — this is a reuse, not a merge.
-    const existingByIdentity = !provider
-      ? state.providers.find((p) => {
-          if (p.name.trim().toLowerCase() !== form.name.trim().toLowerCase()) return false;
-          const formAbn = form.abn.trim();
-          if (formAbn && p.abn && p.abn.trim() !== formAbn) return false;
-          return true;
-        })
-      : undefined;
+    const existingByIdentity = !provider ? findProvider(state.providers, form.name, form.abn) : undefined;
     const providerId = provider ? provider.id : (existingByIdentity?.id ?? addProvider(payload));
     if (provider) {
       updateProvider(provider.id, payload);

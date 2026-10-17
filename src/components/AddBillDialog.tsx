@@ -48,7 +48,7 @@ import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { useDuplicateGuard } from "@/components/DuplicateWarningDialog";
 import { matchProviderByName } from "@/lib/providerMatch";
-import type { BillType, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
+import type { BillType, AiIntakeProposal, BillProposalPayload, Property, ExpenseCategory, ExtractBillResult } from "@/lib/types";
 import { BILL_TYPES, SHARED_UNIT, uid } from "@/lib/constants";
 import { documentLayout } from "@/lib/documentLayout";
 
@@ -81,9 +81,7 @@ export function AddBillDialog({
   const {
     state,
     addBill,
-    addProvider,
-    updateProvider,
-    ensureProviderProperty,
+    findOrCreateProvider,
     updateProperty,
     addInvoice,
     markProposalApplied,
@@ -341,53 +339,23 @@ export function AddBillDialog({
     // proposal or was typed in by hand.
     const payload = initialProposal?.payload as BillProposalPayload | undefined;
 
-    // Resolved BEFORE the bill(s) below so the created bill(s) can carry providerId themselves —
-    // matched portfolio-wide (not just providersForProperty) so a vendor already on file at
-    // another property gets tagged onto this one instead of creating a duplicate identity row —
-    // same fuzzy word-boundary matching findOrCreateProvider uses, so "Sydney Water" vs "Sydney
-    // Water Corporation" across two different bills lands on one directory entry either way.
-    const existingProvider = matchProviderByName(state.providers, form.providerName);
-    let resolvedProviderId: string | undefined;
-    if (existingProvider) {
-      resolvedProviderId = existingProvider.id;
-      ensureProviderProperty(existingProvider.id, propertyId);
-      const patch: Partial<Provider> = {};
-      if (form.portalUrl) patch.portalUrl = form.portalUrl;
-      if (form.portalUsername) patch.portalUsername = form.portalUsername;
-      if (form.passwordNote) patch.passwordNote = form.passwordNote;
-      // An AI-confirmed bill often carries the vendor's contact details straight off the
-      // notice -- fill in whatever the Provider directory doesn't already have, same as the
-      // pre-consolidation review card did. Never overwrites a value already on file.
-      if (payload) {
-        if (!existingProvider.email && payload.vendorEmail) patch.email = payload.vendorEmail;
-        if (!existingProvider.phone && payload.vendorPhone) patch.phone = payload.vendorPhone;
-        if (!existingProvider.website && payload.vendorWebsite) patch.website = payload.vendorWebsite;
-        if (!existingProvider.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
-        if (!existingProvider.address && payload.vendorAddress) patch.address = payload.vendorAddress;
-      }
-      if (!existingProvider.portalUrl && !patch.portalUrl && emailPortalUrl) patch.portalUrl = emailPortalUrl;
-      // Same gap-filling idea for the category this vendor is usually filed under — never
-      // overwrites a default the landlord (or an earlier bill) already set.
-      if (!existingProvider.defaultCategory) patch.defaultCategory = form.category;
-      if (Object.keys(patch).length > 0) updateProvider(existingProvider.id, patch);
-      if (patch.defaultCategory) toast.success(`${existingProvider.name} — default category set to "${patch.defaultCategory}"`);
-    } else {
-      resolvedProviderId = addProvider({
-        name: form.providerName.trim(),
-        role: payload && form.billType === "Council Rates" ? "Council" : "Other",
-        portalUrl: form.portalUrl || emailPortalUrl,
-        portalUsername: form.portalUsername || undefined,
-        passwordNote: form.passwordNote || undefined,
+    // Resolved before the bill(s) below so they carry providerId. The store's shared
+    // find-or-create matches portfolio-wide (ABN, exact name, word tokens), tags the provider to
+    // this property, applies the portal login typed here, and fills in contact details read off
+    // the notice only where the directory has none.
+    const resolvedProviderId = findOrCreateProvider(form.providerName, propertyId, form.category, {
+      abn: payload?.vendorAbn,
+      role: payload && form.billType === "Council Rates" ? "Council" : undefined,
+      set: { portalUrl: form.portalUrl || undefined, portalUsername: form.portalUsername || undefined, passwordNote: form.passwordNote || undefined },
+      fillGaps: {
         email: payload?.vendorEmail,
         phone: payload?.vendorPhone,
         website: payload?.vendorWebsite,
         abn: payload?.vendorAbn,
         address: payload?.vendorAddress,
-        defaultCategory: form.category,
-      });
-      ensureProviderProperty(resolvedProviderId, propertyId);
-      toast.success(`New provider "${form.providerName.trim()}" — default category set to "${form.category}"`);
-    }
+        portalUrl: emailPortalUrl,
+      },
+    });
 
     const billGroupId = form.hasInstalments && instalments.length > 0 ? uid("bg") : undefined;
     const shared = {
@@ -690,7 +658,7 @@ export function AddBillDialog({
                         <option key={p.id} value={p.name} />
                       ))}
                     </datalist>
-                    {form.providerName.trim() && !matchProviderByName(providersForProperty, form.providerName) && (
+                    {form.providerName.trim() && !matchProviderByName(state.providers, form.providerName) && (
                       <div className="text-xs text-muted-foreground">
                         <span className="font-medium">{form.providerName.trim()}</span> is not in your providers yet — saving adds them.
                       </div>
