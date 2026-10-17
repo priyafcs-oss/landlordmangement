@@ -5,6 +5,7 @@ import { routeInboundDocument } from "./router.ts";
 import type { NormalizedBillInput } from "./types.ts";
 import { isOversizedUpload, MAX_AI_UPLOAD_BASE64_CHARS } from "../_shared/limits.ts";
 import { tryFetchLinkedAttachment } from "../_shared/linkAttachment.ts";
+import { isSupportedAttachment } from "../_shared/http.ts";
 
 interface ResendAttachmentMeta {
   id: string;
@@ -116,11 +117,6 @@ async function logEmailInbox(
   };
   const { error } = await supabase.from("email_inbox_log").upsert(row, { onConflict: "emailId,attachmentId" });
   if (error) console.error("[parse-inbound-bill] failed to write email_inbox_log", error);
-}
-
-/** Gemini reads PDFs and common image formats natively as inlineData — anything else (xlsx, docx, csv, ...) is skipped. */
-function isSupportedAttachment(contentType: string): boolean {
-  return contentType === "application/pdf" || contentType.startsWith("image/");
 }
 
 /**

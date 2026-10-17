@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireUser } from "../_shared/http.ts";
 
 const AUTH_URL = "https://auth.domain.com.au/v1/connect/token";
 const API_BASE = "https://api.domain.com.au/v1";
@@ -75,6 +76,10 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
+
+  // Signed-in landlords only — this spends this app's Domain API allowance.
+  const user = await requireUser(req);
+  if (user instanceof Response) return user;
 
   let body: LookupRequest;
   try {

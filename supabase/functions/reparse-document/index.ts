@@ -1,5 +1,5 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireUser } from "../_shared/http.ts";
 import { isStoragePath, resolveOwnerId, resolveStoredBase64, uploadBase64ToStorage } from "../_shared/storage.ts";
 import { downloadBytesFromDrive, driveFileId, getAccessTokenForOwner, isGoogleDrivePath, uploadBytesToDrive } from "../_shared/googleDrive.ts";
 import { parseInboundBill } from "../parse-inbound-bill/parse-bill.ts";
@@ -63,23 +63,9 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
-  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const user = await requireUser(req);
+  if (user instanceof Response) return user;
+  const supabase = user.supabase;
 
   let body: ReparseRequest;
   try {

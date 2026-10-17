@@ -60,7 +60,7 @@ export default defineConfig({
           // A directory glob, minus the specific files that need the "edge" project's node
           // environment + Deno shim below (they import real supabase/functions/** source).
           include: ["tests/unit/**/*.test.{ts,tsx}", "tests/integration/**/*.test.ts"],
-          exclude: ["tests/unit/gemini-parser.test.ts", "tests/integration/resend-webhook.test.ts", "tests/integration/copilot-chat.test.ts"],
+          exclude: ["tests/unit/gemini-parser.test.ts", "tests/integration/resend-webhook.test.ts", "tests/integration/copilot-chat.test.ts", "tests/integration/extract-handler.test.ts"],
         },
       },
       {
@@ -69,7 +69,7 @@ export default defineConfig({
           name: "edge",
           environment: "node",
           setupFiles: ["./tests/setup.edge.ts"],
-          include: ["tests/unit/gemini-parser.test.ts", "tests/integration/resend-webhook.test.ts", "tests/integration/copilot-chat.test.ts"],
+          include: ["tests/unit/gemini-parser.test.ts", "tests/integration/resend-webhook.test.ts", "tests/integration/copilot-chat.test.ts", "tests/integration/extract-handler.test.ts"],
         },
       },
     ],

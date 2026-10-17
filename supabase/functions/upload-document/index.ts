@@ -1,7 +1,7 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { routeInboundDocument } from "../parse-inbound-bill/router.ts";
 import type { NormalizedBillInput } from "../parse-inbound-bill/types.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { isSupportedAttachment, requireUser } from "../_shared/http.ts";
 import { isOversizedUpload, MAX_AI_UPLOAD_BASE64_CHARS } from "../_shared/limits.ts";
 
 interface UploadRequest {
@@ -12,11 +12,6 @@ interface UploadRequest {
   loanId?: string;
   /** Set by the "Upload statement" button on a BankAccount — see NormalizedBillInput.bankAccountIdHint. */
   bankAccountId?: string;
-}
-
-/** Gemini reads PDFs and common image formats natively as inlineData — anything else is rejected. */
-function isSupportedAttachment(contentType: string): boolean {
-  return contentType === "application/pdf" || contentType.startsWith("image/");
 }
 
 /**
@@ -41,23 +36,9 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
-  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const userScopedSupabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: userData, error: userError } = await userScopedSupabase.auth.getUser();
-  if (userError || !userData.user) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const user = await requireUser(req);
+  if (user instanceof Response) return user;
+  const userScopedSupabase = user.supabase;
 
   let body: UploadRequest;
   try {

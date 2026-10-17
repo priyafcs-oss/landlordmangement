@@ -1,5 +1,5 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireUser } from "../_shared/http.ts";
 import { callGeminiJSON } from "../parse-inbound-bill/gemini.ts";
 import { COPILOT_RESPONSE_SCHEMA, buildChatParts } from "../_shared/planSchema.ts";
 import type { RawPlanStep } from "../_shared/planSchema.ts";
@@ -37,23 +37,9 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
-  const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: authHeader } },
-  });
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const user = await requireUser(req);
+  if (user instanceof Response) return user;
+  const supabase = user.supabase;
 
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) {

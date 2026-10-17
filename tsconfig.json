@@ -22,6 +22,7 @@
     "tests/unit/gemini-parser.test.ts",
     "tests/integration/resend-webhook.test.ts",
     "tests/integration/copilot-chat.test.ts",
+    "tests/integration/extract-handler.test.ts",
     "tests/setup.edge.ts"
   ],
   "compilerOptions": {
