@@ -1,5 +1,5 @@
 import { todayISO } from "@/lib/calculations";
-import type { RentFrequency, Tenant } from "@/lib/types";
+import type { LedgerEntry, RentFrequency, Tenant } from "@/lib/types";
 
 /**
  * The tenant currently occupying each dwelling — at most one per distinct `unitId` (a
@@ -65,4 +65,22 @@ export function rentPerPeriod(
 /** A tenant's rent as an annual figure. */
 export function annualRentOf(t: Pick<Tenant, "rentAmount" | "rentFrequency">): number {
   return rentPerPeriod(t.rentAmount, t.rentFrequency, "Yearly");
+}
+
+/** Rent payments received from these tenants (all of a property's tenants, past and present) in
+ * [start, end] — the one definition of "rent collected" behind the P&L, tax summary, portfolio
+ * roll-up, property summary and fee check. Omit the dates for all time. */
+export function rentPayments(
+  ledger: LedgerEntry[],
+  tenants: Pick<Tenant, "id">[],
+  start = "0000-01-01",
+  end = "9999-12-31",
+): LedgerEntry[] {
+  const ids = new Set(tenants.map((t) => t.id));
+  return ledger.filter((e) => ids.has(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end);
+}
+
+/** Total of rentPayments. */
+export function rentCollected(ledger: LedgerEntry[], tenants: Pick<Tenant, "id">[], start?: string, end?: string): number {
+  return rentPayments(ledger, tenants, start, end).reduce((s, e) => s + e.credit, 0);
 }

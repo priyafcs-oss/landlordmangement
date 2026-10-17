@@ -55,7 +55,7 @@ import { DocumentLink } from "@/components/DocumentLink";
 import { StoredImageLink, StoredVideo } from "@/components/StoredImage";
 import { EntityDialog } from "@/components/EntityDialog";
 import { ProviderPortalPasswordField } from "@/components/ProviderPortalLogin";
-import { annualRentOf, currentTenants, rentPerPeriod } from "@/lib/tenancy";
+import { annualRentOf, currentTenants, rentPerPeriod, rentCollected, rentPayments } from "@/lib/tenancy";
 import { loanFieldsFromPayload, agreementFieldsFromExtract, type AgencyAgreementExtractResult } from "@/lib/extractMappers";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent, type ChartConfig } from "@/components/ui/chart";
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
@@ -2969,10 +2969,7 @@ export function PropertySummaryTab({
   const { state } = useStore();
   const currentFY = ausFinancialYear(todayISO());
   const { start, end } = fyRange(currentFY);
-  const tenantIds = tenants.map((t) => t.id);
-  const ytdIncome = state.ledger
-    .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
-    .reduce((s, e) => s + e.credit, 0);
+  const ytdIncome = rentCollected(state.ledger, tenants, start, end);
   const activeTenant = currentTenants(tenants)[0];
   const nextBill = state.bills
     .filter((b) => b.propertyId === prop.id && b.status !== "Paid")
@@ -4461,10 +4458,7 @@ export function PropertyPnLTab({ prop, loan, tenants, expenses }: { prop: Proper
   // year that hasn't happened) matches how a landlord actually reads "where do I stand right now".
   const end = isCurrentFY ? todayISO() : fyEnd;
 
-  const tenantIds = tenants.map((t) => t.id);
-  const rentEntries = state.ledger.filter(
-    (e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end,
-  );
+  const rentEntries = rentPayments(state.ledger, tenants, start, end);
   const grossRent = rentEntries.reduce((s, e) => s + e.credit, 0);
 
   const periodExpenses = expenses.filter((e) => e.date >= start && e.date <= end);
@@ -8218,10 +8212,7 @@ export function PropertyFeeVerificationTab({
   const agreementTerms: AgreementFeeTerms = agreement;
 
   const { start, end } = fy === "all" ? { start: "0000-01-01", end: "9999-12-31" } : fyRange(fy);
-  const tenantIds = state.tenants.filter((t) => t.propertyId === propertyId).map((t) => t.id);
-  const rentInRange = state.ledger.filter(
-    (e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end,
-  );
+  const rentInRange = rentPayments(state.ledger, state.tenants.filter((t) => t.propertyId === propertyId), start, end);
   const expensesInRange = state.expenses.filter(
     (e) => e.propertyId === propertyId && e.date >= start && e.date <= end && isAgentFeeExpense(e, provider.name),
   );

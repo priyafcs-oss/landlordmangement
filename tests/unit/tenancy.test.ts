@@ -5,6 +5,8 @@ import {
   currentTenants,
   currentTenantsAll,
   rentPerPeriod,
+  rentCollected,
+  rentPayments,
 } from "@/lib/tenancy";
 import type { Tenant } from "@/lib/types";
 
@@ -66,5 +68,20 @@ describe("rentPerPeriod", () => {
 
   it("annualises a tenant's rent", () => {
     expect(annualRentOf({ rentAmount: 2000, rentFrequency: "Monthly" })).toBe(24000);
+  });
+});
+
+describe("rentCollected (P&L, tax summary, roll-up, summary, fee check)", () => {
+  const ledger = [
+    { id: "1", tenantId: "a", type: "Rent Payment", date: "2025-07-01", credit: 500, debit: 0 },
+    { id: "2", tenantId: "a", type: "Rent Payment", date: "2026-06-30", credit: 500, debit: 0 },
+    { id: "3", tenantId: "a", type: "Rent Payment", date: "2026-07-01", credit: 500, debit: 0 },
+    { id: "4", tenantId: "a", type: "Water Invoice", date: "2025-09-01", credit: 60, debit: 0 },
+    { id: "5", tenantId: "z", type: "Rent Payment", date: "2025-09-01", credit: 999, debit: 0 },
+  ] as unknown as Parameters<typeof rentCollected>[0];
+
+  it("sums only rent payments from these tenants within the period, inclusive", () => {
+    expect(rentCollected(ledger, [{ id: "a" }], "2025-07-01", "2026-06-30")).toBe(1000);
+    expect(rentPayments(ledger, [{ id: "a" }]).map((e) => e.id)).toEqual(["1", "2", "3"]);
   });
 });

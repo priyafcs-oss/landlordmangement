@@ -3,6 +3,7 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, buildFyOptions, estimateLoanInterest } from "@/lib/calculations";
+import { rentCollected } from "@/lib/tenancy";
 
 /** Portfolio-wide Cost Base — same estimate PropertyCostBaseTab computes per property
  * (purchase price + stamp duty + capital-works expenses), summed across every property. */
@@ -145,10 +146,7 @@ export function PortfolioPnLTab() {
   const end = isCurrentFY ? todayISO() : fyEnd;
 
   const rows = state.properties.map((p) => {
-    const tenantIds = state.tenants.filter((t) => t.propertyId === p.id).map((t) => t.id);
-    const grossRent = state.ledger
-      .filter((e) => tenantIds.includes(e.tenantId) && e.type === "Rent Payment" && e.date >= start && e.date <= end)
-      .reduce((s, e) => s + e.credit, 0);
+    const grossRent = rentCollected(state.ledger, state.tenants.filter((t) => t.propertyId === p.id), start, end);
 
     const periodExpenses = state.expenses.filter((e) => e.propertyId === p.id && e.date >= start && e.date <= end);
     const outgoing = periodExpenses.filter((e) => e.direction !== "Income");

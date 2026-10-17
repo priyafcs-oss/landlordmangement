@@ -4,9 +4,7 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Field, Stat } from "@/components/Field";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
@@ -31,11 +29,11 @@ import { NeedsReviewBanner } from "@/components/NeedsReviewBanner";
 import { DocumentLink } from "@/components/DocumentLink";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
-import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { FeeCheckRow } from "@/components/PropertyShared";
 import { EditLedgerRowDialog } from "@/components/EditLedgerRowDialog";
 import { verifyAgentFees, reconcileFlatFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
+import { rentCollected } from "@/lib/tenancy";
 
 function pdfSafe(s: string): string {
   return s.replace(/−/g, "-").replace(/ /g, " ");
@@ -1033,11 +1031,9 @@ function EofyReport() {
     const byCategory: Record<string, number> = {};
     const feeChecksByProperty: { propertyLabel: string; agentName: string; results: FeeCheckResult[] }[] = [];
     for (const prop of properties) {
-      const tenantIds = state.tenants.filter((t) => t.propertyId === prop.id).map((t) => t.id);
-      const rentCollected = state.ledger
-        .filter((e) => tenantIds.includes(e.tenantId) && e.date >= start && e.date <= end && e.type === "Rent Payment")
-        .reduce((s, e) => s + e.credit, 0);
-      gross += rentCollected;
+      const propertyTenants = state.tenants.filter((t) => t.propertyId === prop.id);
+      const propertyRent = rentCollected(state.ledger, propertyTenants, start, end);
+      gross += propertyRent;
       const expenses = state.expenses.filter((e) => e.propertyId === prop.id && e.date >= start && e.date <= end);
       for (const e of expenses) {
         const group =
@@ -1078,12 +1074,12 @@ function EofyReport() {
         // convert to a dollar figure — only resolvable when the property had exactly one tenant
         // over the FY, the same "unambiguous single tenant" resolution used elsewhere for this
         // (see singleAssignedTenant in PropertyShared.tsx's feeChecks, and PropertyFeeVerificationTab).
-        const soleTenant = tenantIds.length === 1 ? state.tenants.find((t) => t.id === tenantIds[0]) : undefined;
+        const soleTenant = propertyTenants.length === 1 ? propertyTenants[0] : undefined;
         const results = [
           ...verifyAgentFees({
             agentName: agent.name,
             agreement,
-            rentCollected,
+            rentCollected: propertyRent,
             lines,
             tenantRent: soleTenant ? { amount: soleTenant.rentAmount, frequency: soleTenant.rentFrequency } : undefined,
             feeTypes: ["Management Fee", "Letting Fee"],

@@ -1,16 +1,4 @@
-import type {
-  Property,
-  Loan,
-  Expense,
-  LedgerEntry,
-  PropertyBill,
-  CashBuffer,
-  InsurancePolicy,
-  ValuationSnapshot,
-  LoanBalanceSnapshot,
-  Asset,
-  Entity,
-} from "./types";
+import type { Property, Loan, Expense, LedgerEntry, CashBuffer, InsurancePolicy, ValuationSnapshot, LoanBalanceSnapshot, Asset, Entity } from "./types";
 import { addMonths, daysUntil, localISO, todayISO } from "./calculations";
 
 /** Value/debt/equity headline figures for a scope (one property, one entity, or the whole portfolio). */
@@ -162,9 +150,23 @@ function occurrencesInWindow(fromISO: string, frequency: Loan["repaymentFrequenc
   return out;
 }
 
+/** Where a loan's repayment schedule starts: its next repayment date, or failing that this month's
+ * repayment day (`dueDayOfMonth`, clamped to the month's length) — occurrencesInWindow rolls it
+ * forward if it's already past. Undefined when neither is on file. */
+export function repaymentAnchor(loan: Pick<Loan, "nextRepaymentDate" | "dueDayOfMonth">, todayIso = todayISO()): string | undefined {
+  if (loan.nextRepaymentDate) return loan.nextRepaymentDate;
+  if (!loan.dueDayOfMonth) return undefined;
+  const [y, m] = todayIso.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${todayIso.slice(0, 7)}-${String(Math.min(loan.dueDayOfMonth, lastDay)).padStart(2, "0")}`;
+}
+
 /** Loan repayments falling due in the next `windowDays`, with each loan's offset balance as the
  * cash already sitting against it — flags a shortfall where the offset can't cover the instalment.
- * A loan with no `nextRepaymentDate` on file is skipped (nothing to schedule from). */
+ * The one repayment schedule: the Overview's upcoming-repayments card and the Dashboard's
+ * "due within 7 days" alerts both use it (the Dashboard used to build its own, monthly-only, capped
+ * at the 28th, showing the monthly figure for weekly loans and including paid-off loans). A loan
+ * with neither a next repayment date nor a repayment day is skipped. */
 export function computeUpcomingRepayments(loans: Loan[], properties: Property[], windowDays: number): UpcomingRepaymentsSummary {
   const today = new Date(todayISO() + "T00:00:00Z");
   const end = new Date(today);
@@ -172,8 +174,9 @@ export function computeUpcomingRepayments(loans: Loan[], properties: Property[],
 
   const items: UpcomingRepaymentItem[] = [];
   for (const loan of loans) {
-    if (!loan.nextRepaymentDate || loan.status === "Paid Off") continue;
-    const dates = occurrencesInWindow(loan.nextRepaymentDate, loan.repaymentFrequency, today, end);
+    const anchor = repaymentAnchor(loan);
+    if (!anchor || loan.status === "Paid Off" || !(loan.monthlyEmi > 0)) continue;
+    const dates = occurrencesInWindow(anchor, loan.repaymentFrequency, today, end);
     if (dates.length === 0) continue;
     const amount = perRepaymentAmount(loan);
     const offsetBalance = loan.offsetBalance ?? 0;

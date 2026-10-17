@@ -20,15 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  daysUntil,
-  localISO,
-  todayISO,
-  inspectionDueStatus,
-  propertyInspectionCadenceDays,
-  fmtCurrency,
-  billOwed,
-} from "@/lib/calculations";
+import { daysUntil, todayISO, inspectionDueStatus, propertyInspectionCadenceDays, fmtCurrency, billOwed } from "@/lib/calculations";
 import {
   AlertTriangle,
   ShieldCheck,
@@ -58,6 +50,7 @@ function formatTime12h(time: string): string {
 import { WaterRebillBanner } from "@/components/WaterRebillBanner";
 import { OverviewSection } from "@/components/OverviewSection";
 import { StoredImage, StoredVideo } from "@/components/StoredImage";
+import { computeUpcomingRepayments } from "@/lib/overview";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -362,21 +355,12 @@ function HousekeepingWidget() {
     .filter((x) => x.days <= 7)
     .sort((a, b) => a.days - b.days);
 
-  const today = new Date();
-  const dueEmis = state.loans
-    .filter((l) => l.dueDayOfMonth && l.monthlyEmi > 0)
-    .map((l) => {
-      const day = Math.min(l.dueDayOfMonth!, 28);
-      let due = new Date(today.getFullYear(), today.getMonth(), day);
-      if (due < today) due = new Date(today.getFullYear(), today.getMonth() + 1, day);
-      return {
-        loan: l,
-        days: daysUntil(localISO(due)),
-        date: localISO(due),
-      };
-    })
-    .filter((x) => x.days <= 7)
-    .sort((a, b) => a.days - b.days);
+  // The same repayment schedule as the Overview card (frequency-aware, skips paid-off loans).
+  const dueEmis = computeUpcomingRepayments(state.loans, state.properties, 7).items.map((item) => ({
+    item,
+    loan: state.loans.find((l) => l.id === item.loanId)!,
+    days: daysUntil(item.dueDate),
+  }));
 
   return (
     <Card>
@@ -416,26 +400,20 @@ function HousekeepingWidget() {
             </div>
           );
         })}
-        {dueEmis.map(({ loan, days, date }) => {
-          const prop = state.properties.find((p) => p.id === loan.propertyId);
-          return (
-            <div
-              key={loan.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded border p-3"
-            >
-              <div>
-                <div className="font-medium">
-                  {loan.bankName} EMI — {fmtCurrency(loan.monthlyEmi)}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {prop?.address} • due {date}
-                  {loan.isDirectDebit ? " • direct debit" : ""}
-                </div>
+        {dueEmis.map(({ item, loan, days }) => (
+          <div key={item.loanId + item.dueDate} className="flex flex-wrap items-center justify-between gap-2 rounded border p-3">
+            <div>
+              <div className="font-medium">
+                {item.bankName} repayment — {fmtCurrency(item.amount)}
               </div>
-              <Badge variant="outline">{days} days</Badge>
+              <div className="text-xs text-muted-foreground">
+                {item.propertyLabel} • due {item.dueDate}
+                {loan?.isDirectDebit ? " • direct debit" : ""}
+              </div>
             </div>
-          );
-        })}
+            <Badge variant="outline">{days} days</Badge>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );

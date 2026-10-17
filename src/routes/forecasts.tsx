@@ -37,13 +37,15 @@ export function ForecastsContent() {
   const [months, setMonths] = useState<3 | 6 | 12>(6);
 
   const knownMonthlyRent = currentTenantsAll(state.tenants).reduce((s, t) => s + rentPerPeriod(t.rentAmount, t.rentFrequency, "Monthly"), 0);
-  const monthlyEmiTotal = state.loans.reduce((s, l) => s + l.monthlyEmi, 0);
+  // Paid-off loans have no repayments left.
+  const activeLoans = state.loans.filter((l) => l.status !== "Paid Off");
+  const monthlyEmiTotal = activeLoans.reduce((s, l) => s + l.monthlyEmi, 0);
 
   const cashflowRows: { name: string; rent: number; bills: number; emis: number; net: number }[] = [];
   const equityRows: { name: string; loanBalance: number; equity: number }[] = [];
 
   const totalValue = state.assets.filter((a) => a.status === "Active").reduce((s, a) => s + a.currentValue, 0);
-  let projectedBalances = state.loans.map((l) => ({ id: l.id, balance: l.totalBalance, rate: l.interestRate, emi: l.monthlyEmi }));
+  let projectedBalances = activeLoans.map((l) => ({ id: l.id, balance: l.totalBalance, rate: l.interestRate, emi: l.monthlyEmi }));
 
   for (let i = 0; i < months; i++) {
     // Day 1 so the 31st of a month doesn't overflow past a shorter month; local, not UTC.
