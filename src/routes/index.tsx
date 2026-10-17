@@ -51,6 +51,7 @@ import { WaterRebillBanner } from "@/components/WaterRebillBanner";
 import { OverviewSection } from "@/components/OverviewSection";
 import { StoredImage, StoredVideo } from "@/components/StoredImage";
 import { computeUpcomingRepayments } from "@/lib/overview";
+import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -348,7 +349,7 @@ function DashboardPage() {
 
 /** Bills and loan EMIs falling due within the next 7 days. */
 function HousekeepingWidget() {
-  const { state, markBillPaid } = useStore();
+  const { state } = useStore();
   const dueBills = state.bills
     .filter((b) => b.status !== "Paid")
     .map((b) => ({ bill: b, days: daysUntil(b.dueDate) }))
@@ -393,9 +394,14 @@ function HousekeepingWidget() {
                 <Badge variant={days < 0 ? "destructive" : "outline"}>
                   {days < 0 ? `${Math.abs(days)} days overdue` : `${days} days`}
                 </Badge>
-                <Button size="sm" variant="outline" onClick={() => markBillPaid(bill.id)}>
-                  Mark paid
-                </Button>
+                <MarkBillPaidDialog
+                  bill={bill}
+                  trigger={
+                    <Button size="sm" variant="outline">
+                      Mark paid
+                    </Button>
+                  }
+                />
               </div>
             </div>
           );

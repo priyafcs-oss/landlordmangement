@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Field, Stat } from "@/components/Field";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,31 +19,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BillRow } from "@/components/BillRow";
-import {
-  Coins,
-  LineChart,
-  Plus,
-  Building2,
-  ArrowRight,
-  FileText,
-  LayoutGrid,
-  Receipt,
-  ListOrdered,
-  Landmark,
-  Calculator,
-  TrendingUp,
-  ShieldCheck,
-  FolderOpen,
-  Inbox as InboxIcon,
-  Users2,
-  Banknote,
-  ChevronDown,
-  ChevronRight,
-  Trash2,
-} from "lucide-react";
+import { Coins, LineChart, Plus, Building2, FileText, LayoutGrid, Receipt, ListOrdered, Landmark, Calculator, TrendingUp, ShieldCheck, FolderOpen, Inbox as InboxIcon, Users2, Banknote, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { fmtCurrency, todayISO } from "@/lib/calculations";
-import type { Asset, AssetType, GoldDetails, EtfDetails, BillType } from "@/lib/types";
+import type { Asset, AssetType, GoldDetails } from "@/lib/types";
 import { PropertyDialog, AiProposalsSection } from "@/components/PropertyShared";
 import { BillsBoard } from "@/components/BillsBoard";
 import { AddBillDialog } from "@/components/AddBillDialog";
@@ -304,7 +282,7 @@ function AddAssetTransactionDialog({ assetId }: { assetId: string }) {
 }
 
 function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClose: () => void }) {
-  const { state, markBillPaid, unmarkBillPaid, deleteBill, deleteAsset } = useStore();
+  const { state, deleteAsset } = useStore();
   const asset = state.assets.find((a) => a.id === assetId);
   const gold = asset ? state.goldDetails.find((g) => g.assetId === asset.id) : undefined;
   const etf = asset ? state.etfDetails.find((e) => e.assetId === asset.id) : undefined;
@@ -388,26 +366,7 @@ function AssetDetailSheet({ assetId, onClose }: { assetId: string | null; onClos
             <TabsContent value="bills" className="space-y-2 text-sm">
               {bills.length === 0 && <div className="text-xs text-muted-foreground">No bills for this asset.</div>}
               {bills.map((b) => (
-                <BillRow
-                  key={b.id}
-                  bill={b}
-                  onPaid={() => {
-                    markBillPaid(b.id);
-                    toast.success("Marked paid");
-                  }}
-                  onUnpaid={() => {
-                    if (confirm("Undo this payment? The linked transaction will be removed.")) {
-                      unmarkBillPaid(b.id);
-                      toast.success("Payment undone");
-                    }
-                  }}
-                  onDelete={() => {
-                    if (confirm(`Delete this ${b.billType} bill?`)) {
-                      deleteBill(b.id);
-                      toast.success("Bill removed");
-                    }
-                  }}
-                />
+                <BillRow key={b.id} bill={b} />
               ))}
             </TabsContent>
 

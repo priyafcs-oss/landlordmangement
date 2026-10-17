@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/Field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, billOwed } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
@@ -58,6 +58,17 @@ export function MarkBillPaidDialog({
     else setOpenState(o);
   };
 
+  // Fresh fields on every open, however it was opened — the Bills board opens it controlled, which
+  // never went through the reset below, so it showed the date/amount from when it first mounted.
+  useEffect(() => {
+    if (!open) return;
+    setPaidDate(todayISO());
+    setPaymentMethod("Bank Transfer");
+    setAmount(String(remainingOwed));
+    setNotes(bill.notes ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   const submit = () => {
     const parsed = parseFloat(amount);
     if (!(parsed > 0)) return toast.error("Enter an amount greater than zero");
@@ -77,15 +88,7 @@ export function MarkBillPaidDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (o) {
-          setPaidDate(todayISO());
-          setPaymentMethod("Bank Transfer");
-          setAmount(String(remainingOwed));
-          setNotes(bill.notes ?? "");
-        }
-      }}
+      onOpenChange={setOpen}
     >
       {!controlled && (
         <DialogTrigger asChild>
@@ -144,5 +147,80 @@ export function MarkBillPaidDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Confirmed undo-payment and delete for a bill — one wording and one toast wherever a bill can be
+ * unpaid or deleted (bill detail, Bills board, asset page). Each returns whether it went ahead. */
+export function useBillActions() {
+  const { unmarkBillPaid, deleteBill } = useStore();
+  return {
+    unpay: (bill: PropertyBill): boolean => {
+      if (!confirm("Undo this payment? The linked transaction will be removed.")) return false;
+      unmarkBillPaid(bill.id);
+      toast.success("Payment undone");
+      return true;
+    },
+    remove: (bill: PropertyBill, opts: { instalment?: boolean } = {}): boolean => {
+      if (!confirm(opts.instalment ? "Delete this instalment?" : `Delete this ${bill.billType} bill?`)) return false;
+      deleteBill(bill.id);
+      toast.success("Bill removed");
+      return true;
+    },
+  };
+}
+
+/**
+ * The one pay/unpay control for a bill: "Mark paid" (with date, method and amount) while unpaid;
+ * "Pay remainder" + Unpay while part-paid; the paid details + Unpay once paid. Used by the bill
+ * detail dialog and the asset page's bill rows (whose own "Mark Paid" used to skip the payment
+ * dialog and post today's date and the full amount).
+ */
+export function BillPaymentControl({ bill }: { bill: PropertyBill }) {
+  const { unpay } = useBillActions();
+  const payButton = (label: string) => (
+    <MarkBillPaidDialog
+      bill={bill}
+      trigger={
+        <Button size="sm" className="gap-1">
+          <CheckCircle2 className="h-3 w-3" /> {label}
+        </Button>
+      }
+    />
+  );
+  if (bill.status !== "Paid" && bill.status !== "Partial") return payButton("Mark paid");
+
+  const undoButton = (
+    <Button size="sm" variant="outline" className="gap-1" onClick={() => unpay(bill)}>
+      <Undo2 className="h-3 w-3" /> Unpay
+    </Button>
+  );
+  if (bill.status === "Partial") {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="text-right text-xs text-amber-700">
+          <div className="font-medium">
+            Partial — {fmtCurrency(bill.paidAmount ?? 0)} of {fmtCurrency(bill.amount)}
+          </div>
+          <div className="text-muted-foreground">{fmtCurrency(billOwed(bill))} still owed</div>
+        </div>
+        {payButton("Pay remainder")}
+        {undoButton}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <div className="text-right text-xs text-emerald-700">
+        <div className="flex items-center gap-1 font-medium">
+          <CheckCircle2 className="h-3 w-3" /> Paid {bill.paidDate}
+        </div>
+        <div className="text-muted-foreground">
+          {bill.paymentMethod ?? "—"}
+          {bill.paidAmount !== undefined && bill.paidAmount !== bill.amount ? ` · ${fmtCurrency(bill.paidAmount)}` : ""}
+        </div>
+      </div>
+      {undoButton}
+    </div>
   );
 }
