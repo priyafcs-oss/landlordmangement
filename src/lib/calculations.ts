@@ -128,70 +128,9 @@ export function billTypeToDefaultCategory(billType: BillType): ExpenseCategory {
   }
 }
 
-/** Maps the AI-extracted expense_category field (see extract-bill/parse-bill's ParsedBillFields)
- * onto the app's own ExpenseCategory taxonomy — mirrors mapExpenseCategory in
- * supabase/functions/parse-inbound-bill/core-parser.ts (kept in sync by hand; an edge function
- * can't be imported into the client build). Falls back to keyword matching against the vendor
- * name when the extracted string doesn't land exactly on one of the known categories, so a
- * genuine repair/trade/service bill gets something more specific than the generic default. */
-export function mapExpenseCategory(expenseCategory: string | undefined, vendor: string | undefined): ExpenseCategory {
-  const known: ExpenseCategory[] = [
-    "Advertising for Tenants",
-    "Body Corporate Fees",
-    "Cleaning",
-    "Council Rates",
-    "Gardening / Lawn Mowing",
-    "Insurance",
-    "Legal Fees",
-    "Pest Control",
-    "Repairs & Maintenance",
-    "Strata Levies",
-    "Water Charges",
-    "Electricity",
-    "Gas",
-    "Telephone / Internet",
-    "Tax Agent / Accounting Fees",
-    "Sundry Rental Expenses",
-  ];
-  const exact = known.find((c) => c.toLowerCase() === (expenseCategory ?? "").trim().toLowerCase());
-  if (exact) return exact;
-  const haystack = `${expenseCategory ?? ""} ${vendor ?? ""}`.toLowerCase();
-  // A trade/repair vendor's own name is a stronger, more specific signal than the generic utility
-  // substrings below — checked first so it can't be caught by "electric"/"gas" (a vendor like "BGS
-  // Airconditioning and Electricals" contains "electric" as a substring). Mirrors the identical fix
-  // in supabase/functions/parse-inbound-bill/core-parser.ts's own mapExpenseCategory — keep both in
-  // sync by hand, same as the EXPENSE_CATEGORIES duplicate there already is.
-  if (
-    haystack.includes("plumb") ||
-    haystack.includes("electrician") ||
-    haystack.includes("electrical") ||
-    haystack.includes("repair") ||
-    haystack.includes("maintenance") ||
-    haystack.includes("handyman") ||
-    haystack.includes("aircon") ||
-    haystack.includes("locksmith")
-  )
-    return "Repairs & Maintenance";
-  // Checked first — "water_rates"/"water rates" is a common AI-extracted category label for a
-  // water bill and contains "rates", which would otherwise be caught by the generic council-rates
-  // check first and misfile a Sydney Water-type bill as Council Rates.
-  if (haystack.includes("water")) return "Water Charges";
-  if (haystack.includes("council") || haystack.includes("rates")) return "Council Rates";
-  if (haystack.includes("strata") || haystack.includes("owners corp")) return "Strata Levies";
-  if (haystack.includes("body corp")) return "Body Corporate Fees";
-  if (haystack.includes("insur")) return "Insurance";
-  if (haystack.includes("electric") || haystack.includes("power")) return "Electricity";
-  if (haystack.includes("gas")) return "Gas";
-  if (haystack.includes("pest")) return "Pest Control";
-  if (haystack.includes("garden") || haystack.includes("lawn")) return "Gardening / Lawn Mowing";
-  if (haystack.includes("clean")) return "Cleaning";
-  if (haystack.includes("legal") || haystack.includes("lawyer") || haystack.includes("solicitor")) return "Legal Fees";
-  if (haystack.includes("account") || haystack.includes("tax agent") || haystack.includes("bookkeep")) return "Tax Agent / Accounting Fees";
-  if (haystack.includes("telco") || haystack.includes("internet") || haystack.includes("phone") || haystack.includes("telstra") || haystack.includes("optus"))
-    return "Telephone / Internet";
-  if (haystack.includes("advertis") || haystack.includes("marketing") || haystack.includes("listing")) return "Advertising for Tenants";
-  return "Sundry Rental Expenses";
-}
+/** Bill-type / expense-category classifiers for AI-extracted text — the same module the edge
+ * functions use (one copy, so the app and the server can't classify a bill differently). */
+export { mapBillType, mapExpenseCategory } from "../../supabase/functions/_shared/classify.ts";
 
 export function periodDays(freq: RentFrequency): number {
   if (freq === "Weekly") return 7;

@@ -33,6 +33,7 @@ import {
   expenseCategoryToTaxCategory,
   ANNUAL_COST_FIELD,
   CATEGORY_GROUPS,
+  mapBillType,
 } from "@/lib/calculations";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
@@ -53,19 +54,6 @@ import { documentLayout } from "@/lib/documentLayout";
 
 
 
-function mapBillType(category?: string): BillType {
-  const exact = BILL_TYPES.find((t) => t.toLowerCase() === (category ?? "").trim().toLowerCase());
-  if (exact) return exact;
-  const c = (category ?? "").toLowerCase();
-  if (c.includes("land tax")) return "Land Tax";
-  if (c.includes("council") || c.includes("rates")) return "Council Rates";
-  if (c.includes("water")) return "Water";
-  if (c.includes("strata")) return "Strata";
-  if (c.includes("insur")) return "Insurance";
-  if (c.includes("electric") || c.includes("power")) return "Electricity";
-  if (c.includes("gas")) return "Gas";
-  return "Other";
-}
 
 /**
  * Rich Add Bill dialog: a document pane (upload/drag-drop, previewed live) alongside a
@@ -200,7 +188,7 @@ export function AddBillDialog({
       sourceFileName: sourceFileName ?? f.sourceFileName,
       sourceFileData: sourceFileData ?? f.sourceFileData,
       propertyId: lockedPropertyId ?? matchedProperty?.id ?? f.propertyId,
-      billType: mapBillType(data.bill_category),
+      billType: mapBillType(data.bill_category, data.vendor),
       // expense_category is the richer, purpose-built field for this — bill_category only ever
       // has 7 fixed values (Water/Council/Strata/Insurance/Electricity/Gas/Other), so a repair,
       // pest control, gardening or other non-utility bill always fell back to the generic default
@@ -216,7 +204,7 @@ export function AddBillDialog({
       referenceNumber: data.reference_number ?? data.bpay_reference ?? f.referenceNumber,
       hasInstalments: (data.future_instalments?.length ?? 0) > 0,
     }));
-    const category = mapBillType(data.bill_category);
+    const category = mapBillType(data.bill_category, data.vendor);
     setLineItems(
       data.line_items?.length
         ? data.line_items.map((li) => blankBillLine(category, { description: li.description, amount: String(li.amount) }))
