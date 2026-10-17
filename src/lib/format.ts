@@ -42,7 +42,16 @@ export function fmtCompactCurrency(n: number, { axis = false }: { axis?: boolean
 /** A property's display name: its nickname (alias), else its address. Same value as the
  * `p.alias || p.address` it replaces everywhere (undefined when there's no property). */
 export function propertyLabel(p: { alias?: string; address: string }): string;
-export function propertyLabel(p: { alias?: string; address: string } | undefined | null): string | undefined;
-export function propertyLabel(p: { alias?: string; address: string } | undefined | null): string | undefined {
+export function propertyLabel(
+  p: { alias?: string; address: string } | undefined | null,
+): string | undefined;
+export function propertyLabel(
+  p: { alias?: string; address: string } | undefined | null,
+): string | undefined {
   return p ? p.alias || p.address : undefined;
+}
+
+/** "1 file", "3 files". */
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }

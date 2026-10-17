@@ -43,6 +43,20 @@ function isGoogleDrivePath(value: string): boolean {
   return value.startsWith(GDRIVE_PREFIX);
 }
 
+/** Distinct "storage:" files referenced anywhere in a value (the whole portfolio, in Settings) —
+ * documents saved to app storage rather than Google Drive, which "Move to Drive & organise"
+ * moves across. */
+export function countStorageFiles(value: unknown, seen = new Set<string>()): number {
+  if (typeof value === "string") {
+    if (isStoragePath(value)) seen.add(value);
+  } else if (Array.isArray(value)) {
+    for (const v of value) countStorageFiles(v, seen);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) countStorageFiles(v, seen);
+  }
+  return seen.size;
+}
+
 /** True for a value that already points at an uploaded file (either backend) — as opposed to raw
  * base64 that still needs uploading. */
 export function isStoredFileMarker(value: string): boolean {
@@ -108,19 +122,33 @@ export async function uploadDocumentFile(file: File): Promise<string> {
  * dialog reads the file as base64 anyway (for the inline Gemini request), so this lets it reuse
  * that instead of reading the File a second time.
  */
-export async function uploadDocumentBase64(base64: string, fileName: string | undefined): Promise<string> {
+export async function uploadDocumentBase64(
+  base64: string,
+  fileName: string | undefined,
+): Promise<string> {
   const uid = await currentUserId();
   if (!uid) return base64;
 
-  const { data, error } = await supabase.functions.invoke("drive-upload", {
+  const { data, error, response } = await supabase.functions.invoke("drive-upload", {
     body: { fileBase64: base64, fileName: fileName || "file", mimeType: mimeForFileName(fileName) },
   });
   if (!error && data?.marker) return data.marker as string;
   // Not connected to Drive (drive-upload returns a handled 422 for this, not a thrown error) —
-  // or connected but the upload itself failed — either way, fall back to the shared bucket.
+  // or connected but the link lapsed (409) or the upload itself failed — either way, fall back to
+  // the shared bucket. Only the never-connected case is silent: otherwise the landlord thinks
+  // their files are going to Drive, so say where this one went.
+  if (response?.status !== 422) {
+    toast.warning("Couldn't save to Google Drive — this file went to app storage instead", {
+      id: "drive-upload-fallback",
+      description:
+        "Settings → Connected Google Drive → Move to Drive & organise moves it across once Drive is working.",
+    });
+  }
   const path = `${uid}/${crypto.randomUUID()}-${sanitizeFileName(fileName || "file")}`;
   const blob = base64ToBlob(base64, mimeForFileName(fileName));
-  const { error: storageError } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, blob, { contentType: blob.type });
+  const { error: storageError } = await supabase.storage
+    .from(DOCUMENTS_BUCKET)
+    .upload(path, blob, { contentType: blob.type });
   if (storageError) {
     console.error("[storage] upload failed, falling back to inline base64", storageError);
     return base64;
@@ -162,14 +190,20 @@ async function fetchStorageBlob(storedValue: string): Promise<Blob | null> {
  * doc comment for why) using the real content type it reports back via the X-File-Content-Type
  * header on invoke()'s raw `response` — falls back to filename-based inference (matching every
  * other upload path in this app) only if that header is somehow missing. */
-async function fetchDriveBlob(storedValue: string, fileName: string | undefined): Promise<Blob | null> {
-  const { data, error, response } = await supabase.functions.invoke("drive-download", { body: { marker: storedValue } });
+async function fetchDriveBlob(
+  storedValue: string,
+  fileName: string | undefined,
+): Promise<Blob | null> {
+  const { data, error, response } = await supabase.functions.invoke("drive-download", {
+    body: { marker: storedValue },
+  });
   if (error || !(data instanceof Blob)) {
     console.error("[drive] failed to download", error);
     blobCache.delete(storedValue);
     // 409 = the landlord's Drive link has lapsed (see drive-download) — say so, once, rather than
     // every Drive document just silently showing as missing.
-    if (response?.status === 409) toast.error(await edgeFunctionErrorMessage(error), { id: "drive-link-expired" });
+    if (response?.status === 409)
+      toast.error(await edgeFunctionErrorMessage(error), { id: "drive-link-expired" });
     return null;
   }
   logFileAccess(storedValue);
@@ -179,28 +213,40 @@ async function fetchDriveBlob(storedValue: string, fileName: string | undefined)
 
 /** Resolves a legacy inline base64 payload, a "storage:<path>" marker, or a "gdrive:<fileId>"
  * marker to the file's actual bytes. */
-export async function resolveDocumentBlob(fileName: string | undefined, storedValue: string | undefined): Promise<Blob | null> {
+export async function resolveDocumentBlob(
+  fileName: string | undefined,
+  storedValue: string | undefined,
+): Promise<Blob | null> {
   if (!storedValue) return null;
-  if (!isStoragePath(storedValue) && !isGoogleDrivePath(storedValue)) return base64ToBlob(storedValue, mimeForFileName(fileName));
+  if (!isStoragePath(storedValue) && !isGoogleDrivePath(storedValue))
+    return base64ToBlob(storedValue, mimeForFileName(fileName));
 
   const cached = blobCache.get(storedValue);
   if (cached && cached.expiresAt > Date.now()) return cached.promise;
 
-  const promise = isGoogleDrivePath(storedValue) ? fetchDriveBlob(storedValue, fileName) : fetchStorageBlob(storedValue);
+  const promise = isGoogleDrivePath(storedValue)
+    ? fetchDriveBlob(storedValue, fileName)
+    : fetchStorageBlob(storedValue);
   blobCache.set(storedValue, { expiresAt: Date.now() + BLOB_CACHE_TTL_MS, promise });
   return promise;
 }
 
 /** Resolves a stored value to a browser-usable object URL — caller owns calling
  * URL.revokeObjectURL on it once done with it (see BillDocumentViewer's cleanup effect). */
-export async function resolveDocumentUrl(fileName: string | undefined, storedValue: string | undefined): Promise<string | null> {
+export async function resolveDocumentUrl(
+  fileName: string | undefined,
+  storedValue: string | undefined,
+): Promise<string | null> {
   const blob = await resolveDocumentBlob(fileName, storedValue);
   return blob ? URL.createObjectURL(blob) : null;
 }
 
 /** Resolves a stored value to raw bytes — for callers that need to hand a Uint8Array to something
  * other than the DOM (e.g. pdf-lib, see src/lib/leaseTemplate.ts), not just display it. */
-export async function resolveDocumentBytes(fileName: string | undefined, storedValue: string | undefined): Promise<Uint8Array | null> {
+export async function resolveDocumentBytes(
+  fileName: string | undefined,
+  storedValue: string | undefined,
+): Promise<Uint8Array | null> {
   const blob = await resolveDocumentBlob(fileName, storedValue);
   return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
 }
@@ -250,7 +296,8 @@ export const ACCEPTED_DOCUMENT_TYPES_LABEL = "PDF, JPG, PNG, WebP, GIF, HEIC";
  * both preview (isImageFileName) and forward to Gemini, not the browser's broad "image/*" (which
  * would let the OS picker offer formats like BMP/TIFF/SVG that aren't in IMAGE_EXT_MIME and would
  * hit the same "can't preview this" failure mode a non-image/PDF file did). */
-export const ACCEPTED_DOCUMENT_TYPES_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif";
+export const ACCEPTED_DOCUMENT_TYPES_ACCEPT =
+  "application/pdf,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif";
 
 export function mimeForFileName(fileName?: string): string {
   const ext = (fileName ?? "").toLowerCase().split(".").pop() ?? "";
@@ -297,7 +344,10 @@ export function base64ToBlob(base64: string, mime: string): Blob {
  * tab as a phishing mitigation. Callers invoke this synchronously from onClick handlers, so it
  * stays fire-and-forget (async) rather than something every one of those ~25 call sites has to
  * await. */
-export async function openBillDocument(fileName: string | undefined, storedValue: string | undefined) {
+export async function openBillDocument(
+  fileName: string | undefined,
+  storedValue: string | undefined,
+) {
   const url = await resolveDocumentUrl(fileName, storedValue);
   if (url) window.open(url, "_blank");
 }

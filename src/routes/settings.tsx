@@ -1,29 +1,61 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
-import { readFileAsDataUrl, formatFileSize, edgeFunctionErrorMessage } from "@/lib/files";
+import {
+  readFileAsDataUrl,
+  formatFileSize,
+  edgeFunctionErrorMessage,
+  countStorageFiles,
+} from "@/lib/files";
+import { plural } from "@/lib/format";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { User, FileText, ChevronDown, ChevronUp, X, Plus, ShieldCheck, HelpCircle, HardDrive, RefreshCw, Cloud } from "lucide-react";
+import {
+  User,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Plus,
+  ShieldCheck,
+  HelpCircle,
+  HardDrive,
+  RefreshCw,
+  Cloud,
+} from "lucide-react";
 import { inspectLeaseTemplate, LEASE_DATA_FIELDS, carryOverMapping } from "@/lib/leaseTemplate";
 import type { LeaseTemplateConfig, LeaseTemplateField, ContactPerson } from "@/lib/types";
 import { supabase } from "@/integrations/supabase/client";
 import { PasswordField } from "@/components/AuthGate";
-import { getStorageUsageSummary, getAccessActivity, type StorageUsageSummary, type AccessActivitySummary } from "@/lib/usage";
+import {
+  getStorageUsageSummary,
+  getAccessActivity,
+  type StorageUsageSummary,
+  type AccessActivitySummary,
+} from "@/lib/usage";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
       { title: "Settings — Landlord OS" },
-      { name: "description", content: "Manage your landlord profile and notification preferences." },
+      {
+        name: "description",
+        content: "Manage your landlord profile and notification preferences.",
+      },
     ],
   }),
   component: SettingsPage,
@@ -51,9 +83,15 @@ function SettingsPage() {
     });
   };
   const addAdditionalLandlord = () =>
-    setForm((f) => ({ ...f, additionalLandlords: [...(f.additionalLandlords ?? []), { name: "" }] }));
+    setForm((f) => ({
+      ...f,
+      additionalLandlords: [...(f.additionalLandlords ?? []), { name: "" }],
+    }));
   const removeAdditionalLandlord = (idx: number) =>
-    setForm((f) => ({ ...f, additionalLandlords: (f.additionalLandlords ?? []).filter((_, i) => i !== idx) }));
+    setForm((f) => ({
+      ...f,
+      additionalLandlords: (f.additionalLandlords ?? []).filter((_, i) => i !== idx),
+    }));
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
@@ -74,7 +112,10 @@ function SettingsPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name">
-              <Input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
+              <Input
+                value={form.fullName}
+                onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+              />
             </Field>
             <Field label="Email address">
               <Input
@@ -100,14 +141,23 @@ function SettingsPage() {
                   Co-owners on title — offered when generating a tenancy agreement.
                 </div>
               </div>
-              <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={addAdditionalLandlord}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 text-xs"
+                onClick={addAdditionalLandlord}
+              >
                 <Plus className="h-3 w-3" /> Add
               </Button>
             </div>
             {additionalLandlords.map((l, idx) => (
               <div key={idx} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
                 <Field label="Name">
-                  <Input value={l.name} onChange={(e) => updateAdditionalLandlord(idx, { name: e.target.value })} />
+                  <Input
+                    value={l.name}
+                    onChange={(e) => updateAdditionalLandlord(idx, { name: e.target.value })}
+                  />
                 </Field>
                 <Field label="Email">
                   <Input
@@ -210,7 +260,6 @@ function StorageUsageSettings() {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const maxCount = Math.max(1, ...(activity?.byDay.map((d) => d.count) ?? [0]));
@@ -224,7 +273,14 @@ function StorageUsageSettings() {
             <HardDrive className="h-4 w-4" />
             Storage &amp; File Usage
           </span>
-          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={load} disabled={loading} title="Refresh">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            onClick={load}
+            disabled={loading}
+            title="Refresh"
+          >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </CardTitle>
@@ -242,11 +298,16 @@ function StorageUsageSettings() {
             sub={summary ? `${summary.fileCount} file(s)` : undefined}
           />
           <UsageStatTile label="Downloads today" value={activity ? String(activity.today) : "—"} />
-          <UsageStatTile label="Downloads (7d)" value={activity ? String(activity.last7Days) : "—"} />
+          <UsageStatTile
+            label="Downloads (7d)"
+            value={activity ? String(activity.last7Days) : "—"}
+          />
         </div>
 
         <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">Real file downloads, last 14 days</div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground">
+            Real file downloads, last 14 days
+          </div>
           {activity && !hasActivity ? (
             <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
               No file downloads logged yet — open a document or photo to see activity here.
@@ -275,7 +336,12 @@ function StorageUsageSettings() {
         {hasActivity && (
           <Collapsible>
             <CollapsibleTrigger asChild>
-              <Button type="button" variant="outline" size="sm" className="w-full justify-between text-xs">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full justify-between text-xs"
+              >
                 View as table
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
@@ -352,13 +418,19 @@ function AccountSecuritySettings() {
           <div>
             <div className="text-sm font-medium">Login email</div>
             {currentEmail && (
-              <div className="text-xs text-muted-foreground">Currently signed in as {currentEmail}</div>
+              <div className="text-xs text-muted-foreground">
+                Currently signed in as {currentEmail}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[220px] flex-1">
               <Field label="New email address">
-                <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+                <Input
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
               </Field>
             </div>
             <Button disabled={emailBusy} onClick={changeEmail}>
@@ -400,6 +472,7 @@ interface DriveConnection {
  * supabase/functions/oauth-google-drive-start/-callback and
  * supabase/migrations/20260924100000_google_drive_connections.sql. */
 function ConnectedGoogleDriveSettings() {
+  const { state, refresh } = useStore();
   const [connection, setConnection] = useState<DriveConnection | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -411,7 +484,9 @@ function ConnectedGoogleDriveSettings() {
       .select("status, connected_email")
       .maybeSingle()
       .then(({ data }) => {
-        setConnection((data as DriveConnection | null) ?? { status: "disconnected", connected_email: null });
+        setConnection(
+          (data as DriveConnection | null) ?? { status: "disconnected", connected_email: null },
+        );
         setLoading(false);
       });
   };
@@ -430,9 +505,12 @@ function ConnectedGoogleDriveSettings() {
     }
     if (driveParam) {
       params.delete("drive");
-      window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`);
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`,
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const connect = async () => {
@@ -452,16 +530,41 @@ function ConnectedGoogleDriveSettings() {
     load();
   };
 
-  // Runs automatically after saves too (src/lib/db.ts) — this is for an on-demand full re-file.
+  // Filing runs automatically after saves too (src/lib/db.ts) — this button also moves anything
+  // that fell back to app storage (saved while Drive was disconnected or its link had lapsed).
   const organize = async () => {
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke("drive-organize");
+    const { data, error, response } = await supabase.functions.invoke("drive-organize", {
+      body: { moveStorage: true },
+    });
     setBusy(false);
-    if (error) return toast.error(await edgeFunctionErrorMessage(error));
-    toast.success(data?.moved ? `Moved ${data.moved} file${data.moved === 1 ? "" : "s"} into folders` : "Everything's already in its folder");
+    if (response?.status === 409) load(); // link lapsed — show the Reconnect state
+    if (data?.movedToDrive) {
+      // The in-memory portfolio still holds the old storage: markers; re-pull it so a later edit
+      // can't write one back over the new gdrive: marker.
+      await refresh();
+    }
+    if (error) {
+      const moved = data?.movedToDrive
+        ? `Moved ${plural(data.movedToDrive, "file")} to Drive, but `
+        : "";
+      return toast.error(
+        `${moved}${data?.moveFailed ? `${plural(data.moveFailed, "file")} couldn't be moved` : await edgeFunctionErrorMessage(error)}`,
+      );
+    }
+    const parts = [
+      data?.movedToDrive
+        ? `Moved ${plural(data.movedToDrive, "file")} from app storage to Drive`
+        : "",
+      data?.moved ? `filed ${plural(data.moved, "file")} into folders` : "",
+    ].filter(Boolean);
+    toast.success(
+      parts.length ? parts.join(", ") : "Everything's already in Drive and in its folder",
+    );
   };
 
   const isConnected = connection?.status === "connected";
+  const inAppStorage = useMemo(() => countStorageFiles(state), [state]);
 
   return (
     <Card>
@@ -477,17 +580,30 @@ function ConnectedGoogleDriveSettings() {
           Drive, not a shared bucket, filed by property, financial year and document type. The app
           can only see files it creates there, never anything else already in your Drive.
         </p>
+        {!loading && connection?.status !== "disconnected" && inAppStorage > 0 && (
+          <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs">
+            <span className="font-medium">
+              {plural(inAppStorage, "document")} in app storage, not Drive
+            </span>{" "}
+            — saved while Drive wasn't reachable.{" "}
+            {isConnected
+              ? "Move to Drive & organise moves them across."
+              : "Reconnect Drive, then use Move to Drive & organise."}
+          </div>
+        )}
         {loading ? (
           <div className="text-xs text-muted-foreground">Loading…</div>
         ) : isConnected ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
             <div>
               <div className="text-sm font-medium">Connected</div>
-              {connection?.connected_email && <div className="text-xs text-muted-foreground">{connection.connected_email}</div>}
+              {connection?.connected_email && (
+                <div className="text-xs text-muted-foreground">{connection.connected_email}</div>
+              )}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" disabled={busy} onClick={organize}>
-                Organise into folders
+                {busy ? "Working…" : "Move to Drive & organise"}
               </Button>
               <Button variant="outline" size="sm" disabled={busy} onClick={disconnect}>
                 Disconnect
@@ -499,8 +615,9 @@ function ConnectedGoogleDriveSettings() {
             <div>
               <div className="text-sm font-medium text-destructive">Link expired</div>
               <div className="text-xs text-muted-foreground">
-                Google stopped accepting this app's access{connection.connected_email ? ` to ${connection.connected_email}` : ""}.
-                Documents stored in Drive can't be opened until you reconnect the same Google account.
+                Google stopped accepting this app's access
+                {connection.connected_email ? ` to ${connection.connected_email}` : ""}. Documents
+                stored in Drive can't be opened until you reconnect the same Google account.
               </div>
             </div>
             <Button size="sm" disabled={busy} onClick={connect}>
@@ -531,9 +648,9 @@ function HowThisAppWorks() {
       </CardHeader>
       <CardContent className="space-y-2 text-xs text-muted-foreground">
         <p>
-          Your login is your own private portfolio — properties, tenants, bills, leases and
-          finances you add are visible only to your account, even if someone else signs up for
-          their own account on this same app.
+          Your login is your own private portfolio — properties, tenants, bills, leases and finances
+          you add are visible only to your account, even if someone else signs up for their own
+          account on this same app.
         </p>
         <p>
           Anyone who wants their own portfolio creates their own account from the "Create account"
@@ -541,9 +658,9 @@ function HowThisAppWorks() {
           into your existing portfolio.
         </p>
         <p>
-          Forgot your password? Use "Forgot password?" on the sign-in screen, or change it any
-          time above once you're signed in. You can sign out from the button in the top-right of
-          the header.
+          Forgot your password? Use "Forgot password?" on the sign-in screen, or change it any time
+          above once you're signed in. You can sign out from the button in the top-right of the
+          header.
         </p>
       </CardContent>
     </Card>
@@ -558,7 +675,11 @@ function TenantInfoStatementSettings() {
     if (!f) return;
     if (f.type !== "application/pdf") return toast.error("Please upload a PDF file");
     readFileAsDataUrl(f).then((fileData) => {
-      updateTenantInfoStatement({ fileName: f.name, fileData, uploadedAt: new Date().toISOString() });
+      updateTenantInfoStatement({
+        fileName: f.name,
+        fileData,
+        uploadedAt: new Date().toISOString(),
+      });
       toast.success("Tenant Information Statement uploaded");
     });
   };
@@ -577,14 +698,26 @@ function TenantInfoStatementSettings() {
           tenancy agreement every time you generate one, since it's required to accompany the
           agreement.
         </p>
-        <Input type="file" accept="application/pdf" onChange={(e) => handleUpload(e.target.files?.[0])} className="max-w-xs" />
+        <Input
+          type="file"
+          accept="application/pdf"
+          onChange={(e) => handleUpload(e.target.files?.[0])}
+          className="max-w-xs"
+        />
         {doc && (
           <div className="flex items-center justify-between rounded-md border bg-muted/30 p-3 text-xs">
             <div>
               <div className="font-medium">{doc.fileName}</div>
-              <div className="text-muted-foreground">Uploaded {new Date(doc.uploadedAt).toLocaleString("en-AU")}</div>
+              <div className="text-muted-foreground">
+                Uploaded {new Date(doc.uploadedAt).toLocaleString("en-AU")}
+              </div>
             </div>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => updateTenantInfoStatement(null)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => updateTenantInfoStatement(null)}
+            >
               Remove
             </Button>
           </div>
@@ -618,7 +751,11 @@ function LeaseTemplateSettings() {
         }
         // Most field names survive between revisions of the same form — only re-map what
         // actually changed, instead of making the landlord redo everything from scratch.
-        const { mapping: carried, carriedCount, droppedCount } = carryOverMapping(template?.mapping ?? {}, fields);
+        const {
+          mapping: carried,
+          carriedCount,
+          droppedCount,
+        } = carryOverMapping(template?.mapping ?? {}, fields);
         const next: LeaseTemplateConfig = {
           fileName: f.name,
           fileData,
@@ -673,7 +810,10 @@ function LeaseTemplateSettings() {
     setMapping((m) => {
       const current = m[ourKey];
       if (!current) return m;
-      return { ...m, [ourKey]: { ...current, valueMap: { ...(current.valueMap ?? {}), [fromValue]: toOption } } };
+      return {
+        ...m,
+        [ourKey]: { ...current, valueMap: { ...(current.valueMap ?? {}), [fromValue]: toOption } },
+      };
     });
   };
 
@@ -694,7 +834,8 @@ function LeaseTemplateSettings() {
   };
 
   const fieldByName = (name: string) => template?.fields.find((f) => f.name === name);
-  const checkboxFieldNames = template?.fields.filter((f) => f.type === "checkbox").map((f) => f.name) ?? [];
+  const checkboxFieldNames =
+    template?.fields.filter((f) => f.type === "checkbox").map((f) => f.name) ?? [];
 
   return (
     <Card>
@@ -727,17 +868,26 @@ function LeaseTemplateSettings() {
             <div className="rounded-md border bg-muted/30 p-3 text-xs">
               <div className="font-medium">{template.fileName}</div>
               <div className="text-muted-foreground">
-                Uploaded {new Date(template.uploadedAt).toLocaleString("en-AU")} • {template.fields.length}{" "}
-                fillable field(s) found
+                Uploaded {new Date(template.uploadedAt).toLocaleString("en-AU")} •{" "}
+                {template.fields.length} fillable field(s) found
               </div>
             </div>
 
             {template.fields.length > 0 && (
               <Collapsible open={showFields} onOpenChange={setShowFields}>
                 <CollapsibleTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" className="w-full justify-between">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-between"
+                  >
                     View raw field names found in this PDF
-                    {showFields ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    {showFields ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-2 max-h-56 overflow-y-auto rounded border">
@@ -771,7 +921,8 @@ function LeaseTemplateSettings() {
                   {LEASE_DATA_FIELDS.filter((f) => f.group === group).map((f) => {
                     const rowMapping = mapping[f.key];
                     const isChoice = rowMapping?.isChoiceGroup ?? false;
-                    const targetField = !isChoice && rowMapping ? fieldByName(rowMapping.pdfField) : undefined;
+                    const targetField =
+                      !isChoice && rowMapping ? fieldByName(rowMapping.pdfField) : undefined;
                     return (
                       <div key={f.key} className="rounded-md border p-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -802,7 +953,9 @@ function LeaseTemplateSettings() {
                               className="h-7 px-2 text-[11px] text-muted-foreground"
                               onClick={() => toggleChoiceGroup(f.key)}
                             >
-                              {isChoice ? "Use a single field instead" : "This is several checkboxes, not one field"}
+                              {isChoice
+                                ? "Use a single field instead"
+                                : "This is several checkboxes, not one field"}
                             </Button>
                           )}
                         </div>

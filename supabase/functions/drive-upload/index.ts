@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-import { getAccessTokenForOwner, uploadBytesToDrive } from "../_shared/googleDrive.ts";
+import { DRIVE_LINK_EXPIRED, getAccessTokenForOwner, isDriveLinkExpired, uploadBytesToDrive } from "../_shared/googleDrive.ts";
 
 interface UploadRequest {
   fileBase64?: string;
@@ -67,8 +67,11 @@ Deno.serve(async (req) => {
 
   const token = await getAccessTokenForOwner(supabase, userData.user.id, "self");
   if (!token) {
-    return new Response(JSON.stringify({ error: "Google Drive is not connected" }), {
-      status: 422,
+    // 409 (link lapsed) vs 422 (never connected): the client warns on the first, since the file
+    // is about to land in app storage instead of the Drive the landlord thinks they're using.
+    const expired = await isDriveLinkExpired(supabase, userData.user.id, "self");
+    return new Response(JSON.stringify({ error: expired ? DRIVE_LINK_EXPIRED : "Google Drive is not connected" }), {
+      status: expired ? 409 : 422,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
