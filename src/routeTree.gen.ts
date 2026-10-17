@@ -21,9 +21,11 @@ import { Route as ForecastsRouteImport } from './routes/forecasts'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as InspectionsRouteImport } from './routes/inspections'
 import { Route as MaintenanceRouteImport } from './routes/maintenance'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as ApiVisionRouteImport } from './routes/api/vision'
 import { Route as AssetsAssetIdRouteImport } from './routes/assets_.$assetId'
@@ -90,6 +92,11 @@ const MaintenanceRoute = MaintenanceRouteImport.update({
   path: '/maintenance',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProvidersRoute = ProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
@@ -103,6 +110,11 @@ const RentalRoute = RentalRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TransactionsRoute = TransactionsRouteImport.update({
@@ -144,9 +156,11 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
+  '/privacy': typeof PrivacyRoute
   '/providers': typeof ProvidersRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/transactions': typeof TransactionsRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets/$assetId': typeof AssetsAssetIdRoute
@@ -166,9 +180,11 @@ export interface FileRoutesByTo {
   '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
+  '/privacy': typeof PrivacyRoute
   '/providers': typeof ProvidersRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/transactions': typeof TransactionsRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets/$assetId': typeof AssetsAssetIdRoute
@@ -189,9 +205,11 @@ export interface FileRoutesById {
   '/inbox': typeof InboxRoute
   '/inspections': typeof InspectionsRoute
   '/maintenance': typeof MaintenanceRoute
+  '/privacy': typeof PrivacyRoute
   '/providers': typeof ProvidersRoute
   '/rental': typeof RentalRoute
   '/settings': typeof SettingsRoute
+  '/terms': typeof TermsRoute
   '/transactions': typeof TransactionsRoute
   '/api/vision': typeof ApiVisionRoute
   '/assets_/$assetId': typeof AssetsAssetIdRoute
@@ -213,9 +231,11 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inspections'
     | '/maintenance'
+    | '/privacy'
     | '/providers'
     | '/rental'
     | '/settings'
+    | '/terms'
     | '/transactions'
     | '/api/vision'
     | '/assets/$assetId'
@@ -235,9 +255,11 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inspections'
     | '/maintenance'
+    | '/privacy'
     | '/providers'
     | '/rental'
     | '/settings'
+    | '/terms'
     | '/transactions'
     | '/api/vision'
     | '/assets/$assetId'
@@ -257,9 +279,11 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/inspections'
     | '/maintenance'
+    | '/privacy'
     | '/providers'
     | '/rental'
     | '/settings'
+    | '/terms'
     | '/transactions'
     | '/api/vision'
     | '/assets_/$assetId'
@@ -280,9 +304,11 @@ export interface RootRouteChildren {
   InboxRoute: typeof InboxRoute
   InspectionsRoute: typeof InspectionsRoute
   MaintenanceRoute: typeof MaintenanceRoute
+  PrivacyRoute: typeof PrivacyRoute
   ProvidersRoute: typeof ProvidersRoute
   RentalRoute: typeof RentalRoute
   SettingsRoute: typeof SettingsRoute
+  TermsRoute: typeof TermsRoute
   TransactionsRoute: typeof TransactionsRoute
   ApiVisionRoute: typeof ApiVisionRoute
   AssetsAssetIdRoute: typeof AssetsAssetIdRoute
@@ -376,6 +402,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MaintenanceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/providers': {
       id: '/providers'
       path: '/providers'
@@ -395,6 +428,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/transactions': {
@@ -448,9 +488,11 @@ const rootRouteChildren: RootRouteChildren = {
   InboxRoute: InboxRoute,
   InspectionsRoute: InspectionsRoute,
   MaintenanceRoute: MaintenanceRoute,
+  PrivacyRoute: PrivacyRoute,
   ProvidersRoute: ProvidersRoute,
   RentalRoute: RentalRoute,
   SettingsRoute: SettingsRoute,
+  TermsRoute: TermsRoute,
   TransactionsRoute: TransactionsRoute,
   ApiVisionRoute: ApiVisionRoute,
   AssetsAssetIdRoute: AssetsAssetIdRoute,

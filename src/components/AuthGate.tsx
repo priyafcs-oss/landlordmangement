@@ -48,16 +48,16 @@ const authRpc = supabase as unknown as {
   rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
 };
 
-async function checkLockout(email: string): Promise<{ locked: boolean; retryAfterSeconds: number }> {
+async function checkLockout(
+  email: string,
+): Promise<{ locked: boolean; retryAfterSeconds: number }> {
   const { data, error } = await authRpc.rpc("check_login_lockout", { p_email: email });
   if (error) {
     console.error("[auth] lockout check failed", error);
     return { locked: false, retryAfterSeconds: 0 };
   }
   const row = (Array.isArray(data) ? data[0] : data) as
-    | { locked?: boolean; retry_after_seconds?: number }
-    | null
-    | undefined;
+    { locked?: boolean; retry_after_seconds?: number } | null | undefined;
   return { locked: !!row?.locked, retryAfterSeconds: row?.retry_after_seconds ?? 0 };
 }
 
@@ -124,7 +124,9 @@ function SignInScreen() {
       const lockout = await checkLockout(email);
       if (lockout.locked) {
         const minutes = Math.max(1, Math.ceil(lockout.retryAfterSeconds / 60));
-        toast.error(`Too many failed attempts — try again in ${minutes} minute${minutes === 1 ? "" : "s"}`);
+        toast.error(
+          `Too many failed attempts — try again in ${minutes} minute${minutes === 1 ? "" : "s"}`,
+        );
         return;
       }
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -176,7 +178,7 @@ function SignInScreen() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -191,7 +193,12 @@ function SignInScreen() {
             <>
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
               </div>
               <PasswordField
                 label="Password"
@@ -229,7 +236,12 @@ function SignInScreen() {
               </p>
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
               </div>
               <PasswordField
                 label="Password"
@@ -257,7 +269,12 @@ function SignInScreen() {
               </p>
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                />
               </div>
               <Button className="w-full" disabled={busy} onClick={sendReset}>
                 Send reset link
@@ -273,6 +290,14 @@ function SignInScreen() {
           )}
         </CardContent>
       </Card>
+      <nav className="flex gap-4 text-xs text-muted-foreground">
+        <a href="/privacy" className="hover:text-foreground">
+          Privacy Policy
+        </a>
+        <a href="/terms" className="hover:text-foreground">
+          Terms of Service
+        </a>
+      </nav>
     </div>
   );
 }

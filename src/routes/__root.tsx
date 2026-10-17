@@ -18,6 +18,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { AppHeader } from "@/components/AppHeader";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthGate } from "@/components/AuthGate";
+import { isPublicPath } from "@/lib/publicPaths";
 
 function NotFoundComponent() {
   return (
@@ -26,7 +27,10 @@ function NotFoundComponent() {
         <h1 className="text-7xl font-bold text-foreground">404</h1>
         <p className="mt-2 text-sm text-muted-foreground">Page not found.</p>
         <div className="mt-6">
-          <Link to="/" className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
             Go home
           </Link>
         </div>
@@ -42,7 +46,9 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold">This page didn't load</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{error instanceof Error ? error.message : String(error)}</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {error instanceof Error ? error.message : String(error)}
+        </p>
         <button
           className="mt-4 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
           onClick={() => {
@@ -63,13 +69,22 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Dashboard — Landlord OS" },
-      { name: "description", content: "Portfolio wealth, cash flow and proactive compliance alerts." },
+      {
+        name: "description",
+        content: "Portfolio wealth, cash flow and proactive compliance alerts.",
+      },
       { property: "og:title", content: "Dashboard — Landlord OS" },
-      { property: "og:description", content: "Portfolio wealth, cash flow and proactive compliance alerts." },
+      {
+        property: "og:description",
+        content: "Portfolio wealth, cash flow and proactive compliance alerts.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Dashboard — Landlord OS" },
-      { name: "twitter:description", content: "Portfolio wealth, cash flow and proactive compliance alerts." },
+      {
+        name: "twitter:description",
+        content: "Portfolio wealth, cash flow and proactive compliance alerts.",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -99,9 +114,10 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const isPublic = pathname.startsWith("/maintenance");
+  const isPublic = isPublicPath(pathname);
   // The public tenant maintenance-request form has no login of its own (see the matching RLS
-  // migration's anon INSERT-only carve-out) — everything else requires a session.
+  // migration's anon INSERT-only carve-out), and Google's OAuth verification needs the privacy
+  // policy and terms at public URLs — everything else requires a session.
   if (isPublic) {
     return (
       <QueryClientProvider client={queryClient}>
