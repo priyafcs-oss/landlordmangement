@@ -46,6 +46,7 @@ import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { formatTime12h, propertyLabel } from "@/lib/format";
 import { ALERT_WINDOW_DAYS } from "@/lib/constants";
 import { PropertyOptions } from "@/components/PropertyOptions";
+import { DueInBadge } from "@/components/StatusBadges";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -377,9 +378,7 @@ function HousekeepingWidget() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge variant={days < 0 ? "destructive" : "outline"}>
-                  {days < 0 ? `${Math.abs(days)} days overdue` : `${days} days`}
-                </Badge>
+                <DueInBadge days={days} />
                 <MarkBillPaidDialog
                   bill={bill}
                   trigger={
@@ -403,7 +402,7 @@ function HousekeepingWidget() {
                 {loan?.isDirectDebit ? " • direct debit" : ""}
               </div>
             </div>
-            <Badge variant="outline">{days} days</Badge>
+            <DueInBadge days={days} />
           </div>
         ))}
       </CardContent>

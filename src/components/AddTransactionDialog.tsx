@@ -7,15 +7,7 @@ import { Field } from "@/components/Field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Trash2, ChevronDown, ChevronRight, Eye, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
-import { fmtCurrency, todayISO, CATEGORY_GROUPS, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory, fmtModified } from "@/lib/calculations";
+import { fmtCurrency, todayISO, INCOME_CATEGORIES, expenseCategoryToTaxCategory, mapExpenseCategory, fmtModified } from "@/lib/calculations";
 import { planRecharge, rechargeChargeType } from "@/lib/recharge";
 import { canRechargeLine, rechargeBlockedReason } from "@/lib/waterSplit";
 import { RechargeControl } from "@/components/RechargeControl";
@@ -44,6 +36,8 @@ import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { documentLayout } from "@/lib/documentLayout";
 import { PropertyOptions } from "@/components/PropertyOptions";
 import { propertyLabel } from "@/lib/format";
+import { DwellingSelect } from "@/components/DwellingSelect";
+import { ExpenseCategoryOptions } from "@/components/ExpenseCategoryOptions";
 
 /** How this transaction was recorded — shown read-only next to the title, separate from the
  * invoice/file section below, so "where did this come from" and "what document backs it" are
@@ -821,21 +815,7 @@ export function AddTransactionDialog({
                     </div>
                   </Field>
                 ) : propertyUnits.length > 0 ? (
-                  <Field label="Dwelling">
-                    <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Shared / whole property" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={SHARED_UNIT}>Shared / whole property</SelectItem>
-                        {propertyUnits.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
+                  <DwellingSelect units={propertyUnits} value={form.unitId} onChange={(v) => setForm((f) => ({ ...f, unitId: v }))} />
                 ) : !expense ? (
                   <div className="flex items-end">
                     <button type="button" className="text-xs text-primary underline" onClick={() => setSplitting(true)}>
@@ -910,16 +890,7 @@ export function AddTransactionDialog({
                                   {c}
                                 </SelectItem>
                               ))
-                            : Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
-                                <SelectGroup key={group}>
-                                  <SelectLabel>{group}</SelectLabel>
-                                  {categories.map((c) => (
-                                    <SelectItem key={c} value={c}>
-                                      {c}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              ))}
+                            : <ExpenseCategoryOptions />}
                         </SelectContent>
                       </Select>
                     </Field>

@@ -1,11 +1,12 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, Paperclip, Receipt, Trash2 } from "lucide-react";
-import { fmtCurrency, fmtModified, isBillOverdue } from "@/lib/calculations";
+import { fmtCurrency, fmtModified } from "@/lib/calculations";
 import type { PropertyBill } from "@/lib/types";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { BillPaymentControl, useBillActions } from "@/components/MarkBillPaidDialog";
 import { openBillDocument } from "@/lib/files";
+import { BillStatusBadge } from "@/components/StatusBadges";
 
 export function BillRow({
   bill,
@@ -15,7 +16,6 @@ export function BillRow({
   /** When set (e.g. on a portfolio-wide list), shown alongside the due date so bills aren't ambiguous. */
   propertyLabel?: string;
 }) {
-  const overdue = isBillOverdue(bill);
   const { remove } = useBillActions();
   return (
     <div className="rounded-md border p-3">
@@ -28,9 +28,7 @@ export function BillRow({
               <div className="flex flex-wrap items-center gap-2">
                 <Receipt className="h-4 w-4 text-muted-foreground" />
                 <span className="font-medium">{bill.billType}</span>
-                <Badge variant={bill.status === "Paid" ? "secondary" : overdue ? "destructive" : "outline"}>
-                  {overdue ? "Overdue" : bill.status}
-                </Badge>
+                <BillStatusBadge bill={bill} />
                 {bill.recurrenceMonths ? <Badge variant="outline">Every {bill.recurrenceMonths}mo</Badge> : null}
                 {bill.label ? <Badge variant="secondary">{bill.label}</Badge> : null}
               </div>

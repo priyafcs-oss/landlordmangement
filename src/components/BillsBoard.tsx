@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -15,7 +15,7 @@ import { BillDetailDialog } from "@/components/BillDetailDialog";
 import { MarkBillPaidDialog, useBillActions } from "@/components/MarkBillPaidDialog";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { CheckCircle2, ChevronDown, ChevronRight, MoreVertical, PanelRightClose, PanelRightOpen, Receipt, Search, Undo2 } from "lucide-react";
-import { fmtCurrency, todayISO, addDays, CATEGORY_GROUPS, taxTreatmentLabel, billOwed, isBillOverdue } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, taxTreatmentLabel, billOwed, isBillOverdue } from "@/lib/calculations";
 import type { AssetType, BillType, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { bucketBy } from "@/lib/group";
@@ -23,6 +23,7 @@ import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { usePersistedToggle } from "@/lib/hooks";
 import { BILL_TYPES } from "@/lib/constants";
 import { propertyLabel } from "@/lib/format";
+import { ExpenseCategoryOptions } from "@/components/ExpenseCategoryOptions";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
 const TYPE_COLORS = ["bg-sky-500", "bg-violet-500", "bg-amber-500", "bg-emerald-500", "bg-rose-500", "bg-cyan-500", "bg-slate-500"];
@@ -239,16 +240,7 @@ export function BillsBoard({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">All categories</SelectItem>
-              {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
-                <SelectGroup key={group}>
-                  <SelectLabel>{group}</SelectLabel>
-                  {categories.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
+              {<ExpenseCategoryOptions />}
             </SelectContent>
           </Select>
           <Select value={providerFilterId} onValueChange={setProviderFilterId}>

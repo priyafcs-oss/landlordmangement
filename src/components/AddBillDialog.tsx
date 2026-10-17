@@ -6,15 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -25,17 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, ChevronDown, ChevronRight, CheckCircle2, Mail } from "lucide-react";
 import { toast } from "sonner";
-import {
-  fmtCurrency,
-  todayISO,
-  billTypeToDefaultCategory,
-  mapExpenseCategory,
-  expenseCategoryToTaxCategory,
-  ANNUAL_COST_FIELD,
-  CATEGORY_GROUPS,
-  mapBillType,
-  round2,
-} from "@/lib/calculations";
+import { fmtCurrency, todayISO, billTypeToDefaultCategory, mapExpenseCategory, expenseCategoryToTaxCategory, ANNUAL_COST_FIELD, mapBillType, round2 } from "@/lib/calculations";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { BillLineItemsEditor } from "@/components/BillLineItemsEditor";
@@ -54,6 +36,8 @@ import { BILL_TYPES, SHARED_UNIT, uid } from "@/lib/constants";
 import { documentLayout } from "@/lib/documentLayout";
 import { PropertyOptions } from "@/components/PropertyOptions";
 import { propertyLabel } from "@/lib/format";
+import { DwellingSelect } from "@/components/DwellingSelect";
+import { ExpenseCategoryOptions } from "@/components/ExpenseCategoryOptions";
 
 
 
@@ -557,21 +541,7 @@ export function AddBillDialog({
               </div>
               {propertyUnits.length > 0 && (
                 <div className="sm:col-span-2">
-                  <Field label="Dwelling">
-                    <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Shared / whole property" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={SHARED_UNIT}>Shared / whole property</SelectItem>
-                        {propertyUnits.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
+                  <DwellingSelect units={propertyUnits} value={form.unitId} onChange={(v) => setForm((f) => ({ ...f, unitId: v }))} />
                 </div>
               )}
               <Field label="Bill type">
@@ -597,16 +567,7 @@ export function AddBillDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.entries(CATEGORY_GROUPS).map(([group, categories]) => (
-                      <SelectGroup key={group}>
-                        <SelectLabel>{group}</SelectLabel>
-                        {categories.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
+                    {<ExpenseCategoryOptions />}
                   </SelectContent>
                 </Select>
               </Field>

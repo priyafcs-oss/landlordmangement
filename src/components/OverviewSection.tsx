@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -54,6 +53,7 @@ import type {
   Asset,
   Entity,
 } from "@/lib/types";
+import { DueInBadge } from "@/components/StatusBadges";
 
 export interface OverviewSectionProps {
   scopeLabel: string;
@@ -258,9 +258,7 @@ export function OverviewSection({
                         <span className="min-w-0 flex-1 truncate">
                           {bill.billType} — {fmtCurrency(billOwed(bill))}
                         </span>
-                        <Badge variant={days < 0 ? "destructive" : "outline"} className="shrink-0">
-                          {days < 0 ? `${Math.abs(days)}d overdue` : `${days}d`}
-                        </Badge>
+                        <DueInBadge days={days} compact className="shrink-0" />
                       </div>
                     ))}
                   </div>

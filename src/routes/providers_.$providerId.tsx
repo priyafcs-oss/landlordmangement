@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ArrowLeft, Pencil, Trash2, Eye, Plus, Receipt, FileWarning, FolderOpen, FileSignature } from "lucide-react";
-import { fmtCurrency, daysUntil, billOwed, isBillOverdue } from "@/lib/calculations";
+import { fmtCurrency, daysUntil, billOwed } from "@/lib/calculations";
 import { openBillDocument, readFileAsDataUrl } from "@/lib/files";
 import { ProviderDialog, ProviderRow, ProviderAgreementDialog } from "@/components/PropertyShared";
 import { agreementsForProvider } from "@/lib/providerAgreements";
@@ -26,6 +26,7 @@ import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
 import { PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { ALERT_WINDOW_DAYS } from "@/lib/constants";
 import { propertyLabel } from "@/lib/format";
+import { BillStatusBadge } from "@/components/StatusBadges";
 
 export const Route = createFileRoute("/providers_/$providerId")({
   head: () => ({
@@ -420,9 +421,7 @@ function ProviderProfilePage() {
                       {propertyLabel(prop) || "Unassigned"} · Due {b.dueDate}
                     </div>
                   </div>
-                  <Badge variant={isBillOverdue(b) ? "destructive" : "outline"} className="shrink-0 text-[10px]">
-                    {isBillOverdue(b) ? "Overdue" : b.status}
-                  </Badge>
+                  <BillStatusBadge bill={b} className="shrink-0 text-[10px]" />
                 </div>
               );
             })}

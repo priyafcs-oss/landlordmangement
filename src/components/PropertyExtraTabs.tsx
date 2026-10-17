@@ -41,30 +41,14 @@ import type {
 } from "@/lib/types";
 import { COMPLIANCE_CERT_TYPES } from "@/lib/types";
 import { SHARED_UNIT, ALERT_WINDOW_DAYS } from "@/lib/constants";
+import { DwellingSelect } from "@/components/DwellingSelect";
 
 
 /** Premises/dwelling scope select, shared by every dialog in this file — only rendered when the
  * property actually has units on file, same "shared vs a specific dwelling" pattern used across
  * AddTransactionDialog. */
 function UnitScopeField({ prop, unitId, onChange }: { prop: Property; unitId: string; onChange: (v: string) => void }) {
-  if (!prop.units || prop.units.length === 0) return null;
-  return (
-    <Field label="Premises / scope">
-      <Select value={unitId} onValueChange={onChange}>
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={SHARED_UNIT}>Whole property / shared</SelectItem>
-          {prop.units.map((u) => (
-            <SelectItem key={u.id} value={u.id}>
-              {u.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
-  );
+  return <DwellingSelect units={prop.units} value={unitId} onChange={onChange} label="Premises / scope" />;
 }
 
 /* ------------------------------------------------------------------------------------------- */

@@ -74,6 +74,7 @@ import { findProvider } from "@/lib/providerMatch";
 import { emailTenant, leaseEmail } from "@/lib/tenantEmails";
 import { fmtCompactCurrency, fmtCurrencyWhole, propertyLabel } from "@/lib/format";
 import { PropertyOptions } from "@/components/PropertyOptions";
+import { DwellingSelect } from "@/components/DwellingSelect";
 
 
 interface DomainSuggestResult {
@@ -6825,21 +6826,7 @@ export function ProviderDialog({
             </Select>
           </Field>
           {propertyUnits.length > 0 && (
-            <Field label="Dwelling">
-              <Select value={form.unitId} onValueChange={(v) => setForm((f) => ({ ...f, unitId: v }))}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={SHARED_UNIT}>Whole property</SelectItem>
-                  {propertyUnits.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+            <DwellingSelect units={propertyUnits} value={form.unitId} onChange={(v) => setForm((f) => ({ ...f, unitId: v }))} />
           )}
           <Field label="Email">
             <Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
