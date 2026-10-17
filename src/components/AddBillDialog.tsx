@@ -39,6 +39,8 @@ import {
 import { buildRechargeInvoice } from "@/lib/recharge";
 import { canRechargeLine, classifyWaterCharge, lastFixedWaterCharge, needsWaterSplit } from "@/lib/waterSplit";
 import { WaterSplitPanel } from "@/components/WaterSplitPanel";
+import { ProviderPortalLogin } from "@/components/ProviderPortalLogin";
+import { extractEmailLinks, linkifySegments, pickBillLink, portalOrigin } from "@/lib/emailLinks";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import {
   openBillDocument,
@@ -205,6 +207,9 @@ export function AddBillDialog({
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
+  // A "your bill is ready" email with no PDF — its "View bill" link is the way to the actual bill.
+  const emailBillLink = pickBillLink(extractEmailLinks(initialProposal?.sourceEmailBody));
+  const emailPortalUrl = emailBillLink ? portalOrigin(emailBillLink.url) : undefined;
   // On a water bill only the usage line can go to the tenant — a box ticked on a line later
   // retyped as a fixed charge is ignored rather than silently billing the tenant for it.
   const rechargeable = (li: LineItemRow) => canRechargeLine(form.billType, li.category, li.description);
@@ -503,6 +508,7 @@ export function AddBillDialog({
         if (!existingProvider.abn && payload.vendorAbn) patch.abn = payload.vendorAbn;
         if (!existingProvider.address && payload.vendorAddress) patch.address = payload.vendorAddress;
       }
+      if (!existingProvider.portalUrl && !patch.portalUrl && emailPortalUrl) patch.portalUrl = emailPortalUrl;
       // Same gap-filling idea for the category this vendor is usually filed under — never
       // overwrites a default the landlord (or an earlier bill) already set.
       if (!existingProvider.defaultCategory) patch.defaultCategory = form.category;
@@ -512,7 +518,7 @@ export function AddBillDialog({
       resolvedProviderId = addProvider({
         name: form.providerName.trim(),
         role: payload && form.billType === "Council Rates" ? "Council" : "Other",
-        portalUrl: form.portalUrl || undefined,
+        portalUrl: form.portalUrl || emailPortalUrl,
         portalUsername: form.portalUsername || undefined,
         passwordNote: form.passwordNote || undefined,
         email: payload?.vendorEmail,
@@ -740,9 +746,23 @@ export function AddBillDialog({
                 <div className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
                   No bill PDF came with this email — this is the email it was read from. Drop the PDF above to attach it.
                 </div>
+                {(emailBillLink || (initialProposal.payload as BillProposalPayload).providerId) && (
+                  <ProviderPortalLogin
+                    providerId={(initialProposal.payload as BillProposalPayload).providerId}
+                    billUrl={emailBillLink?.url}
+                  />
+                )}
                 <pre className="max-h-[420px] min-h-[300px] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-2 font-sans text-xs">
                   {initialProposal.sourceSubject ? `${initialProposal.sourceSubject}\n\n` : ""}
-                  {initialProposal.sourceEmailBody}
+                  {linkifySegments(initialProposal.sourceEmailBody).map((seg, i) =>
+                    "url" in seg ? (
+                      <a key={i} href={seg.url} target="_blank" rel="noreferrer" className="break-all text-primary underline">
+                        {seg.url}
+                      </a>
+                    ) : (
+                      seg.text
+                    ),
+                  )}
                 </pre>
               </div>
             ) : (
