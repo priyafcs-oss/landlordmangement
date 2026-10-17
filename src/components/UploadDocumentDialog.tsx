@@ -25,6 +25,7 @@ import {
   edgeFunctionErrorMessage,
 } from "@/lib/files";
 import { toast } from "sonner";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 /** Same list PropertyNoteDialog uses (src/components/PropertyExtraTabs.tsx) — kept in sync there
  * rather than shared, since that's the only other place it's used and pulling it into a shared
@@ -350,11 +351,7 @@ export function UploadDocumentDialog({
                       <SelectValue placeholder="Property" />
                     </SelectTrigger>
                     <SelectContent>
-                      {state.properties.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.alias || p.address}
-                        </SelectItem>
-                      ))}
+                      <PropertyOptions />
                     </SelectContent>
                   </Select>
                   <Select value={manualCategory} onValueChange={setManualCategory}>

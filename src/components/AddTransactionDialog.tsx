@@ -42,6 +42,8 @@ import { SHARED_UNIT, uid } from "@/lib/constants";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { documentLayout } from "@/lib/documentLayout";
+import { PropertyOptions } from "@/components/PropertyOptions";
+import { propertyLabel } from "@/lib/format";
 
 /** How this transaction was recorded — shown read-only next to the title, separate from the
  * invoice/file section below, so "where did this come from" and "what document backs it" are
@@ -793,11 +795,7 @@ export function AddTransactionDialog({
                         <SelectValue placeholder="Select property" />
                       </SelectTrigger>
                       <SelectContent>
-                        {state.properties.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.alias || p.address}
-                          </SelectItem>
-                        ))}
+                        <PropertyOptions />
                       </SelectContent>
                     </Select>
                   </Field>
@@ -812,7 +810,7 @@ export function AddTransactionDialog({
                         <SelectContent>
                           {state.properties.filter((p) => p.id !== form.propertyId).map((p) => (
                             <SelectItem key={p.id} value={p.id}>
-                              {p.alias || p.address}
+                              {propertyLabel(p)}
                             </SelectItem>
                           ))}
                         </SelectContent>

@@ -32,6 +32,7 @@ import { AddLoanDialog } from "@/components/AddLoanDialog";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { LoanStatementHistory } from "@/components/LoanStatementHistory";
 import { toast } from "sonner";
+import { propertyLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/entities_/$entityId")({
   head: () => ({
@@ -327,7 +328,7 @@ function EntityOverviewTab({
                 className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm hover:bg-muted/50"
               >
                 <div className="min-w-0">
-                  <div className="truncate font-medium">{p.alias || p.address}</div>
+                  <div className="truncate font-medium">{propertyLabel(p)}</div>
                   {p.alias && (
                     <div className="truncate text-xs text-muted-foreground">{p.address}</div>
                   )}
@@ -358,7 +359,7 @@ function EntityBankAccountsTab({
   const loans = state.loans.filter((l) => propertyIdSet.has(l.propertyId));
   const propertyName = (propertyId: string) => {
     const p = state.properties.find((pr) => pr.id === propertyId);
-    return p ? p.alias || p.address : "Unknown property";
+    return p ? propertyLabel(p) : "Unknown property";
   };
 
   return (

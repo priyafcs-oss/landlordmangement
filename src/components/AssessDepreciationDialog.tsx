@@ -11,6 +11,7 @@ import { fmtCurrency, itemAnnualClaims, taxTreatmentLabel, expenseCategoryToTaxC
 import { openBillDocument } from "@/lib/files";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import type { DepreciationItem, Expense } from "@/lib/types";
+import { propertyLabel } from "@/lib/format";
 
 const DIV_40_CATEGORY = "Depreciation - Plant & Equipment (Div 40)" as const;
 const DIV_43_CATEGORY = "Capital Works Deduction (Div 43)" as const;
@@ -105,7 +106,7 @@ export function AssessDepreciationDialog({ expense, onClose }: { expense: Expens
         <div className="grid grid-cols-2 gap-2 rounded border p-3 text-sm">
           <div>
             <div className="text-xs text-muted-foreground">Property</div>
-            <div className="font-medium">{property?.alias || property?.address || "—"}</div>
+            <div className="font-medium">{propertyLabel(property) || "—"}</div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Amount</div>

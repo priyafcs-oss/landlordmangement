@@ -66,6 +66,7 @@ import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import { AddLoanStatementDialog } from "@/components/AddLoanStatementDialog";
 import { LoanCompiledFeed } from "@/components/LoanCompiledFeed";
 import { OverviewSection } from "@/components/OverviewSection";
+import { propertyLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/assets_/$assetId")({
   head: () => ({
@@ -351,7 +352,7 @@ function PropertyAssetPage() {
         {!sidebarCollapsed && (
           <div className="mb-3 flex items-start justify-between gap-1">
             <div>
-              <div className="font-semibold leading-tight">{prop.alias || prop.address}</div>
+              <div className="font-semibold leading-tight">{propertyLabel(prop)}</div>
               {prop.alias && <div className="text-xs text-muted-foreground">{prop.address}</div>}
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -438,7 +439,7 @@ function PropertyAssetPage() {
       <div className="min-w-0 flex-1 p-4 sm:p-6">
         {section === "overview" && (
           <OverviewSection
-            scopeLabel={prop.alias || prop.address}
+            scopeLabel={propertyLabel(prop)}
             properties={[prop]}
             loans={propertyLoans}
             expenses={expenses}

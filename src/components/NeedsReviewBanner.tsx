@@ -10,6 +10,7 @@ import { fmtCurrency, todayISO } from "@/lib/calculations";
 import { toast } from "sonner";
 import { AddTransactionDialog } from "@/components/AddTransactionDialog";
 import { DocumentLink } from "@/components/DocumentLink";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 function DocumentViewLinks({
   fileName,
@@ -113,11 +114,7 @@ export function NeedsReviewBanner() {
                           <SelectValue placeholder="Assign property" />
                         </SelectTrigger>
                         <SelectContent>
-                          {state.properties.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.address}
-                            </SelectItem>
-                          ))}
+                          <PropertyOptions />
                         </SelectContent>
                       </Select>
                     </div>

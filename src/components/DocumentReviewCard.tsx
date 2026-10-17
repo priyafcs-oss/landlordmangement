@@ -8,6 +8,7 @@ import { useStore } from "@/lib/store";
 import { openBillDocument } from "@/lib/files";
 import { ChevronDown, ChevronRight, ExternalLink, RefreshCw } from "lucide-react";
 import type { AiIntakeProposal } from "@/lib/types";
+import { propertyLabel } from "@/lib/format";
 
 /** Set by `ProposalReviewDialog` (the after-upload review popup) so its "Review later" action is
  * reachable from `ReviewActionsBar` below — unset (no button rendered) for every other place
@@ -185,7 +186,7 @@ export function DocumentReviewCard({ proposal, children }: { proposal: AiIntakeP
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
             <Badge variant="secondary">{KIND_LABELS[proposal.kind] ?? proposal.kind}</Badge>
             {(property || proposal.rawPropertyAddress) && (
-              <span className="font-medium">{property?.alias || property?.address || proposal.rawPropertyAddress}</span>
+              <span className="font-medium">{propertyLabel(property) || proposal.rawPropertyAddress}</span>
             )}
             {meta.map((m) => (
               <span key={m.label} className="text-muted-foreground">

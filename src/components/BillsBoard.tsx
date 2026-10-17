@@ -22,6 +22,7 @@ import { bucketBy } from "@/lib/group";
 import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { usePersistedToggle } from "@/lib/hooks";
 import { BILL_TYPES } from "@/lib/constants";
+import { propertyLabel } from "@/lib/format";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
 const TYPE_COLORS = ["bg-sky-500", "bg-violet-500", "bg-amber-500", "bg-emerald-500", "bg-rose-500", "bg-cyan-500", "bg-slate-500"];
@@ -75,7 +76,7 @@ export function BillsBoard({
   const assetTypeOf = (b: PropertyBill) => state.assets.find((a) => a.id === b.assetId)?.assetType;
   const propertyLabelOf = (b: PropertyBill) => {
     const p = state.properties.find((pr) => pr.id === b.propertyId);
-    return p?.alias || p?.address || state.assets.find((a) => a.id === b.assetId)?.name;
+    return propertyLabel(p) || state.assets.find((a) => a.id === b.assetId)?.name;
   };
   /** A bill has no direct tenantId of its own — only individual line items that were recharged do
    * — so this joins every distinct recharged tenant's name across the bill's line items. */
@@ -188,7 +189,7 @@ export function BillsBoard({
                   <SelectItem value="__all__">All properties</SelectItem>
                   {scopedProperties.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.alias || p.address}
+                      {propertyLabel(p)}
                     </SelectItem>
                   ))}
                 </SelectContent>

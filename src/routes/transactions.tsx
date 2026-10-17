@@ -34,7 +34,8 @@ import { EditLedgerRowDialog } from "@/components/EditLedgerRowDialog";
 import { verifyAgentFees, reconcileFlatFees, hasFeeTerms, collectAgentFeeLines, isAgentFeeExpense, type FeeCheckResult } from "@/lib/feeVerification";
 import jsPDF from "jspdf";
 import { rentCollected } from "@/lib/tenancy";
-import { formatMonthLabel } from "@/lib/format";
+import { formatMonthLabel, propertyLabel } from "@/lib/format";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 function pdfSafe(s: string): string {
   return s.replace(/−/g, "-").replace(/ /g, " ");
@@ -321,7 +322,7 @@ export function LedgerTab({
   const assetTypeOf = (r: TxRow) => state.assets.find((a) => a.id === r.assetId)?.assetType;
   const propertyLabelOf = (r: TxRow) => {
     const prop = state.properties.find((p) => p.id === r.propertyId);
-    return prop?.alias || prop?.address || state.assets.find((a) => a.id === r.assetId)?.name || "";
+    return propertyLabel(prop) || state.assets.find((a) => a.id === r.assetId)?.name || "";
   };
   const anyTypeFilter = typeFilter.income || typeFilter.expense;
   const anySourceFilter = sourceFilter.manual || sourceFilter.bankFeed || sourceFilter.email || sourceFilter.upload || sourceFilter.agentStatement;
@@ -406,7 +407,7 @@ export function LedgerTab({
         r.date,
         r.description,
         r.providerName ?? "",
-        prop?.alias || prop?.address || asset?.name || "",
+        propertyLabel(prop) || asset?.name || "",
         r.tenantName ?? "",
         r.category,
         taxTreatmentLabel(r.category),
@@ -463,7 +464,7 @@ export function LedgerTab({
                 <SelectItem value="__all__">All properties</SelectItem>
                 {scopedProperties.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
+                    {propertyLabel(p)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -876,7 +877,7 @@ function TxTable({
           {rows.map((r) => {
             const prop = state.properties.find((p) => p.id === r.propertyId);
             const asset = state.assets.find((a) => a.id === r.assetId);
-            const propertyLabel = prop?.alias || prop?.address || asset?.name;
+            const rowPropertyLabel = propertyLabel(prop) || asset?.name;
             const expense = r.expenseId ? state.expenses.find((e) => e.id === r.expenseId) : undefined;
             return (
               <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
@@ -887,7 +888,7 @@ function TxTable({
                       key === "date" || key === "modified" ? "whitespace-nowrap" : ""
                     } ${["provider", "property", "tenant", "category", "taxTreatment", "modified"].includes(key) ? "text-muted-foreground" : ""}`}
                   >
-                    {txCell(key, r, propertyLabel)}
+                    {txCell(key, r, rowPropertyLabel)}
                   </td>
                 ))}
                 <td className="px-2 py-2">
@@ -1014,7 +1015,7 @@ function EofyReport() {
     }
     const propertyId = scope.slice("property:".length);
     const p = state.properties.find((x) => x.id === propertyId);
-    return p?.alias || p?.address || "Property";
+    return propertyLabel(p) || "Property";
   };
 
   const generate = () => {
@@ -1083,7 +1084,7 @@ function EofyReport() {
           ...reconcileFlatFees({ agentName: agent.name, agreement, lines, statementCount }),
         ];
         if (results.length > 0) {
-          feeChecksByProperty.push({ propertyLabel: prop.alias || prop.address, agentName: agent.name, results });
+          feeChecksByProperty.push({ propertyLabel: propertyLabel(prop), agentName: agent.name, results });
         }
       }
     }
@@ -1156,11 +1157,7 @@ function EofyReport() {
                       {e.name}
                     </SelectItem>
                   ))}
-                  {state.properties.map((p) => (
-                    <SelectItem key={p.id} value={`property:${p.id}`}>
-                      {p.alias || p.address}
-                    </SelectItem>
-                  ))}
+                  <PropertyOptions valuePrefix="property:" />
                 </SelectContent>
               </Select>
             </Field>

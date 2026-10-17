@@ -38,6 +38,7 @@ import {
   type FeedRowAnnotation,
 } from "@/lib/bankFeed";
 import type { DuplicateMatch } from "@/lib/billMatch";
+import { PropertyOptions } from "@/components/PropertyOptions";
 import type {
   AiIntakeProposal,
   BankAccount,
@@ -116,11 +117,7 @@ function RecordTransactionDialog({
                   <SelectValue placeholder="Select property" />
                 </SelectTrigger>
                 <SelectContent>
-                  {state.properties.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.alias || p.address}
-                    </SelectItem>
-                  ))}
+                  <PropertyOptions />
                 </SelectContent>
               </Select>
             </Field>

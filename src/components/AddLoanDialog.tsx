@@ -28,6 +28,7 @@ import { useAiExtraction } from "@/lib/useAiExtraction";
 import { loanFieldsFromPayload, loanPayloadFromExtract, type LoanExtractResult } from "@/lib/extractMappers";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { documentLayout } from "@/lib/documentLayout";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 /**
  * Manual Add/Edit Loan — previously the only way a Loan record ever came into existence was an
@@ -273,11 +274,7 @@ export function AddLoanDialog({
                       <SelectValue placeholder="Select property" />
                     </SelectTrigger>
                     <SelectContent>
-                      {state.properties.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.alias || p.address}
-                        </SelectItem>
-                      ))}
+                      <PropertyOptions />
                     </SelectContent>
                   </Select>
                 </Field>

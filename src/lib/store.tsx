@@ -57,6 +57,7 @@ import { matchProviderByName } from "./providerMatch";
 import { toast } from "sonner";
 import { uid } from "@/lib/constants";
 import { ASSET_CHILDREN, LOAN_CHILDREN, TENANT_CHILDREN, assetBufferIds, withoutChildren, type ChildRecords } from "./cascade";
+import { propertyLabel } from "@/lib/format";
 
 const defaultAi: AiConfig = {
   enabled: true,
@@ -676,7 +677,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const assetRow: Asset = {
         id: assetId,
         assetType: "Property",
-        name: row.alias || row.address,
+        name: propertyLabel(row),
         purchaseDate: row.purchaseDate,
         purchaseCost: row.purchasePrice,
         currentValue: row.currentValue,
@@ -716,7 +717,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const assetRow: Asset = {
             id: assetId,
             assetType: "Property",
-            name: updated.alias || updated.address,
+            name: propertyLabel(updated),
             purchaseDate: updated.purchaseDate,
             purchaseCost: updated.purchasePrice,
             currentValue: updated.currentValue,
@@ -731,7 +732,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         } else if (existing?.assetId && touchesMirroredFields) {
           const updated = { ...existing, ...p };
           const assetPatch: Partial<Asset> = {
-            name: updated.alias || updated.address,
+            name: propertyLabel(updated),
             purchaseDate: updated.purchaseDate,
             purchaseCost: updated.purchasePrice,
             currentValue: updated.currentValue,

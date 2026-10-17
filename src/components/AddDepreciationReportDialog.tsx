@@ -27,6 +27,7 @@ import type { DepreciationItem } from "@/lib/types";
 import { uid } from "@/lib/constants";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
+import { propertyLabel } from "@/lib/format";
 
 
 type Division = NonNullable<DepreciationItem["division"]>;
@@ -334,7 +335,7 @@ export function AddDepreciationReportDialog({
   const propertyMismatch = (() => {
     if (!extractedAddress || !prop) return undefined;
     const matched = matchPropertyByAddress(state.properties, extractedAddress);
-    if (matched && matched.id !== prop.id) return { extracted: extractedAddress, actual: prop.alias || prop.address };
+    if (matched && matched.id !== prop.id) return { extracted: extractedAddress, actual: propertyLabel(prop) };
     return undefined;
   })();
 
@@ -502,7 +503,7 @@ export function AddDepreciationReportDialog({
             {prop && (
               <div className="space-y-1 rounded-md border p-3">
                 <div className="text-xs font-medium text-muted-foreground">Property</div>
-                <div className="text-sm">{prop.alias || prop.address}</div>
+                <div className="text-sm">{propertyLabel(prop)}</div>
                 {propertyMismatch && (
                   <div className="flex items-center gap-1 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
                     <AlertTriangle className="h-3 w-3 shrink-0" />

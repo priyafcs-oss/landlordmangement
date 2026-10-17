@@ -11,7 +11,7 @@ import { useStore } from "@/lib/store";
 import { daysUntil, fmtCurrency, ausFinancialYear, fyRange, buildFyOptions } from "@/lib/calculations";
 import { bucketBy } from "@/lib/group";
 import { matchesDocumentQuery, type DocumentEntry } from "@/lib/documents";
-import { formatMonthLabel } from "@/lib/format";
+import { formatMonthLabel, propertyLabel } from "@/lib/format";
 
 /**
  * Small reusable "Documents" section for a single property tab (Tenancy, Purchase & Acquisition,
@@ -263,7 +263,7 @@ export function DocumentNameCell({
         </div>
         {showLabelSubtitle && <div className="truncate text-xs text-muted-foreground">{d.label}</div>}
         {showProperty && property && (
-          <div className="truncate text-xs text-muted-foreground">{property.alias || property.address}</div>
+          <div className="truncate text-xs text-muted-foreground">{propertyLabel(property)}</div>
         )}
       </div>
     </div>

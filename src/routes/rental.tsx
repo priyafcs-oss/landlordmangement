@@ -51,6 +51,7 @@ import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { emailTenant, rentReceivedEmail, ledgerEmail } from "@/lib/tenantEmails";
 import { formatMonthLabel } from "@/lib/format";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 export const Route = createFileRoute("/rental")({
   head: () => ({
@@ -102,11 +103,7 @@ function RentalHubPage() {
               <SelectValue placeholder="Select a property" />
             </SelectTrigger>
             <SelectContent>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.address}
-                </SelectItem>
-              ))}
+              <PropertyOptions />
             </SelectContent>
           </Select>
           {property && (

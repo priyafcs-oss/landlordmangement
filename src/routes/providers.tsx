@@ -23,6 +23,7 @@ import { PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { rowBelongsToProvider } from "@/lib/providerMatch";
 import { openBillDocument } from "@/lib/files";
 import { toast } from "sonner";
+import { propertyLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/providers")({
   head: () => ({
@@ -82,7 +83,7 @@ function ProviderListRow({ provider }: { provider: Provider }) {
   const addresses = linkedPropertyIds(state, provider.id)
     .map((id) => state.properties.find((p) => p.id === id))
     .filter((p): p is NonNullable<typeof p> => Boolean(p))
-    .map((p) => p.alias || p.address);
+    .map((p) => propertyLabel(p));
   const details = [provider.phone, provider.email].filter(Boolean).join(" · ");
   const { invoice, statement } = latestInvoiceAndStatement(state, provider);
 

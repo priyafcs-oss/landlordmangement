@@ -52,6 +52,8 @@ import { matchProviderByName } from "@/lib/providerMatch";
 import type { BillType, AiIntakeProposal, BillProposalPayload, Property, ExpenseCategory, ExtractBillResult } from "@/lib/types";
 import { BILL_TYPES, SHARED_UNIT, uid } from "@/lib/constants";
 import { documentLayout } from "@/lib/documentLayout";
+import { PropertyOptions } from "@/components/PropertyOptions";
+import { propertyLabel } from "@/lib/format";
 
 
 
@@ -295,7 +297,7 @@ export function AddBillDialog({
       tenant,
       rechargeEmail({
         tenantName: tenant?.name ?? "",
-        propertyLabel: property?.alias || property?.address,
+        propertyLabel: propertyLabel(property),
         billType: form.billType,
         description: li.description,
         amount: parseFloat(li.amount) || 0,
@@ -548,11 +550,7 @@ export function AddBillDialog({
                       <SelectValue placeholder="Select property" />
                     </SelectTrigger>
                     <SelectContent>
-                      {state.properties.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.alias || p.address}
-                        </SelectItem>
-                      ))}
+                      <PropertyOptions />
                     </SelectContent>
                   </Select>
                 </Field>

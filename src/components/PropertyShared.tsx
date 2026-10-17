@@ -72,7 +72,8 @@ import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { useReparse } from "@/lib/useReparse";
 import { findProvider } from "@/lib/providerMatch";
 import { emailTenant, leaseEmail } from "@/lib/tenantEmails";
-import { fmtCompactCurrency, fmtCurrencyWhole } from "@/lib/format";
+import { fmtCompactCurrency, fmtCurrencyWhole, propertyLabel } from "@/lib/format";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 
 interface DomainSuggestResult {
@@ -1608,11 +1609,7 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
               <SelectValue placeholder="No property (optional)" />
             </SelectTrigger>
             <SelectContent>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.alias || p.address}
-                </SelectItem>
-              ))}
+              <PropertyOptions />
             </SelectContent>
           </Select>
         </div>
@@ -1637,11 +1634,7 @@ function PropertyPicker({ propertyId, onChange }: { propertyId: string; onChange
         <SelectValue placeholder="Assign property" />
       </SelectTrigger>
       <SelectContent>
-        {state.properties.map((p) => (
-          <SelectItem key={p.id} value={p.id}>
-            {p.alias || p.address}
-          </SelectItem>
-        ))}
+        <PropertyOptions />
       </SelectContent>
     </Select>
   );
@@ -2904,7 +2897,7 @@ export function PropertyDialog({
                 if (
                   !isArchived &&
                   !confirm(
-                    `Archive ${property?.alias || property?.address}? It'll be hidden from Assets, but every tenant, bill, transaction and document stays intact — unarchive any time.`,
+                    `Archive ${propertyLabel(property)}? It'll be hidden from Assets, but every tenant, bill, transaction and document stays intact — unarchive any time.`,
                   )
                 ) {
                   return;
@@ -5693,7 +5686,7 @@ export function LeaseAgreementWizard({
     if (!generatedBlob) return;
     void emailTenant(
       { name: leaseForm.name, email: leaseForm.email },
-      leaseEmail({ tenantName: leaseForm.name, propertyLabel: property.alias || property.address, landlordName: state.landlordProfile.fullName }),
+      leaseEmail({ tenantName: leaseForm.name, propertyLabel: propertyLabel(property), landlordName: state.landlordProfile.fullName }),
       { blob: generatedBlob, fileName },
     );
   };
@@ -6121,7 +6114,7 @@ export function LeaseAgreementWizard({
         {step === 3 && (
           <div className="space-y-3 text-sm">
             <div className="rounded-md border p-3">
-              <div className="mb-2 font-medium">{property.alias || property.address}</div>
+              <div className="mb-2 font-medium">{propertyLabel(property)}</div>
               <div className="text-xs text-muted-foreground">
                 {leaseForm.name} — {fmtCurrency(parseFloat(leaseForm.rentAmount) || 0)}/{leaseForm.rentFrequency} •{" "}
                 {leaseForm.leaseDuration} from {leaseForm.leaseStart}
@@ -6977,7 +6970,7 @@ export function ProviderAgreementDialog({
             <div className="text-sm">
               {(() => {
                 const p = state.properties.find((x) => x.id === agreement.propertyId);
-                return p?.alias || p?.address || "Unknown property";
+                return propertyLabel(p) || "Unknown property";
               })()}
             </div>
           ) : (
@@ -6986,11 +6979,7 @@ export function ProviderAgreementDialog({
                 <SelectValue placeholder="Select a property…" />
               </SelectTrigger>
               <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
-                  </SelectItem>
-                ))}
+                <PropertyOptions />
               </SelectContent>
             </Select>
           )}
@@ -8510,7 +8499,7 @@ export function DeletePropertyDialog({ property, trigger, onDeleted }: { propert
   const [mode, setMode] = useState<"all" | "keepRentalHub">("all");
   const [confirmText, setConfirmText] = useState("");
 
-  const label = (property.alias || property.address).trim();
+  const label = (propertyLabel(property)).trim();
   const tenantIds = state.tenants.filter((t) => t.propertyId === property.id).map((t) => t.id);
   const tenantCount = tenantIds.length;
   const ledgerCount = state.ledger.filter((e) => tenantIds.includes(e.tenantId)).length;

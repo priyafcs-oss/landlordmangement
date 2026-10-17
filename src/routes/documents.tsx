@@ -12,6 +12,7 @@ import {
 } from "@/components/DocumentEntryRow";
 import { buildDocumentEntries, type DocumentEntry } from "@/lib/documents";
 import { formatMonthLabel } from "@/lib/format";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 export const Route = createFileRoute("/documents")({
   head: () => ({
@@ -180,11 +181,7 @@ export function DocumentsContent({ propertyId: lockedPropertyId }: { propertyId?
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__all__">All properties</SelectItem>
-                  {state.properties.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.alias || p.address}
-                    </SelectItem>
-                  ))}
+                  <PropertyOptions />
                 </SelectContent>
               </Select>
             )}

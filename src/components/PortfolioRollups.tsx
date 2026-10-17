@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { fmtCurrency, ausFinancialYear, fyRange, todayISO, buildFyOptions, estimateLoanInterest } from "@/lib/calculations";
 import { rentCollected } from "@/lib/tenancy";
+import { propertyLabel } from "@/lib/format";
 
 /** Portfolio-wide Cost Base — same estimate PropertyCostBaseTab computes per property
  * (purchase price + stamp duty + capital-works expenses), summed across every property. */
@@ -46,7 +47,7 @@ export function PortfolioCostBaseTab() {
               )}
               {rows.map((r) => (
                 <tr key={r.property.id} className="border-b last:border-0">
-                  <td className="px-3 py-2 font-medium">{r.property.alias || r.property.address}</td>
+                  <td className="px-3 py-2 font-medium">{propertyLabel(r.property)}</td>
                   <td className="px-3 py-2 text-right">{fmtCurrency(r.property.purchasePrice)}</td>
                   <td className="px-3 py-2 text-right">{r.property.stampDuty ? fmtCurrency(r.property.stampDuty) : "—"}</td>
                   <td className="px-3 py-2 text-right">{fmtCurrency(r.capitalWorks)}</td>
@@ -99,7 +100,7 @@ export function PortfolioDepreciationTab() {
           <Card key={r.property.id}>
             <CardContent className="space-y-2 p-4">
               <div className="flex items-center justify-between">
-                <div className="font-medium">{r.property.alias || r.property.address}</div>
+                <div className="font-medium">{propertyLabel(r.property)}</div>
                 <div className="text-xs text-muted-foreground">{fmtCurrency(r.annual)}/yr</div>
               </div>
               {r.items.map((d) => (
@@ -272,7 +273,7 @@ export function PortfolioPnLTab() {
               )}
               {rows.map((r) => (
                 <tr key={r.property.id} className="border-b last:border-0">
-                  <td className="px-3 py-2 font-medium">{r.property.alias || r.property.address}</td>
+                  <td className="px-3 py-2 font-medium">{propertyLabel(r.property)}</td>
                   <td className="px-3 py-2 text-right text-emerald-600">{fmtCurrency(r.totalIncome)}</td>
                   <td className="px-3 py-2 text-right text-destructive">{fmtCurrency(r.totalExpenses)}</td>
                   <td className={"px-3 py-2 text-right font-medium " + (r.net < 0 ? "text-destructive" : "")}>{fmtCurrency(r.net)}</td>

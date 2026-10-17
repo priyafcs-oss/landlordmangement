@@ -38,3 +38,11 @@ export function fmtCompactCurrency(n: number, { axis = false }: { axis?: boolean
   if (abs >= 1_000) return `${sign}$${Math.round(abs / 1000)}k`;
   return axis ? `${sign}$${Math.round(abs)}` : `${sign}${fmtCurrency(abs)}`;
 }
+
+/** A property's display name: its nickname (alias), else its address. Same value as the
+ * `p.alias || p.address` it replaces everywhere (undefined when there's no property). */
+export function propertyLabel(p: { alias?: string; address: string }): string;
+export function propertyLabel(p: { alias?: string; address: string } | undefined | null): string | undefined;
+export function propertyLabel(p: { alias?: string; address: string } | undefined | null): string | undefined {
+  return p ? p.alias || p.address : undefined;
+}

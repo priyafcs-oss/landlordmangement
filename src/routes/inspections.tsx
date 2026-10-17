@@ -43,7 +43,7 @@ import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Propert
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
 import { DocumentLink } from "@/components/DocumentLink";
 import { currentTenant } from "@/lib/tenancy";
-import { formatTime12h } from "@/lib/format";
+import { formatTime12h, propertyLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/inspections")({
   head: () => ({
@@ -105,7 +105,7 @@ function InspectionsPage() {
             return (
               <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
                 <div>
-                  <div className="font-medium">{p.alias || p.address}</div>
+                  <div className="font-medium">{propertyLabel(p)}</div>
                   <div className="text-xs text-muted-foreground">
                     {tenant?.name ?? "No tenant"} •{" "}
                     {status.last ? `Last inspected ${status.last.date}` : "No inspection on record"}
@@ -270,7 +270,7 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
       tenant,
       inspectionEmail({
         tenantName: tenant?.name ?? "",
-        propertyLabel: property?.alias || property?.address || "",
+        propertyLabel: propertyLabel(property) || "",
         inspectionType: inspection.type,
         date: inspection.date,
         landlordName: state.landlordProfile.fullName,
@@ -283,7 +283,7 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
     <div className={`rounded-md border p-3 text-sm ${overdue ? "border-destructive/40 bg-destructive/5" : ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="font-medium">{property?.alias || property?.address}</div>
+          <div className="font-medium">{propertyLabel(property)}</div>
           <div className="text-xs text-muted-foreground">
             {tenant?.name ?? "No tenant"} • {inspection.type} • {inspection.date}
             {inspection.time && ` at ${formatTime12h(inspection.time)}`}
@@ -343,7 +343,7 @@ function PropertyInspectionGroup({ property }: { property: Property }) {
         <CollapsibleTrigger asChild>
           <CardHeader className="cursor-pointer">
             <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-              <span>{property.alias || property.address}</span>
+              <span>{propertyLabel(property)}</span>
               <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
                 {status.last ? `Last inspected ${status.last.date}` : "Never inspected"} • {inspections.length} record(s)
                 {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -517,7 +517,7 @@ function BookInspectionDialog({
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox checked={!!slot} onCheckedChange={() => toggle(p.id)} />
                     <span className="flex-1">
-                      {p.alias || p.address}
+                      {propertyLabel(p)}
                       {tenant && <span className="text-muted-foreground"> — {tenant.name}</span>}
                     </span>
                     {status.overdue && (
@@ -676,7 +676,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
       tenant,
       inspectionIssueEmail({
         tenantName: tenant?.name ?? "",
-        propertyLabel: property?.alias || property?.address || "",
+        propertyLabel: propertyLabel(property) || "",
         inspectionType: inspection.type,
         issue: issue.description,
         landlordName: state.landlordProfile.fullName,
@@ -752,7 +752,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {inspection.type} Inspection — {property?.alias || property?.address}
+            {inspection.type} Inspection — {propertyLabel(property)}
           </DialogTitle>
         </DialogHeader>
 
@@ -773,7 +773,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
                 tenant,
                 inspectionEmail({
                   tenantName: tenant?.name ?? "",
-                  propertyLabel: property?.alias || property?.address || "",
+                  propertyLabel: propertyLabel(property) || "",
                   inspectionType: inspection.type,
                   date,
                   completed: status === "Completed",

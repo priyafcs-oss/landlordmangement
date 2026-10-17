@@ -4,6 +4,7 @@ import {
   fmtCurrencyWhole,
   formatMonthLabel,
   formatTime12h,
+  propertyLabel,
 } from "@/lib/format";
 import { addDays, isDueWithin, round2 } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
@@ -64,5 +65,13 @@ describe("date helpers", () => {
       }).dueDate,
     ).toBe(addDays("2026-09-25", 14));
     expect(addDays("2026-09-25", 14)).toBe("2026-10-09");
+  });
+});
+
+describe("propertyLabel", () => {
+  it("is the nickname, else the address, else undefined", () => {
+    expect(propertyLabel({ alias: "Facer Ct", address: "10 Facer Ct Castle Hill" })).toBe("Facer Ct");
+    expect(propertyLabel({ address: "10 Facer Ct Castle Hill" })).toBe("10 Facer Ct Castle Hill");
+    expect(propertyLabel(undefined)).toBeUndefined();
   });
 });

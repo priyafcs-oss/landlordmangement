@@ -43,8 +43,9 @@ import { OverviewSection } from "@/components/OverviewSection";
 import { StoredImage, StoredVideo } from "@/components/StoredImage";
 import { computeUpcomingRepayments } from "@/lib/overview";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
-import { formatTime12h } from "@/lib/format";
+import { formatTime12h, propertyLabel } from "@/lib/format";
 import { ALERT_WINDOW_DAYS } from "@/lib/constants";
+import { PropertyOptions } from "@/components/PropertyOptions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -304,7 +305,7 @@ function DashboardPage() {
                 return (
                   <div key={i.id} className="flex items-center justify-between rounded-md border p-3">
                     <div>
-                      <div className="font-medium">{property?.alias || property?.address}</div>
+                      <div className="font-medium">{propertyLabel(property)}</div>
                       <div className="text-xs text-muted-foreground">
                         {i.type} • {i.date}
                         {i.time && ` at ${formatTime12h(i.time)}`}
@@ -457,11 +458,7 @@ function LogMaintenanceDialog() {
               <SelectValue placeholder="Property" />
             </SelectTrigger>
             <SelectContent>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.address}
-                </SelectItem>
-              ))}
+              <PropertyOptions />
             </SelectContent>
           </Select>
           <Select value={category} onValueChange={setCategory}>

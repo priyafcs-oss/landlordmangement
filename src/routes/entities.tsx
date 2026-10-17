@@ -8,6 +8,7 @@ import { fmtCurrency } from "@/lib/calculations";
 import type { Entity } from "@/lib/types";
 import { EntityDialog } from "@/components/EntityDialog";
 import { toast } from "sonner";
+import { propertyLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/entities")({
   head: () => ({
@@ -112,7 +113,7 @@ function EntityCard({ entity }: { entity: Entity }) {
         <div className="mt-2 text-xs text-muted-foreground">
           {properties.length === 0
             ? "No properties assigned."
-            : properties.map((p) => p.alias || p.address).join(", ")}
+            : properties.map((p) => propertyLabel(p)).join(", ")}
         </div>
       </CardContent>
     </Card>
@@ -157,7 +158,7 @@ function EntitiesPage() {
 
       {unassigned.length > 0 && (
         <div className="text-xs text-muted-foreground">
-          Unassigned: {unassigned.map((p) => p.alias || p.address).join(", ")} — set an entity on
+          Unassigned: {unassigned.map((p) => propertyLabel(p)).join(", ")} — set an entity on
           each from Portfolio Manager.
         </div>
       )}

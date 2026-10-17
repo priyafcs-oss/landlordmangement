@@ -9,6 +9,7 @@ import { AddLoanDialog } from "@/components/AddLoanDialog";
 import { LoanStatementHistory } from "@/components/LoanStatementHistory";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import type { Loan } from "@/lib/types";
+import { propertyLabel } from "@/lib/format";
 
 function LoanRow({ loan: l, propertyLabel }: { loan: Loan; propertyLabel: string }) {
   const historic = l.status === "Paid Off";
@@ -75,7 +76,7 @@ export function LoanSummaryTab() {
   const totalEmi = activeLoans.reduce((s, l) => s + l.monthlyEmi, 0);
   const propertyLabelOf = (l: Loan) => {
     const prop = state.properties.find((p) => p.id === l.propertyId);
-    return prop?.alias || prop?.address || "Unlinked";
+    return propertyLabel(prop) || "Unlinked";
   };
 
   return (

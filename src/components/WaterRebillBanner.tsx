@@ -6,6 +6,7 @@ import { Droplets, Pencil, X } from "lucide-react";
 import { fmtCurrency } from "@/lib/calculations";
 import { toast } from "sonner";
 import { BillDetailDialog } from "@/components/BillDetailDialog";
+import { propertyLabel } from "@/lib/format";
 
 /** Water bills auto-approve straight to Bills now instead of being forced into review — this is
  * where the recharge-to-tenant decision that used to gate that review surfaces instead, as a
@@ -37,12 +38,12 @@ export function WaterRebillBanner() {
                     <span className="font-medium">{b.providerName || "Water bill"}</span>
                     <span className="text-xs text-muted-foreground">{fmtCurrency(b.amount)} • due {b.dueDate}</span>
                   </div>
-                  {property && <div className="text-xs text-muted-foreground">{property.alias || property.address}</div>}
+                  {property && <div className="text-xs text-muted-foreground">{propertyLabel(property)}</div>}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <BillDetailDialog
                     bill={b}
-                    propertyLabel={property?.alias || property?.address}
+                    propertyLabel={propertyLabel(property)}
                     trigger={
                       <Button size="sm" variant="outline" className="gap-1">
                         <Pencil className="h-3 w-3" /> Review

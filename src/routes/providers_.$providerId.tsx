@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import type { ProviderAgreement, ProviderDocument } from "@/lib/types";
 import { PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { ALERT_WINDOW_DAYS } from "@/lib/constants";
+import { propertyLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/providers_/$providerId")({
   head: () => ({
@@ -174,7 +175,7 @@ function AgreementRow({ agreement }: { agreement: ProviderAgreement }) {
   return (
     <div className="flex items-start justify-between gap-2 rounded border p-2 text-xs">
       <div className="min-w-0">
-        <div className="font-medium">{property?.alias || property?.address || "Unknown property"}</div>
+        <div className="font-medium">{propertyLabel(property) || "Unknown property"}</div>
         {agreement.contractStartDate && (
           <div className="text-muted-foreground">
             From {agreement.contractStartDate}
@@ -213,7 +214,7 @@ function AgreementRow({ agreement }: { agreement: ProviderAgreement }) {
           variant="ghost"
           className="h-6 w-6"
           onClick={() => {
-            if (confirm(`Delete this agreement for ${property?.alias || property?.address || "this property"}?`)) {
+            if (confirm(`Delete this agreement for ${propertyLabel(property) || "this property"}?`)) {
               deleteProviderAgreement(agreement.id);
               toast.success("Agreement deleted");
             }
@@ -309,7 +310,7 @@ function ProviderProfilePage() {
   }
   const paymentGroups = Array.from(paymentsByProperty.entries()).map(([propertyId, rows]) => {
     const prop = state.properties.find((p) => p.id === propertyId);
-    return { label: prop?.alias || prop?.address || "Unassigned property", rows };
+    return { label: propertyLabel(prop) || "Unassigned property", rows };
   });
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
@@ -416,7 +417,7 @@ function ProviderProfilePage() {
                       {b.billType} — {fmtCurrency(billOwed(b))}
                     </div>
                     <div className="text-muted-foreground">
-                      {prop?.alias || prop?.address || "Unassigned"} · Due {b.dueDate}
+                      {propertyLabel(prop) || "Unassigned"} · Due {b.dueDate}
                     </div>
                   </div>
                   <Badge variant={isBillOverdue(b) ? "destructive" : "outline"} className="shrink-0 text-[10px]">

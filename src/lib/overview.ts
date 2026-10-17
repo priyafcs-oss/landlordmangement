@@ -1,6 +1,7 @@
 import type { Property, Loan, Expense, LedgerEntry, CashBuffer, InsurancePolicy, ValuationSnapshot, LoanBalanceSnapshot, Asset, Entity } from "./types";
 import { addMonths, daysUntil, localISO, todayISO } from "./calculations";
 import { ALERT_WINDOW_DAYS } from "@/lib/constants";
+import { propertyLabel } from "@/lib/format";
 
 /** Value/debt/equity headline figures for a scope (one property, one entity, or the whole portfolio). */
 export interface OverviewMetrics {
@@ -182,13 +183,13 @@ export function computeUpcomingRepayments(loans: Loan[], properties: Property[],
     const amount = perRepaymentAmount(loan);
     const offsetBalance = loan.offsetBalance ?? 0;
     const property = properties.find((p) => p.id === loan.propertyId);
-    const propertyLabel = property?.alias || property?.address || "—";
+    const label = propertyLabel(property) || "—";
     for (const d of dates) {
       items.push({
         loanId: loan.id,
         bankName: loan.bankName,
         accountNumber: loan.accountNumber,
-        propertyLabel,
+        propertyLabel: label,
         repaymentFrequency: loan.repaymentFrequency ?? "Monthly",
         dueDate: d.toISOString().slice(0, 10),
         amount,
@@ -282,7 +283,7 @@ export function computeInsuranceAlerts(
   for (const p of properties) {
     const propPolicies = policies.filter((ip) => ip.propertyId === p.id);
     const active = propPolicies.filter((ip) => !ip.coverEnd || ip.coverEnd >= today);
-    const suffix = multi ? ` — ${p.alias || p.address}` : "";
+    const suffix = multi ? ` — ${propertyLabel(p)}` : "";
     if (active.length === 0) {
       alerts.push({ id: `noins_${p.id}`, label: `No active insurance on file${suffix}` });
       continue;

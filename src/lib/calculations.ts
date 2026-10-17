@@ -18,6 +18,7 @@ import type {
   LeaseDuration,
 } from "./types";
 import { categoryGroupOf } from "./types";
+import { propertyLabel } from "@/lib/format";
 
 
 /** Which Property annual-running-cost column each bill type feeds, if any — mirrors
@@ -727,7 +728,7 @@ export function buildActivityFeed(state: {
     items.push({
       id: `exp_${e.id}`,
       date: e.date,
-      label: `Matched a bill — ${e.itemName}${prop ? ` · ${prop.alias || prop.address}` : ""}`,
+      label: `Matched a bill — ${e.itemName}${prop ? ` · ${propertyLabel(prop)}` : ""}`,
       amount: -e.cost,
     });
   }
@@ -741,7 +742,7 @@ export function buildActivityFeed(state: {
       date: entry.date,
       label:
         entry.source === "agent_statement"
-          ? `Processed an agent statement${prop ? ` · ${prop.alias || prop.address}` : ""}`
+          ? `Processed an agent statement${prop ? ` · ${propertyLabel(prop)}` : ""}`
           : `Recorded rent received${tenant ? ` · ${tenant.name}` : ""}`,
       amount: entry.credit || undefined,
     });
@@ -753,7 +754,7 @@ export function buildActivityFeed(state: {
     items.push({
       id: `prop_${proposal.id}`,
       date: proposal.created_at.slice(0, 10),
-      label: `Filed a ${proposal.kind === "tenant_lease" ? "lease agreement" : "rent statement"}${prop ? ` · ${prop.alias || prop.address}` : ""}`,
+      label: `Filed a ${proposal.kind === "tenant_lease" ? "lease agreement" : "rent statement"}${prop ? ` · ${propertyLabel(prop)}` : ""}`,
     });
   }
 
