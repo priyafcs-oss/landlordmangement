@@ -7,26 +7,34 @@ export function downloadBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-export function openGmailCompose(to: string | undefined, subject: string, body: string) {
-  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+export function gmailComposeUrl(to: string | undefined, subject: string, body: string): string {
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
     to ?? "",
   )}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.open(gmailUrl, "_blank");
 }
 
 /**
- * Downloads a PDF and opens Gmail's web compose prefilled, asking the landlord to attach the
- * file they just downloaded. No email link (mailto: or any provider's compose URL) can attach a
- * file automatically — that's a browser security restriction, not something any web app can
- * work around — so this is the most complete flow actually achievable from a link.
+ * Opens a blank tab for a Gmail draft — call this synchronously inside the click handler, BEFORE
+ * any await. A browser only lets a page open a tab during the click's brief user-activation
+ * window; fetching the attachment first (a Drive/Storage round trip) used to outlast it, so the
+ * bill downloaded but the Gmail tab was silently popup-blocked. Null when blocked anyway.
  */
-export function downloadPdfAndEmailViaGmail(params: {
-  blob: Blob;
-  fileName: string;
-  to: string | undefined;
-  subject: string;
-  body: string;
-}) {
-  downloadBlob(params.blob, params.fileName);
-  openGmailCompose(params.to, params.subject, params.body);
+export function reserveComposeWindow(): Window | null {
+  return window.open("about:blank", "_blank");
+}
+
+/** Points a reserved tab (or, failing that, a fresh one) at a prefilled Gmail draft. */
+export function openGmailCompose(
+  to: string | undefined,
+  subject: string,
+  body: string,
+  reserved?: Window | null,
+) {
+  const url = gmailComposeUrl(to, subject, body);
+  if (reserved && !reserved.closed) {
+    reserved.location.href = url;
+    reserved.focus();
+  } else {
+    window.open(url, "_blank");
+  }
 }

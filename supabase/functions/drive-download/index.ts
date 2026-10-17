@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-import { downloadBytesFromDrive, driveFileId, getAccessTokenForOwner, isGoogleDrivePath } from "../_shared/googleDrive.ts";
+import { DRIVE_LINK_EXPIRED, downloadBytesFromDrive, driveFileId, getAccessTokenForOwner, isDriveLinkExpired, isGoogleDrivePath } from "../_shared/googleDrive.ts";
 
 interface DownloadRequest {
   marker?: string;
@@ -61,8 +61,9 @@ Deno.serve(async (req) => {
 
   const token = await getAccessTokenForOwner(supabase, userData.user.id, "self");
   if (!token) {
-    return new Response(JSON.stringify({ error: "Google Drive is not connected" }), {
-      status: 422,
+    const expired = await isDriveLinkExpired(supabase, userData.user.id, "self");
+    return new Response(JSON.stringify({ error: expired ? DRIVE_LINK_EXPIRED : "Google Drive is not connected" }), {
+      status: expired ? 409 : 422,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

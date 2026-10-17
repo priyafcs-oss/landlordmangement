@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { logFileAccess } from "@/lib/usage";
 
@@ -166,6 +167,9 @@ async function fetchDriveBlob(storedValue: string, fileName: string | undefined)
   if (error || !(data instanceof Blob)) {
     console.error("[drive] failed to download", error);
     blobCache.delete(storedValue);
+    // 409 = the landlord's Drive link has lapsed (see drive-download) — say so, once, rather than
+    // every Drive document just silently showing as missing.
+    if (response?.status === 409) toast.error(await edgeFunctionErrorMessage(error), { id: "drive-link-expired" });
     return null;
   }
   logFileAccess(storedValue);

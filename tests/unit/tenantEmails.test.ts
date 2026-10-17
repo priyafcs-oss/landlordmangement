@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  emailTenant,
   inspectionEmail,
   inspectionIssueEmail,
   leaseEmail,
@@ -95,5 +96,55 @@ describe("tenant emails", () => {
         paidUpTo: "2026-10-28",
       }).body,
     ).toContain("Total outstanding: $261.59");
+  });
+});
+
+describe("recharge email", () => {
+  it("opens with a greeting line and closes inviting questions", () => {
+    const body = rechargeEmail({
+      tenantName: "Sam",
+      propertyLabel: "10 Facer Ct",
+      billType: "Water",
+      description: "Water usage",
+      amount: 261.59,
+      landlordName: "Jane Smith",
+    }).body;
+    expect(body.startsWith("Hi Sam,\n\nI hope you are well.\n\n")).toBe(true);
+    expect(
+      body.endsWith("Please let me know if you have any questions.\n\nThanks,\nJane Smith"),
+    ).toBe(true);
+  });
+});
+
+// The Gmail tab used to be opened only after the attachment had been fetched from Drive/Storage —
+// by then the click's user activation had lapsed, so the browser blocked the tab and the landlord
+// was left with just the downloaded bill.
+describe("emailTenant", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("opens the draft tab synchronously, then points it at Gmail", async () => {
+    const draft = { closed: false, location: { href: "about:blank" }, focus: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(draft as unknown as Window);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+
+    const pending = emailTenant(
+      { name: "Sam", email: "sam@example.com" },
+      { subject: "Water", body: "Hi" },
+      { blob: new Blob(["%PDF"]), fileName: "bill.pdf" },
+    );
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
+    await pending;
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(draft.location.href).toContain("https://mail.google.com/mail/?view=cm");
+    expect(draft.location.href).toContain("to=sam%40example.com");
+  });
+
+  it("opens no tab when no tenant is selected", async () => {
+    const open = vi.spyOn(window, "open");
+    await emailTenant(undefined, { subject: "s", body: "b" });
+    expect(open).not.toHaveBeenCalled();
   });
 });

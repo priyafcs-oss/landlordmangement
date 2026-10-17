@@ -494,6 +494,19 @@ function ConnectedGoogleDriveSettings() {
               </Button>
             </div>
           </div>
+        ) : connection?.status === "error" ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/50 p-3">
+            <div>
+              <div className="text-sm font-medium text-destructive">Link expired</div>
+              <div className="text-xs text-muted-foreground">
+                Google stopped accepting this app's access{connection.connected_email ? ` to ${connection.connected_email}` : ""}.
+                Documents stored in Drive can't be opened until you reconnect the same Google account.
+              </div>
+            </div>
+            <Button size="sm" disabled={busy} onClick={connect}>
+              Reconnect Google Drive
+            </Button>
+          </div>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
             <div className="text-sm">Not connected — new uploads use shared storage for now.</div>

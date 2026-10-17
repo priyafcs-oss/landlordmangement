@@ -58,7 +58,9 @@ interface AccessToken {
  * between invocations (unlike src/lib/files.ts's guaranteed-persistent browser-session cache). */
 const accessTokenCache = new Map<string, { token: AccessToken; expiresAt: number }>();
 
-async function exchangeRefreshToken(refreshToken: string): Promise<string | null> {
+/** "revoked" when Google has rejected the refresh token for good (invalid_grant — access revoked,
+ * or 7 days after issue while the OAuth app is in "Testing"); null for anything transient. */
+async function exchangeRefreshToken(refreshToken: string): Promise<string | "revoked" | null> {
   const clientId = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID");
   const clientSecret = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
@@ -76,11 +78,34 @@ async function exchangeRefreshToken(refreshToken: string): Promise<string | null
     }),
   });
   if (!res.ok) {
-    console.error("[googleDrive] refresh token exchange failed", res.status, await res.text());
-    return null;
+    const text = await res.text();
+    console.error("[googleDrive] refresh token exchange failed", res.status, text);
+    return res.status === 400 && text.includes("invalid_grant") ? "revoked" : null;
   }
   const data = await res.json();
   return data.access_token ?? null;
+}
+
+/** Flags the connection 'error' so Settings shows "Reconnect" rather than a dead "Connected". */
+async function markDriveLinkExpired(supabase: SupabaseClient, ownerId: string, scope: "self" | "admin") {
+  const { error } =
+    scope === "self"
+      ? await supabase.rpc("mark_my_google_drive_expired")
+      : await supabase
+          .from("google_drive_connections")
+          .update({ status: "error", updated_at: new Date().toISOString() })
+          .eq("owner_id", ownerId)
+          .eq("status", "connected");
+  if (error) console.error("[googleDrive] failed to flag expired connection", error);
+}
+
+/** The error message edge functions return when the owner's Drive link has lapsed — the client
+ * (src/lib/files.ts) recognises the 409 and points the landlord at Settings. */
+export const DRIVE_LINK_EXPIRED = "Your Google Drive link has expired — reconnect it in Settings";
+
+/** True when the owner's row is flagged 'error' (their Drive link lapsed and needs reconnecting). */
+export async function isDriveLinkExpired(supabase: SupabaseClient, ownerId: string, scope: "self" | "admin"): Promise<boolean> {
+  return (await getDriveConnection(supabase, ownerId, scope))?.status === "error";
 }
 
 /**
@@ -112,7 +137,8 @@ export async function getAccessTokenForOwner(
   }
 
   const accessToken = await exchangeRefreshToken(refreshToken as string);
-  if (!accessToken) return null;
+  if (accessToken === "revoked") await markDriveLinkExpired(supabase, ownerId, scope);
+  if (!accessToken || accessToken === "revoked") return null;
 
   const token: AccessToken = { accessToken, rootFolderId: conn.root_folder_id };
   // 5-minute safety margin under Google's real ~1hr access token lifetime.

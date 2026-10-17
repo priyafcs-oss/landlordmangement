@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 import { fmtCurrency } from "@/lib/calculations";
-import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
+import { downloadBlob, openGmailCompose, reserveComposeWindow } from "@/lib/emailPdf";
 import { resolveDocumentBlob } from "@/lib/files";
 import type { Tenant } from "@/lib/types";
 
@@ -36,7 +36,7 @@ export function rechargeEmail(input: {
   const what = description || "usage charge";
   return {
     subject: `${billType} — ${what} (${fmtCurrency(amount)})`,
-    body: `Hi ${tenantName},\n\nThe ${propertyLabel || "property"} ${billType.toLowerCase()} bill has come in. It includes a charge of ${fmtCurrency(amount)} for "${what}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\n${signOff(input.landlordName)}`,
+    body: `Hi ${tenantName},\n\nI hope you are well.\n\nThe ${propertyLabel || "property"} ${billType.toLowerCase()} bill has come in. It includes a charge of ${fmtCurrency(amount)} for "${what}" that's payable by you under the lease — the full bill is attached for your records.\n\nCould you arrange payment of ${fmtCurrency(amount)} at your earliest convenience?\n\nPlease let me know if you have any questions.\n\n${signOff(input.landlordName)}`,
   };
 }
 
@@ -120,7 +120,9 @@ export function leaseEmail(input: {
  * Opens a Gmail draft to a tenant. No browser email client can attach a file automatically (a
  * security restriction, not something this app can work around), so with a document it's
  * downloaded first and the landlord attaches it to the draft that opens. A tenant with no email
- * address still gets the draft (with a warning), so the address can be typed in.
+ * address still gets the draft (with a warning), so the address can be typed in. Must be called
+ * straight from a click: the draft's tab is opened before the attachment is fetched (see
+ * reserveComposeWindow).
  */
 export async function emailTenant(
   tenant: Pick<Tenant, "name" | "email"> | undefined,
@@ -131,6 +133,7 @@ export async function emailTenant(
     toast.error("Select a tenant first");
     return;
   }
+  const draft = reserveComposeWindow();
   if (!tenant.email)
     toast.warning(`No email address on file for ${tenant.name} — add it in the draft`);
   const blob =
@@ -138,16 +141,8 @@ export async function emailTenant(
     (attachment?.fileData
       ? await resolveDocumentBlob(attachment.fileName, attachment.fileData)
       : null);
-  if (blob) {
-    downloadPdfAndEmailViaGmail({
-      blob,
-      fileName: attachment?.fileName || "document.pdf",
-      to: tenant.email,
-      ...message,
-    });
-    toast.success("Document downloaded — attach it in the Gmail draft that just opened");
-  } else {
-    openGmailCompose(tenant.email, message.subject, message.body);
-    if (attachment) toast("No source document — compose opened without an attachment");
-  }
+  if (blob) downloadBlob(blob, attachment?.fileName || "document.pdf");
+  openGmailCompose(tenant.email, message.subject, message.body, draft);
+  if (blob) toast.success("Document downloaded — attach it to the Gmail draft");
+  else if (attachment) toast("Couldn't load the document — the draft opened without an attachment");
 }
