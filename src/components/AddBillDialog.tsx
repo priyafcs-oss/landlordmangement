@@ -37,6 +37,8 @@ import {
   CATEGORY_GROUPS,
 } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
+import { canRechargeLine, classifyWaterCharge, lastFixedWaterCharge, needsWaterSplit } from "@/lib/waterSplit";
+import { WaterSplitPanel } from "@/components/WaterSplitPanel";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import {
   openBillDocument,
@@ -203,6 +205,10 @@ export function AddBillDialog({
   };
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
+  // On a water bill only the usage line can go to the tenant — a box ticked on a line later
+  // retyped as a fixed charge is ignored rather than silently billing the tenant for it.
+  const rechargeable = (li: LineItemRow) => canRechargeLine(form.billType, li.category, li.description);
+  const wantsRecharge = (li: LineItemRow) => li.rechargeToTenant && rechargeable(li);
 
   const propertyId = form.propertyId || lockedPropertyId || "";
   const providersForProperty = (() => {
@@ -416,7 +422,7 @@ export function AddBillDialog({
     if (form.hasInstalments && instalments.some((i) => !i.dueDate || !parseFloat(i.amount))) {
       return toast.error("Every instalment needs a due date and amount");
     }
-    if (lineItems.some((li) => li.rechargeToTenant && !li.tenantId)) {
+    if (lineItems.some((li) => wantsRecharge(li) && !li.tenantId)) {
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
@@ -444,7 +450,7 @@ export function AddBillDialog({
       .filter((li) => parseFloat(li.amount) > 0)
       .map((li) => {
         const amount = parseFloat(li.amount) || 0;
-        const recharge = !!(li.rechargeToTenant && li.tenantId);
+        const recharge = !!(wantsRecharge(li) && li.tenantId);
         if (recharge) {
           addInvoice(
             buildRechargeInvoice({
@@ -461,8 +467,8 @@ export function AddBillDialog({
           category: li.category,
           amount,
           gst: li.gst ? parseFloat(li.gst) : undefined,
-          rechargeToTenant: li.rechargeToTenant || undefined,
-          tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+          rechargeToTenant: wantsRecharge(li) || undefined,
+          tenantId: wantsRecharge(li) ? li.tenantId : undefined,
           recharged: recharge || undefined,
         };
       });
@@ -582,7 +588,7 @@ export function AddBillDialog({
     // to be a duplicate or that they cancelled partway through.
     if (notify) {
       for (const li of lineItems) {
-        if (li.rechargeToTenant && li.tenantId) emailTenantAboutLineItem(li);
+        if (wantsRecharge(li) && li.tenantId) emailTenantAboutLineItem(li);
       }
     }
 
@@ -609,7 +615,17 @@ export function AddBillDialog({
     toast.success("Invoice attached to the existing transaction");
   };
 
-  const hasRecharge = lineItems.some((li) => li.rechargeToTenant && li.tenantId);
+  const hasRecharge = lineItems.some((li) => wantsRecharge(li) && li.tenantId);
+  const showWaterSplit = needsWaterSplit(form.billType, lineItems);
+
+  /** Replaces the bill's lines with a fixed line and a usage line — the usage line is the one the
+   * recharge option shows on, with the property's tenant pre-picked when there's only one. */
+  const applyWaterSplit = (lines: { description: string; amount: number; kind: "fixed" | "usage" }[]) => {
+    const soleTenant = tenantsForProperty.length === 1 ? tenantsForProperty[0].id : "";
+    setLineItems(
+      lines.map((l) => ({ ...blankLineItem("Water"), description: l.description, amount: l.amount.toFixed(2), tenantId: l.kind === "usage" ? soleTenant : "" })),
+    );
+  };
 
   return (
     <>
@@ -717,12 +733,26 @@ export function AddBillDialog({
               )}
             </div>
 
-            <BillDocumentViewer
-              fileName={form.sourceFileName}
-              fileData={form.sourceFileData}
-              expanded={docExpanded}
-              onToggleExpand={() => setDocExpanded((v) => !v)}
-            />
+            {!form.sourceFileData && initialProposal?.sourceEmailBody ? (
+              // An emailed "your bill is ready" notice often has no PDF at all — show the email it
+              // was read from rather than an empty "No document attached" pane.
+              <div className="space-y-1">
+                <div className="rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  No bill PDF came with this email — this is the email it was read from. Drop the PDF above to attach it.
+                </div>
+                <pre className="max-h-[420px] min-h-[300px] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-2 font-sans text-xs">
+                  {initialProposal.sourceSubject ? `${initialProposal.sourceSubject}\n\n` : ""}
+                  {initialProposal.sourceEmailBody}
+                </pre>
+              </div>
+            ) : (
+              <BillDocumentViewer
+                fileName={form.sourceFileName}
+                fileData={form.sourceFileData}
+                expanded={docExpanded}
+                onToggleExpand={() => setDocExpanded((v) => !v)}
+              />
+            )}
           </div>
 
           <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
@@ -973,11 +1003,18 @@ export function AddBillDialog({
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+                  {rechargeable(li) ? (
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={li.rechargeToTenant}
                       onCheckedChange={(v) =>
-                        setLineItems((rows) => rows.map((r) => (r.key === li.key ? { ...r, rechargeToTenant: v === true } : r)))
+                        setLineItems((rows) =>
+                          rows.map((r) =>
+                            r.key === li.key
+                              ? { ...r, rechargeToTenant: v === true, tenantId: r.tenantId || (tenantsForProperty.length === 1 ? tenantsForProperty[0].id : "") }
+                              : r,
+                          ),
+                        )
                       }
                     />
                     <Label className="cursor-pointer text-xs font-normal text-muted-foreground">Recharge to tenant</Label>
@@ -1004,8 +1041,19 @@ export function AddBillDialog({
                       </Button>
                     )}
                   </div>
+                  ) : classifyWaterCharge(li.description) === "fixed" ? (
+                    <div className="text-xs text-muted-foreground">Fixed charge — paid by the landlord, can't be recharged</div>
+                  ) : null}
                 </div>
               ))}
+              {showWaterSplit && (
+                <WaterSplitPanel
+                  total={netTotal}
+                  lastFixed={lastFixedWaterCharge(state.bills, propertyId)}
+                  hasDocument={!!form.sourceFileData}
+                  onSplit={applyWaterSplit}
+                />
+              )}
               <Button size="sm" variant="outline" className="gap-1" onClick={addLineItem}>
                 <Plus className="h-3 w-3" /> Add line item
               </Button>

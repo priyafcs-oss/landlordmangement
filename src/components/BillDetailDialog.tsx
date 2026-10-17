@@ -21,6 +21,8 @@ import { CheckCircle2, Trash2, Plus, Pencil, Mail, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { fmtCurrency, todayISO, billTypeToChargeType, expenseCategoryToTaxCategory, billTypeToDefaultCategory, CATEGORY_GROUPS, fmtModified } from "@/lib/calculations";
 import { buildRechargeInvoice } from "@/lib/recharge";
+import { canRechargeLine, classifyWaterCharge, lastFixedWaterCharge, needsWaterSplit } from "@/lib/waterSplit";
+import { WaterSplitPanel } from "@/components/WaterSplitPanel";
 import type { BillType, BillLineItem, ExpenseCategory, PropertyBill } from "@/lib/types";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { resolveDocumentBlob } from "@/lib/files";
@@ -190,6 +192,8 @@ export function BillDetailDialog({
 
   const netTotal = lineItems.reduce((s, li) => s + (parseFloat(li.amount) || 0), 0);
   const tenantsForProperty = state.tenants.filter((t) => t.propertyId === selected.propertyId);
+  // Water bills: recharge only on the usage line (see canRechargeLine).
+  const wantsRecharge = (li: LineItemRow) => li.rechargeToTenant && canRechargeLine(selected.billType, li.category, li.description);
   const propertyUnits = state.properties.find((p) => p.id === selected.propertyId)?.units ?? [];
 
   /** No browser email client can attach a file automatically (a security restriction, not
@@ -213,7 +217,7 @@ export function BillDetailDialog({
   };
 
   const saveDetails = () => {
-    if (lineItems.some((li) => li.rechargeToTenant && !li.recharged && !li.tenantId)) {
+    if (lineItems.some((li) => wantsRecharge(li) && !li.recharged && !li.tenantId)) {
       return toast.error("Select a tenant for every line item flagged to recharge");
     }
 
@@ -231,7 +235,7 @@ export function BillDetailDialog({
       unitId: form.unitId !== SHARED_UNIT ? form.unitId : undefined,
       lineItems: lineItems.filter((li) => parseFloat(li.amount) > 0).map((li) => {
         const amount = parseFloat(li.amount) || 0;
-        const nowRecharging = li.rechargeToTenant && li.tenantId && !li.recharged;
+        const nowRecharging = wantsRecharge(li) && li.tenantId && !li.recharged;
         if (nowRecharging) {
           addInvoice(
             buildRechargeInvoice({
@@ -248,8 +252,8 @@ export function BillDetailDialog({
           category: li.category,
           amount,
           gst: li.gst ? parseFloat(li.gst) : undefined,
-          rechargeToTenant: li.rechargeToTenant || undefined,
-          tenantId: li.rechargeToTenant ? li.tenantId : undefined,
+          rechargeToTenant: li.recharged || wantsRecharge(li) || undefined,
+          tenantId: li.recharged || wantsRecharge(li) ? li.tenantId : undefined,
           recharged: li.recharged || nowRecharging || undefined,
         };
       }),
@@ -562,6 +566,10 @@ export function BillDetailDialog({
                         <Mail className="h-3 w-3" /> Email tenant
                       </Button>
                     </div>
+                  ) : !canRechargeLine(selected.billType, li.category, li.description) ? (
+                    classifyWaterCharge(li.description) === "fixed" ? (
+                      <div className="text-xs text-muted-foreground">Fixed charge — paid by the landlord, can't be recharged</div>
+                    ) : null
                   ) : (
                     <div className="flex items-center gap-2">
                       <Checkbox
@@ -590,6 +598,31 @@ export function BillDetailDialog({
                   )}
                 </div>
               ))}
+              {needsWaterSplit(selected.billType, lineItems) && !lineItems.some((li) => li.recharged) && (
+                <WaterSplitPanel
+                  total={netTotal}
+                  lastFixed={lastFixedWaterCharge(
+                    state.bills.filter((b) => b.id !== selected.id),
+                    selected.propertyId ?? "",
+                  )}
+                  hasDocument={!!selected.sourceFileData}
+                  onSplit={(lines) => {
+                    const soleTenant = tenantsForProperty.length === 1 ? tenantsForProperty[0].id : "";
+                    setLineItems(
+                      lines.map((l) => ({
+                        key: uid("li"),
+                        description: l.description,
+                        category: "Water",
+                        amount: l.amount.toFixed(2),
+                        gst: "",
+                        rechargeToTenant: false,
+                        tenantId: l.kind === "usage" ? soleTenant : "",
+                        recharged: false,
+                      })),
+                    );
+                  }}
+                />
+              )}
               <Button
                 size="sm"
                 variant="outline"
