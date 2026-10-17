@@ -298,6 +298,7 @@ export function AddBillDialog({
         billType: form.billType,
         description: li.description,
         amount: parseFloat(li.amount) || 0,
+        landlordName: state.landlordProfile.fullName,
       }),
       { fileName: form.sourceFileName, fileData: form.sourceFileData },
     );

@@ -4,7 +4,6 @@ import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Field } from "@/components/Field";
 import { readFileAsDataUrl } from "@/lib/files";
 import { StoredImage } from "@/components/StoredImage";
@@ -39,7 +38,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { todayISO, daysUntil, inspectionDueStatus, addMonths, propertyInspectionCadenceDays } from "@/lib/calculations";
-import { openGmailCompose } from "@/lib/emailPdf";
+import { emailTenant, inspectionEmail, inspectionIssueEmail } from "@/lib/tenantEmails";
 import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Property } from "@/lib/types";
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
 import { DocumentLink } from "@/components/DocumentLink";
@@ -275,15 +274,17 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
     toast.success(`Rescheduled to ${newDate}`);
   };
 
-  const emailTenant = () => {
-    if (!tenant?.email) return toast.error("This tenant has no email on file");
-    const propertyLabel = property?.alias || property?.address || "";
-    openGmailCompose(
-      tenant.email,
-      `Upcoming ${inspection.type.toLowerCase()} inspection — ${propertyLabel}`,
-      `Hi ${tenant.name},\n\nJust a heads up that a ${inspection.type.toLowerCase()} inspection is scheduled for ${inspection.date} at ${propertyLabel}.\n\nPlease let us know if this time doesn't work.\n\nThanks,\n${state.landlordProfile.fullName || "The Landlord"}`,
+  const emailInspectionTenant = () =>
+    void emailTenant(
+      tenant,
+      inspectionEmail({
+        tenantName: tenant?.name ?? "",
+        propertyLabel: property?.alias || property?.address || "",
+        inspectionType: inspection.type,
+        date: inspection.date,
+        landlordName: state.landlordProfile.fullName,
+      }),
     );
-  };
 
   const daysAway = daysUntil(inspection.date);
 
@@ -313,7 +314,7 @@ function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdu
           <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setRescheduling((r) => !r)}>
             <CalendarClock className="h-3 w-3" /> Reschedule
           </Button>
-          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={emailTenant}>
+          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={emailInspectionTenant}>
             <Mail className="h-3 w-3" /> Email tenant
           </Button>
           <InspectionDetailDialog inspection={inspection}>
@@ -679,15 +680,17 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
     toast.success("Maintenance job logged");
   };
 
-  const followUpWithTenant = (issue: InspectionIssue) => {
-    if (!tenant?.email) return toast.error("This tenant has no email on file");
-    const propertyLabel = property?.alias || property?.address || "";
-    openGmailCompose(
-      tenant.email,
-      `Follow-up from ${inspection.type.toLowerCase()} inspection — ${propertyLabel}`,
-      `Hi ${tenant.name},\n\nFollowing up on the recent inspection — we noted: ${issue.description}\n\nCould you let us know a good time to address this, or if it's already resolved?\n\nThanks,\n${state.landlordProfile.fullName || "The Landlord"}`,
+  const followUpWithTenant = (issue: InspectionIssue) =>
+    void emailTenant(
+      tenant,
+      inspectionIssueEmail({
+        tenantName: tenant?.name ?? "",
+        propertyLabel: property?.alias || property?.address || "",
+        inspectionType: inspection.type,
+        issue: issue.description,
+        landlordName: state.landlordProfile.fullName,
+      }),
     );
-  };
 
   const markDone = () => {
     setStatus("Completed");
@@ -774,19 +777,19 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
             size="sm"
             variant="ghost"
             className="h-7 gap-1 text-xs"
-            onClick={() => {
-              if (!tenant?.email) return toast.error("This tenant has no email on file");
-              const propertyLabel = property?.alias || property?.address || "";
-              openGmailCompose(
-                tenant.email,
-                `${status === "Completed" ? "Inspection" : "Upcoming inspection"} — ${propertyLabel}`,
-                `Hi ${tenant.name},\n\n${
-                  status === "Completed"
-                    ? `Following up on the ${inspection.type.toLowerCase()} inspection on ${date}.`
-                    : `Just a heads up that a ${inspection.type.toLowerCase()} inspection is scheduled for ${date} at ${propertyLabel}.`
-                }\n\nThanks,\n${state.landlordProfile.fullName || "The Landlord"}`,
-              );
-            }}
+            onClick={() =>
+              void emailTenant(
+                tenant,
+                inspectionEmail({
+                  tenantName: tenant?.name ?? "",
+                  propertyLabel: property?.alias || property?.address || "",
+                  inspectionType: inspection.type,
+                  date,
+                  completed: status === "Completed",
+                  landlordName: state.landlordProfile.fullName,
+                }),
+              )
+            }
           >
             <Mail className="h-3 w-3" /> Email tenant
           </Button>

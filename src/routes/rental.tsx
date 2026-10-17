@@ -36,7 +36,6 @@ import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
 import { findDuplicateLedgerEntry, ledgerDuplicateAsMatch, type DuplicateMatch } from "@/lib/billMatch";
 import { matchTenantByText, nonPropertyReason, parseBankFeedLine } from "@/lib/feedSuggest";
 import jsPDF from "jspdf";
-import { downloadPdfAndEmailViaGmail, openGmailCompose } from "@/lib/emailPdf";
 import { downloadCsv } from "@/lib/csv";
 import { UploadDocumentDialog } from "@/components/UploadDocumentDialog";
 import {
@@ -50,6 +49,7 @@ import {
 } from "@/components/PropertyShared";
 import { TEMPLATES, renderTemplate, type TemplateKey } from "@/lib/templates";
 import { useAiExtraction } from "@/lib/useAiExtraction";
+import { emailTenant, rentReceivedEmail, ledgerEmail } from "@/lib/tenantEmails";
 
 export const Route = createFileRoute("/rental")({
   head: () => ({
@@ -677,15 +677,22 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
    * Always states the authoritative, store-recalculated paidUpToDate rather than anything
    * computed locally, so it can never say something the ledger itself doesn't back up. */
   const emailRentReceived = () => {
-    if (!tenant.email) return toast.error("This tenant has no email on file");
     const typedAmount = parseFloat(amount);
     const lastPayment = rows.filter((r) => r.credit > 0).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
     const receivedAmount = typedAmount > 0 ? typedAmount : lastPayment?.credit;
     const receivedDate = typedAmount > 0 ? paymentDate : lastPayment?.date;
     if (!receivedAmount) return toast.error("No rent payment to reference — enter an amount or post a payment first");
-    const subject = `Rent received — ${propertyAddress || "your rental"}`;
-    const body = `Hi ${tenant.name},\n\nWe've received your rent payment of ${fmtCurrency(receivedAmount)}${receivedDate ? ` on ${receivedDate}` : ""}.\n\nYou are now paid up to ${tenant.paidUpToDate}.\n\nThanks`;
-    openGmailCompose(tenant.email, subject, body);
+    void emailTenant(
+      tenant,
+      rentReceivedEmail({
+        tenantName: tenant.name,
+        propertyLabel: propertyAddress,
+        amount: receivedAmount,
+        date: receivedDate,
+        paidUpTo: tenant.paidUpToDate,
+        landlordName: state.landlordProfile.fullName,
+      }),
+    );
   };
 
   const removeRow = (row: LedgerRow) => {
@@ -989,6 +996,7 @@ function LedgerExportButtons({
   rows: LedgerRow[];
   total: number;
 }) {
+  const { state } = useStore();
   const header = ["Date", "Description", "Debit", "Credit", "Balance", "Source"];
 
   const downloadLedgerCsv = () => {
@@ -1094,15 +1102,17 @@ function LedgerExportButtons({
     // download the PDF so it's ready in Downloads, and open Gmail's web compose (rather than
     // mailto:, which opens whatever the OS has registered — Outlook here) prefilled with a note
     // to attach it.
-    const blob = buildPdf().output("blob");
-    const body = `Dear ${tenant.name},\n\nPlease find your rent ledger statement for ${propertyAddress} attached to this email — I've just downloaded it as a PDF; please attach the file (from your Downloads) before sending.\n\nTotal outstanding: ${fmtCurrency(total)}\nPaid up to: ${tenant.paidUpToDate}\n\nKind regards,\nThe Landlord`;
-    downloadPdfAndEmailViaGmail({
-      blob,
-      fileName: ledgerFileName,
-      to: tenant.email,
-      subject: `Rent ledger — ${propertyAddress}`,
-      body,
-    });
+    void emailTenant(
+      tenant,
+      ledgerEmail({
+        tenantName: tenant.name,
+        propertyLabel: propertyAddress,
+        totalOutstanding: total,
+        paidUpTo: tenant.paidUpToDate,
+        landlordName: state.landlordProfile.fullName,
+      }),
+      { blob: buildPdf().output("blob"), fileName: ledgerFileName },
+    );
   };
 
   return (

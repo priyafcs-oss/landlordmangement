@@ -211,6 +211,7 @@ export function BillDetailDialog({
         billType: selected.billType,
         description: li.description,
         amount: parseFloat(li.amount) || 0,
+        landlordName: state.landlordProfile.fullName,
       }),
       { fileName: selected.sourceFileName, fileData: selected.sourceFileData },
     );

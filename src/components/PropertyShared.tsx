@@ -48,7 +48,7 @@ import { AddDepreciationReportDialog } from "@/components/AddDepreciationReportD
 import { DocumentReviewCard, ReviewLaterContext, ReparseContext } from "@/components/DocumentReviewCard";
 import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
-import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
+import { downloadBlob } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
 import { openBillDocument, readFileAsDataUrl } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
@@ -71,6 +71,7 @@ import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
 import { useReparse } from "@/lib/useReparse";
 import { findProvider } from "@/lib/providerMatch";
+import { emailTenant, leaseEmail } from "@/lib/tenantEmails";
 
 
 interface DomainSuggestResult {
@@ -5715,15 +5716,11 @@ export function LeaseAgreementWizard({
 
   const emailToTenant = () => {
     if (!generatedBlob) return;
-    const propertyLabel = property.alias || property.address;
-    const body = `Dear ${leaseForm.name},\n\nPlease find your tenancy agreement for ${propertyLabel} attached to this email — I've just downloaded it as a PDF; please attach the file (from your Downloads) before sending.\n\nKind regards,\n${state.landlordProfile.fullName || "The Landlord"}`;
-    downloadPdfAndEmailViaGmail({
-      blob: generatedBlob,
-      fileName,
-      to: leaseForm.email,
-      subject: `Tenancy agreement — ${propertyLabel}`,
-      body,
-    });
+    void emailTenant(
+      { name: leaseForm.name, email: leaseForm.email },
+      leaseEmail({ tenantName: leaseForm.name, propertyLabel: property.alias || property.address, landlordName: state.landlordProfile.fullName }),
+      { blob: generatedBlob, fileName },
+    );
   };
 
   return (
