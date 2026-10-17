@@ -11,6 +11,7 @@ import { buildTenantLedger, fmtCurrency, daysUntil } from "@/lib/calculations";
 import { toast } from "sonner";
 import { AiPlanStepList } from "@/components/AiPlanStepList";
 import { normalizeSteps, type AiPlanStep, type RawPlanStep } from "@/lib/aiPlanTypes";
+import { annualRentOf, currentTenants } from "@/lib/tenancy";
 
 export const Route = createFileRoute("/copilot")({
   head: () => ({
@@ -71,11 +72,8 @@ function CopilotPage() {
       };
     });
     const propertiesSummary = state.properties.map((p) => {
-      const tenants = state.tenants.filter((t) => t.propertyId === p.id);
-      const annualRent = tenants.reduce((s, t) => {
-        const mult = t.rentFrequency === "Weekly" ? 52 : t.rentFrequency === "Fortnightly" ? 26 : 12;
-        return s + t.rentAmount * mult;
-      }, 0);
+      // Current tenants only — summing every tenant ever recorded overstated the yield.
+      const annualRent = currentTenants(state.tenants, p.id).reduce((s, t) => s + annualRentOf(t), 0);
       const yieldPct = p.purchasePrice ? (annualRent / p.purchasePrice) * 100 : 0;
       const loan = state.loans.find((l) => l.propertyId === p.id);
       return {

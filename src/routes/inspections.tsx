@@ -40,9 +40,10 @@ import {
 import { toast } from "sonner";
 import { todayISO, daysUntil, inspectionDueStatus, addMonths, propertyInspectionCadenceDays } from "@/lib/calculations";
 import { openGmailCompose } from "@/lib/emailPdf";
-import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Property, Tenant } from "@/lib/types";
+import type { Inspection, InspectionIssue, ChecklistItem, ChecklistRoom, Property } from "@/lib/types";
 import { DEFAULT_INSPECTION_ROOMS } from "@/lib/types";
 import { DocumentLink } from "@/components/DocumentLink";
+import { currentTenant } from "@/lib/tenancy";
 
 export const Route = createFileRoute("/inspections")({
   head: () => ({
@@ -53,10 +54,6 @@ export const Route = createFileRoute("/inspections")({
   }),
   component: InspectionsPage,
 });
-
-function currentTenantOf(propertyId: string, tenants: Tenant[]): Tenant | undefined {
-  return tenants.find((t) => t.propertyId === propertyId);
-}
 
 /** "14:30" -> "2:30 PM". Falls back to the raw value if it's not a plain HH:MM string. */
 function formatTime12h(time: string): string {
@@ -114,7 +111,7 @@ function InspectionsPage() {
           ))}
           {overdueProperties.map((p) => {
             const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
-            const tenant = currentTenantOf(p.id, state.tenants);
+            const tenant = currentTenant(state.tenants, p.id);
             return (
               <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
                 <div>
@@ -262,7 +259,7 @@ function autoBookNext(
 function InspectionRow({ inspection, overdue }: { inspection: Inspection; overdue?: boolean }) {
   const { state, updateInspection, addInspection } = useStore();
   const property = state.properties.find((p) => p.id === inspection.propertyId);
-  const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenantOf(inspection.propertyId, state.tenants);
+  const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenant(state.tenants, inspection.propertyId);
   const [rescheduling, setRescheduling] = useState(false);
   const [newDate, setNewDate] = useState(inspection.date);
 
@@ -473,7 +470,7 @@ function BookInspectionDialog({
   const save = () => {
     if (slots.size === 0) return toast.error("Select at least one property");
     for (const [propertyId, slot] of slots) {
-      const tenant = currentTenantOf(propertyId, state.tenants);
+      const tenant = currentTenant(state.tenants, propertyId);
       addInspection({
         propertyId,
         tenantId: tenant?.id,
@@ -521,7 +518,7 @@ function BookInspectionDialog({
           <div className="max-h-96 space-y-1 overflow-y-auto rounded-md border p-2">
             {state.properties.map((p) => {
               const status = inspectionDueStatus(p.id, state.inspections, propertyInspectionCadenceDays(p));
-              const tenant = currentTenantOf(p.id, state.tenants);
+              const tenant = currentTenant(state.tenants, p.id);
               const slot = slots.get(p.id);
               return (
                 <div key={p.id} className="rounded p-1.5 hover:bg-muted/50">
@@ -582,7 +579,7 @@ function InspectionDetailDialog({ inspection, children }: { inspection: Inspecti
   const { state, updateInspection, addInspection, addMaintenanceRequest, consumeAiBudget } = useStore();
   const [open, setOpen] = useState(false);
   const property = state.properties.find((p) => p.id === inspection.propertyId);
-  const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenantOf(inspection.propertyId, state.tenants);
+  const tenant = state.tenants.find((t) => t.id === inspection.tenantId) ?? currentTenant(state.tenants, inspection.propertyId);
 
   const [date, setDate] = useState(inspection.date);
   const [status, setStatus] = useState<Inspection["status"]>(inspection.status);

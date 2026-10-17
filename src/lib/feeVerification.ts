@@ -1,5 +1,6 @@
 import type { Expense, ExpenseCategory, FeeFrequency, ProviderAgreement, RentFrequency } from "./types";
 import { fmtCurrency, mapExpenseCategory } from "./calculations";
+import { rentPerPeriod } from "./tenancy";
 
 /** The subset of a ProviderAgreement's fields verification actually needs — lets a caller pass
  * either a real ProviderAgreement row or a plain object built ad hoc (e.g. from an AI-extracted
@@ -104,12 +105,6 @@ export function categorizeAgentStatementLine(
   // Maintenance cost than the generic Sundry catch-all mapExpenseCategory defaults to elsewhere.
   const mapped = mapExpenseCategory(line.category, `${line.vendor ?? ""} ${line.description ?? ""}`);
   return mapped === "Sundry Rental Expenses" ? "Repairs & Maintenance" : mapped;
-}
-
-function weeklyRentOf(rentAmount: number, frequency: RentFrequency): number {
-  if (frequency === "Weekly") return rentAmount;
-  if (frequency === "Fortnightly") return rentAmount / 2;
-  return (rentAmount * 12) / 52; // Monthly
 }
 
 const TOLERANCE_RATE = 0.02;
@@ -263,7 +258,7 @@ export function verifyAgentFees(params: {
   if (wants("Letting Fee")) {
     const lettingActual = actualByType.get("Letting Fee") ?? 0;
     if (lettingActual > 0) {
-      const weeklyRent = tenantRent ? weeklyRentOf(tenantRent.amount, tenantRent.frequency) : undefined;
+      const weeklyRent = tenantRent ? rentPerPeriod(tenantRent.amount, tenantRent.frequency, "Weekly") : undefined;
       const rawExpected =
         agreement.lettingFeeAmount ?? (agreement.lettingFeeWeeksRent && weeklyRent ? agreement.lettingFeeWeeksRent * weeklyRent : undefined);
       const expected =

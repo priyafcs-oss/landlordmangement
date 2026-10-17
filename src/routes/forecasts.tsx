@@ -3,7 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fmtCurrency, localISO, todayISO } from "@/lib/calculations";
+import { fmtCurrency, localISO } from "@/lib/calculations";
+import { currentTenantsAll, rentPerPeriod } from "@/lib/tenancy";
 
 export const Route = createFileRoute("/forecasts")({
   head: () => ({
@@ -14,12 +15,6 @@ export const Route = createFileRoute("/forecasts")({
   }),
   component: ForecastsPage,
 });
-
-function monthlyRent(rentAmount: number, frequency: string): number {
-  if (frequency === "Weekly") return rentAmount * 4.33;
-  if (frequency === "Fortnightly") return rentAmount * 2.17;
-  return rentAmount;
-}
 
 function ForecastsPage() {
   return (
@@ -41,8 +36,7 @@ export function ForecastsContent() {
   const { state } = useStore();
   const [months, setMonths] = useState<3 | 6 | 12>(6);
 
-  const activeTenants = state.tenants.filter((t) => !t.leaseExpiry || t.leaseExpiry >= todayISO());
-  const knownMonthlyRent = activeTenants.reduce((s, t) => s + monthlyRent(t.rentAmount, t.rentFrequency), 0);
+  const knownMonthlyRent = currentTenantsAll(state.tenants).reduce((s, t) => s + rentPerPeriod(t.rentAmount, t.rentFrequency, "Monthly"), 0);
   const monthlyEmiTotal = state.loans.reduce((s, l) => s + l.monthlyEmi, 0);
 
   const cashflowRows: { name: string; rent: number; bills: number; emis: number; net: number }[] = [];
