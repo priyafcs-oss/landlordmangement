@@ -433,7 +433,9 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
           {noticeOpen && (
             <TemplateModal
               tenant={tenant}
-              outstanding={0}
+              // What the tenant actually owes (rent arrears + unpaid invoices) — this was hard-coded
+              // to 0, so the 7-day arrears notice always said $0.00.
+              outstanding={buildTenantLedger(tenant, state.ledger, state.invoices, state.rentChanges).total}
               property={propertyAddress}
               defaultKey={noticeOpen}
             />
