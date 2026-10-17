@@ -29,6 +29,7 @@ import { useAiExtraction } from "@/lib/useAiExtraction";
 import { MarkBillPaidDialog } from "@/components/MarkBillPaidDialog";
 import { SHARED_UNIT, uid } from "@/lib/constants";
 import { ExtractBillResult } from "@/lib/types";
+import { documentLayout } from "@/lib/documentLayout";
 
 
 
@@ -196,6 +197,7 @@ export function BillDetailDialog({
     void reading.reread(selected.sourceFileName, selected.sourceFileData);
   };
 
+  const layout = documentLayout(docExpanded, { dialog: "max-h-[90vh] max-w-4xl overflow-y-auto", cols: "md:grid-cols-2" });
   const hasNewRecharge = newlyRechargedLines(selected.billType, lineItems).length > 0;
   const propertyUnits = state.properties.find((p) => p.id === selected.propertyId)?.units ?? [];
 
@@ -304,11 +306,7 @@ export function BillDetailDialog({
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent
-        className={
-          docExpanded
-            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
-            : "max-h-[90vh] max-w-4xl overflow-y-auto"
-        }
+        className={layout.dialog}
       >
         <DialogHeader>
           <div className="flex items-center gap-2">
@@ -323,8 +321,8 @@ export function BillDetailDialog({
           </div>
         </DialogHeader>
 
-        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-2")}>
-          <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
+        <div className={layout.grid}>
+          <div className={layout.left}>
             {selected.sourceFileData && (
               <Button size="sm" variant="outline" className="mb-2 h-7 gap-1 text-xs" disabled={reading.busy} onClick={readWithAi}>
                 <RefreshCw className={"h-3 w-3" + (reading.busy ? " animate-spin" : "")} />
@@ -339,7 +337,7 @@ export function BillDetailDialog({
             />
           </div>
 
-          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
+          <div className={"space-y-4 " + layout.right}>
             {siblings.length > 1 && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="flex items-center justify-between">

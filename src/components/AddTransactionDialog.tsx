@@ -34,14 +34,14 @@ import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { matchProviderByName } from "@/lib/providerMatch";
 import { openBillDocument, readFileAsBase64 } from "@/lib/files";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
-import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
+import { useDuplicateGuard } from "@/components/DuplicateWarningDialog";
 import { AssessDepreciationDialog } from "@/components/AssessDepreciationDialog";
-import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
 import type { ExpenseCategory, IncomeCategory } from "@/lib/calculations";
 import type { AiIntakeProposal, Expense, ExpenseProposalPayload, ExtractBillResult } from "@/lib/types";
 import { SHARED_UNIT, uid } from "@/lib/constants";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
+import { documentLayout } from "@/lib/documentLayout";
 
 /** How this transaction was recorded — shown read-only next to the title, separate from the
  * invoice/file section below, so "where did this come from" and "what document backs it" are
@@ -170,7 +170,6 @@ export function AddTransactionDialog({
     if (onOpenChangeProp) onOpenChangeProp(o);
     else setInternalOpen(o);
   };
-  const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
@@ -179,6 +178,7 @@ export function AddTransactionDialog({
   // Whether the document pane(s) — and this whole dialog — are enlarged. Shared by both the
   // source-statement and invoice viewers so either one's "Enlarge" button grows the same dialog.
   const [docExpanded, setDocExpanded] = useState(false);
+  const layout = documentLayout(docExpanded);
   // Shown right after the Payee field prefills a line's category from a matched existing
   // provider's defaultCategory — so the auto-fill is visible/undoable rather than a silent trap.
   const [categoryPrefillNote, setCategoryPrefillNote] = useState<string | null>(null);
@@ -451,18 +451,17 @@ export function AddTransactionDialog({
     // findDuplicateRecord would otherwise just find this very row and flag itself.
     if (expense) return commitEdit();
 
-    const match = findDuplicateRecord(state.bills, state.expenses, {
+    const duplicate = duplicates.guard({
       propertyId: form.propertyId,
       vendorOrDescription: form.payee,
       amount: netTotal,
       date: form.date,
       referenceNumber: form.referenceNumber || undefined,
+      // This form has one reference field, and a BPAY reference read off a document lands in it —
+      // so it's also compared against a bill's BPAY reference (it never was).
+      bpayReference: form.referenceNumber || undefined,
     });
-    if (match) {
-      setDuplicateMatch(match);
-      return;
-    }
-    commitSave();
+    if (!duplicate) commitSave();
   };
 
   /** Locked to exactly one line item on one property — splitting/adding further line items only
@@ -521,7 +520,6 @@ export function AddTransactionDialog({
   };
 
   const commitSave = () => {
-    setDuplicateMatch(null);
     const properties = [form.propertyId, splitting ? form.secondPropertyId : ""].filter(Boolean);
     const validItems = lineItems.filter((li) => parseFloat(li.amount) > 0);
     const perPropertyDivisor = properties.length;
@@ -618,23 +616,13 @@ export function AddTransactionDialog({
     }
   };
 
-  /** Offered on the duplicate-warning dialog when the match is an Expense — the invoice being
-   * saved is very plausibly the actual document for a charge already posted from an agent
-   * statement (no invoice attached yet), not a genuinely separate second transaction. Attaches it
-   * there instead of creating a duplicate; if this came from Universal Upload, still marks the
-   * proposal applied so it doesn't linger in the review queue. Same pattern as AddBillDialog's own
-   * attachToExisting. */
-  const attachToExisting = () => {
-    if (!duplicateMatch || duplicateMatch.kind !== "expense") return;
-    updateExpense(duplicateMatch.id, {
-      invoiceFileName: form.invoiceFileName || undefined,
-      invoiceFileData: form.invoiceFileData || undefined,
-    });
-    if (initialProposal) markProposalApplied(initialProposal.id, { propertyId: form.propertyId });
-    setDuplicateMatch(null);
-    setOpen(false);
-    toast.success("Invoice attached to the existing transaction");
-  };
+  const duplicates = useDuplicateGuard({
+    onSaveAnyway: () => commitSave(),
+    file: { fileName: form.invoiceFileName, fileData: form.invoiceFileData },
+    proposalId: initialProposal?.id,
+    propertyId: form.propertyId,
+    onAttached: () => setOpen(false),
+  });
 
   return (
     <>
@@ -649,11 +637,7 @@ export function AddTransactionDialog({
         </DialogTrigger>
       )}
       <DialogContent
-        className={
-          docExpanded
-            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
-            : "max-h-[90vh] max-w-5xl overflow-y-auto"
-        }
+        className={layout.dialog}
       >
         <DialogHeader>
           <div className="flex items-center gap-2">
@@ -685,8 +669,8 @@ export function AddTransactionDialog({
           </div>
         )}
 
-        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")}>
-          <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
+        <div className={layout.grid}>
+          <div className={"space-y-3 " + layout.left}>
             {sourceDoc && (
               <div className="space-y-1">
                 <div className="text-xs font-medium text-muted-foreground">Source statement</div>
@@ -798,7 +782,7 @@ export function AddTransactionDialog({
             </div>
           </div>
 
-          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
+          <div className={"space-y-4 " + layout.right}>
             <div className="space-y-2 rounded-md border p-3">
               <div className="text-xs font-medium">Details</div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1048,12 +1032,7 @@ export function AddTransactionDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <DuplicateWarningDialog
-      match={duplicateMatch}
-      onCancel={() => setDuplicateMatch(null)}
-      onSaveAnyway={commitSave}
-      onAttachInstead={duplicateMatch?.kind === "expense" && form.invoiceFileData ? attachToExisting : undefined}
-    />
+    {duplicates.dialog}
     <AssessDepreciationDialog expense={assessingDepreciation ? (expense ?? null) : null} onClose={() => setAssessingDepreciation(false)} />
     </>
   );

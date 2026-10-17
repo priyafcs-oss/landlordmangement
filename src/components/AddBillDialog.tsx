@@ -45,11 +45,11 @@ import { ProviderPortalLogin } from "@/components/ProviderPortalLogin";
 import { extractEmailLinks, linkifySegments, pickBillLink, portalOrigin } from "@/lib/emailLinks";
 import { matchPropertyByAddress } from "@/lib/addressMatch";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
-import { DuplicateWarningDialog } from "@/components/DuplicateWarningDialog";
-import { findDuplicateRecord, type DuplicateMatch } from "@/lib/billMatch";
+import { useDuplicateGuard } from "@/components/DuplicateWarningDialog";
 import { matchProviderByName } from "@/lib/providerMatch";
 import type { BillType, AiIntakeProposal, BillProposalPayload, Property, Provider, ExpenseCategory, ExtractBillResult } from "@/lib/types";
 import { BILL_TYPES, SHARED_UNIT, uid } from "@/lib/constants";
+import { documentLayout } from "@/lib/documentLayout";
 
 
 
@@ -98,7 +98,6 @@ export function AddBillDialog({
     ensureProviderProperty,
     updateProperty,
     addInvoice,
-    updateExpense,
     markProposalApplied,
     dismissProposal,
   } = useStore();
@@ -120,7 +119,6 @@ export function AddBillDialog({
     propertyMatched: boolean;
     instalmentCount: number;
   } | null>(null);
-  const [duplicateMatch, setDuplicateMatch] = useState<DuplicateMatch | null>(null);
   const [pendingNotify, setPendingNotify] = useState(false);
   // Whether the document pane — and this whole dialog — is enlarged, so "Enlarge" on the source
   // document grows the review window (document + extracted fields together), not just the pane.
@@ -332,7 +330,8 @@ export function AddBillDialog({
 
     // Runs every save, regardless of entry route (manual, upload, or a staged proposal) — the
     // one thing none of those routes checked for before this existed.
-    const match = findDuplicateRecord(state.bills, state.expenses, {
+    setPendingNotify(notify);
+    const duplicate = duplicates.guard({
       propertyId,
       vendorOrDescription: form.providerName,
       amount: netTotal,
@@ -340,16 +339,10 @@ export function AddBillDialog({
       referenceNumber: form.referenceNumber || undefined,
       bpayReference: form.bpayReference || undefined,
     });
-    if (match) {
-      setDuplicateMatch(match);
-      setPendingNotify(notify);
-      return;
-    }
-    commitSave(notify);
+    if (!duplicate) commitSave(notify);
   };
 
   const commitSave = (notify: boolean) => {
-    setDuplicateMatch(null);
     const toNotify = newlyRechargedLines(form.billType, lineItems);
     const { lineItems: finalLineItems, invoices } = planBillLines(lineItems, { billType: form.billType, date: form.issueDate || todayISO() });
     invoices.forEach(addInvoice);
@@ -467,23 +460,15 @@ export function AddBillDialog({
     toast.success(billGroupId ? "Bill added with scheduled instalments" : "Bill added");
   };
 
-  /** Offered on the duplicate-warning dialog when the match is an Expense — the file being saved
-   * is very plausibly the actual invoice for a charge already posted from a rent statement (no PDF
-   * attached yet), not a genuinely separate second bill. Attaches it there instead of creating a
-   * duplicate; if this proposal came from Universal Upload, still marks it applied so it doesn't
-   * linger in the review queue. */
-  const attachToExisting = () => {
-    if (!duplicateMatch || duplicateMatch.kind !== "expense") return;
-    updateExpense(duplicateMatch.id, {
-      invoiceFileName: form.sourceFileName || undefined,
-      invoiceFileData: form.sourceFileData || undefined,
-    });
-    if (initialProposal) markProposalApplied(initialProposal.id, { propertyId });
-    setDuplicateMatch(null);
-    setOpen(false);
-    toast.success("Invoice attached to the existing transaction");
-  };
+  const duplicates = useDuplicateGuard({
+    onSaveAnyway: () => commitSave(pendingNotify),
+    file: { fileName: form.sourceFileName, fileData: form.sourceFileData },
+    proposalId: initialProposal?.id,
+    propertyId,
+    onAttached: () => setOpen(false),
+  });
 
+  const layout = documentLayout(docExpanded);
   const hasRecharge = newlyRechargedLines(form.billType, lineItems).length > 0;
 
   return (
@@ -500,11 +485,7 @@ export function AddBillDialog({
         </DialogTrigger>
       )}
       <DialogContent
-        className={
-          docExpanded
-            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
-            : "max-h-[90vh] max-w-5xl overflow-y-auto"
-        }
+        className={layout.dialog}
       >
         <DialogHeader>
           <DialogTitle>{initialProposal ? "Review bill" : "New bill"}</DialogTitle>
@@ -515,8 +496,8 @@ export function AddBillDialog({
           </div>
         </DialogHeader>
 
-        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")}>
-          <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
+        <div className={layout.grid}>
+          <div className={"space-y-3 " + layout.left}>
             <DocumentDropzone
               prompt="Drop a bill here, or choose a file."
               busy={reading.busy}
@@ -583,7 +564,7 @@ export function AddBillDialog({
             )}
           </div>
 
-          <div className={"space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "")}>
+          <div className={"space-y-4 " + layout.right}>
             <div className="flex items-center gap-2 rounded-md border p-2">
               <Checkbox
                 checked={form.hasInstalments}
@@ -799,12 +780,7 @@ export function AddBillDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <DuplicateWarningDialog
-      match={duplicateMatch}
-      onCancel={() => setDuplicateMatch(null)}
-      onSaveAnyway={() => commitSave(pendingNotify)}
-      onAttachInstead={duplicateMatch?.kind === "expense" && form.sourceFileData ? attachToExisting : undefined}
-    />
+    {duplicates.dialog}
     </>
   );
 }

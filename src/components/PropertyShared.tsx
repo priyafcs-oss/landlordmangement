@@ -50,7 +50,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fillLeaseTemplate, toDDMMYYYY, appendPdf, SMOKE_ALARM_BATTERY_TYPES } from "@/lib/leaseTemplate";
 import { downloadBlob, downloadPdfAndEmailViaGmail } from "@/lib/emailPdf";
 import { supabase } from "@/integrations/supabase/client";
-import { openBillDocument, readFileAsDataUrl, edgeFunctionErrorMessage } from "@/lib/files";
+import { openBillDocument, readFileAsDataUrl } from "@/lib/files";
 import { DocumentLink } from "@/components/DocumentLink";
 import { StoredImageLink, StoredVideo } from "@/components/StoredImage";
 import { EntityDialog } from "@/components/EntityDialog";
@@ -69,6 +69,7 @@ import { FileSignature } from "lucide-react";
 import { SHARED_UNIT, uid } from "@/lib/constants";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
+import { useReparse } from "@/lib/useReparse";
 
 
 interface DomainSuggestResult {
@@ -209,20 +210,31 @@ function BankStatementNoticeRow({ proposal, onDismiss }: { proposal: AiIntakePro
   );
 }
 
-/** Compact pending-list row for a "bill" proposal — Review opens the real Add Bill dialog
- * (pre-filled via initialProposal), the same form/logic used everywhere else a bill is entered,
- * instead of a separate lighter-weight card that could drift out of sync with it. */
-function BillProposalRow({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+/** Compact pending-list row for a staged bill/expense proposal — Review opens the real Add Bill /
+ * Add Transaction dialog (pre-filled via initialProposal), the same form used everywhere else that
+ * record is entered, rather than a lighter card that could drift out of sync with it. */
+function PendingProposalRow({
+  proposal,
+  onDismiss,
+  badge,
+  title,
+  detail,
+  dialog,
+}: {
+  proposal: AiIntakeProposal;
+  onDismiss: () => void;
+  badge: string;
+  title: string;
+  detail: string;
+  dialog: (open: boolean, setOpen: (o: boolean) => void) => React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
-  const payload = proposal.payload as BillProposalPayload;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Badge variant="secondary">Bill</Badge>
-        <span className="font-medium">{proposal.providerName || "Unknown vendor"}</span>
-        <span className="text-muted-foreground">
-          {fmtCurrency(payload.amount)} due {payload.dueDate}
-        </span>
+        <Badge variant="secondary">{badge}</Badge>
+        <span className="font-medium">{title}</span>
+        <span className="text-muted-foreground">{detail}</span>
         {(proposal.reviewReason ?? "")
           .split("; ")
           .filter(Boolean)
@@ -240,43 +252,36 @@ function BillProposalRow({ proposal, onDismiss }: { proposal: AiIntakeProposal; 
           Dismiss
         </Button>
       </div>
-      <AddBillDialog initialProposal={proposal} open={open} onOpenChange={setOpen} />
+      {dialog(open, setOpen)}
     </div>
   );
 }
 
-/** Compact pending-list row for an "expense" proposal — same pattern as BillProposalRow, opening
- * the real Add Transaction dialog instead of a separate review card. */
+function BillProposalRow({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
+  const payload = proposal.payload as BillProposalPayload;
+  return (
+    <PendingProposalRow
+      proposal={proposal}
+      onDismiss={onDismiss}
+      badge="Bill"
+      title={proposal.providerName || "Unknown vendor"}
+      detail={`${fmtCurrency(payload.amount)} due ${payload.dueDate}`}
+      dialog={(open, setOpen) => <AddBillDialog initialProposal={proposal} open={open} onOpenChange={setOpen} />}
+    />
+  );
+}
+
 function ExpenseProposalRow({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const [open, setOpen] = useState(false);
   const payload = proposal.payload as ExpenseProposalPayload;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded border p-2 text-xs">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Badge variant="secondary">Transaction</Badge>
-        <span className="font-medium">{payload.itemName}</span>
-        <span className="text-muted-foreground">
-          {fmtCurrency(payload.cost)} • {payload.date}
-        </span>
-        {(proposal.reviewReason ?? "")
-          .split("; ")
-          .filter(Boolean)
-          .map((r) => (
-            <Badge key={r} variant="destructive">
-              {r}
-            </Badge>
-          ))}
-      </div>
-      <div className="flex shrink-0 gap-2">
-        <Button size="sm" onClick={() => setOpen(true)}>
-          Review
-        </Button>
-        <Button size="sm" variant="outline" onClick={onDismiss}>
-          Dismiss
-        </Button>
-      </div>
-      <AddTransactionDialog initialProposal={proposal} open={open} onOpenChange={setOpen} />
-    </div>
+    <PendingProposalRow
+      proposal={proposal}
+      onDismiss={onDismiss}
+      badge="Transaction"
+      title={payload.itemName}
+      detail={`${fmtCurrency(payload.cost)} • ${payload.date}`}
+      dialog={(open, setOpen) => <AddTransactionDialog initialProposal={proposal} open={open} onOpenChange={setOpen} />}
+    />
   );
 }
 
@@ -382,7 +387,7 @@ export function ProposalReviewDialog({
 }
 
 function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, markProposalApplied } = useStore();
+  const { markProposalApplied } = useStore();
   const payload = proposal.payload as TenantLeaseProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
@@ -400,25 +405,7 @@ function TenantLeaseProposalCard({ proposal, onDismiss }: { proposal: AiIntakePr
           {payload.bondAmount ? ` • Bond ${fmtCurrency(payload.bondAmount)}` : ""}
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">
-              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
-            </span>
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger className="h-7 w-[220px] text-xs">
-                <SelectValue placeholder="Assign property" />
-              </SelectTrigger>
-              <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         <div className="flex flex-wrap gap-2 pt-1">
           <TenantDialog
@@ -482,7 +469,7 @@ function mapOwnershipType(raw?: string): Entity["type"] {
 }
 
 function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProperty, markProposalApplied, findOrCreateEntity, addExpense } = useStore();
+  const { updateProperty, markProposalApplied, findOrCreateEntity, addExpense } = useStore();
   const payload = proposal.payload as PropertyDetailProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
 
@@ -548,23 +535,7 @@ function PropertyDetailProposalCard({ proposal, onDismiss }: { proposal: AiIntak
           {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-xs ${proposal.propertyId ? "text-muted-foreground" : "text-destructive"}`}>
-            {proposal.propertyId ? "Property (wrong match? change it):" : "No property matched — assign one:"}
-          </span>
-          <Select value={propertyId} onValueChange={setPropertyId}>
-            <SelectTrigger className="h-7 w-[220px] text-xs">
-              <SelectValue placeholder="Assign property" />
-            </SelectTrigger>
-            <SelectContent>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.alias || p.address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         {payload.ownerName && (
           <div className="space-y-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs">
@@ -700,7 +671,7 @@ function rentStatementPeriodEnd(p: AiIntakeProposal): string | undefined {
 }
 
 function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied, refreshOne, removeOne } = useStore();
+  const { state, addLedger, addExpense, addInvoice, findOrCreateProvider, markBillPaid, markProposalApplied } = useStore();
   const payload = proposal.payload as RentLedgerProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const expenseLines = payload.expenseLines ?? [];
@@ -1018,35 +989,9 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
   // UnclassifiedProposalCard's identical use of this function) — useful when a line was
   // misread or misclassified and might come out right on a second pass. Deletes this proposal
   // row once the replacement is confirmed written, so there's never a stale duplicate left behind.
-  const [reparsing, setReparsing] = useState(false);
-  const reparse = async () => {
-    if (!proposal.sourceFileData) return;
-    setReparsing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke<{
-        ok?: boolean;
-        error?: string;
-        proposalId?: string;
-        billId?: string;
-      }>("reparse-document", {
-        body: { proposalId: proposal.id, documentType: "rent_statement" },
-      });
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Re-parse failed");
-        return;
-      }
-      // reparse-document deletes the original proposal server-side once its replacement is
-      // written, so mirror that here instead of re-fetching every table via refresh().
-      removeOne("aiProposals", proposal.id);
-      if (data.proposalId) await refreshOne("aiProposals", data.proposalId);
-      if (data.billId) await refreshOne("bills", data.billId);
-      toast.success("Re-parsed — check the review queue for the fresh version");
-    } catch (e) {
-      toast.error(await edgeFunctionErrorMessage(e));
-    } finally {
-      setReparsing(false);
-    }
+  const { reparse: reparseAs, reparsing } = useReparse(proposal.id);
+  const reparse = () => {
+    if (proposal.sourceFileData) void reparseAs("rent_statement", "Re-parsed — check the review queue for the fresh version");
   };
 
   return (
@@ -1065,25 +1010,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {!propertyId && (
-            <span className="text-xs text-destructive">
-              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
-            </span>
-          )}
-          {propertyId && <span className="text-xs text-muted-foreground">Property:</span>}
-          <Select value={propertyId} onValueChange={setPropertyId}>
-            <SelectTrigger className="h-7 w-[220px] text-xs">
-              <SelectValue placeholder="Assign property" />
-            </SelectTrigger>
-            <SelectContent>
-              {state.properties.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.alias || p.address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId}>
           <PropertyDialog
             property={null}
             onDone={() => {}}
@@ -1095,7 +1022,7 @@ function RentLedgerProposalCard({ proposal, onDismiss }: { proposal: AiIntakePro
               </Button>
             }
           />
-        </div>
+        </ProposalPropertyRow>
 
         {!multiTenant && (
           <div className="flex flex-wrap items-center gap-2">
@@ -1548,25 +1475,7 @@ function DepreciationReportProposalCard({ proposal, onDismiss }: { proposal: AiI
           {payload.reportDate && <span className="text-xs text-muted-foreground">{payload.reportDate}</span>}
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">
-              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
-            </span>
-            <Select value={propertyId} onValueChange={setPropertyId}>
-              <SelectTrigger className="h-7 w-[220px] text-xs">
-                <SelectValue placeholder="Assign property" />
-              </SelectTrigger>
-              <SelectContent>
-                {state.properties.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.alias || p.address}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         {dup && (
           <div className="space-y-1.5 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
@@ -1636,11 +1545,11 @@ const REPARSE_DOCUMENT_TYPES: { value: string; label: string }[] = [
 ];
 
 function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
-  const { state, updateProposal, refreshOne, removeOne } = useStore();
+  const { state, updateProposal } = useStore();
   const payload = proposal.payload as UnclassifiedProposalPayload;
   const [propertyId, setPropertyId] = useState(proposal.propertyId ?? "");
   const [reclassifyAs, setReclassifyAs] = useState("");
-  const [reparsing, setReparsing] = useState(false);
+  const { reparse: reparseAs, reparsing } = useReparse(proposal.id);
 
   const file = () => {
     updateProposal(proposal.id, { propertyId: propertyId || undefined, status: "applied" });
@@ -1651,36 +1560,12 @@ function UnclassifiedProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
   // DB-writing parsers the email/upload pipeline dispatches to, see router.ts) instead of relying
   // on Gemini's own classification guess. Deletes this unclassified row once the replacement is
   // confirmed written — see reparse-document/index.ts.
-  const reparse = async () => {
+  const reparse = () => {
     if (!reclassifyAs) return toast.error("Choose what kind of document this is first");
-    setReparsing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke<{
-        ok?: boolean;
-        error?: string;
-        proposalId?: string;
-        billId?: string;
-      }>("reparse-document", {
-        body: { proposalId: proposal.id, documentType: reclassifyAs },
-      });
-      if (error) throw error;
-      if (!data?.ok) {
-        toast.error(data?.error || "Couldn't read this document as that type");
-        return;
-      }
-      // reparse-document deletes the original proposal server-side once its replacement is
-      // written, so mirror that here instead of re-fetching every table via refresh().
-      removeOne("aiProposals", proposal.id);
-      if (data.proposalId) await refreshOne("aiProposals", data.proposalId);
-      if (data.billId) await refreshOne("bills", data.billId);
-      toast.success(
-        `Re-parsed as ${REPARSE_DOCUMENT_TYPES.find((t) => t.value === reclassifyAs)?.label ?? reclassifyAs} — check the review queue`,
-      );
-    } catch (e) {
-      toast.error(await edgeFunctionErrorMessage(e));
-    } finally {
-      setReparsing(false);
-    }
+    void reparseAs(
+      reclassifyAs,
+      `Re-parsed as ${REPARSE_DOCUMENT_TYPES.find((t) => t.value === reclassifyAs)?.label ?? reclassifyAs} — check the review queue`,
+    );
   };
 
   return (
@@ -1759,6 +1644,38 @@ function PropertyPicker({ propertyId, onChange }: { propertyId: string; onChange
   );
 }
 
+/**
+ * The property row on every proposal review card: which property this document belongs to, with
+ * the picker always available — "No property matched" when the server couldn't match the address,
+ * or the matched property shown so a wrong match can still be changed. `children` adds extras such
+ * as a "create property" button. (Cards used to hide the picker once matched, except two.)
+ */
+function ProposalPropertyRow({
+  proposal,
+  propertyId,
+  onChange,
+  children,
+}: {
+  proposal: AiIntakeProposal;
+  propertyId: string;
+  onChange: (id: string) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {propertyId ? (
+        <span className="text-xs text-muted-foreground">Property{proposal.propertyId ? " (wrong match? change it)" : ""}:</span>
+      ) : (
+        <span className="text-xs text-destructive">
+          No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
+        </span>
+      )}
+      <PropertyPicker propertyId={propertyId} onChange={onChange} />
+      {children}
+    </div>
+  );
+}
+
 function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeProposal; onDismiss: () => void }) {
   const { state, addLoan, markProposalApplied } = useStore();
   const payload = proposal.payload as LoanDocumentProposalPayload;
@@ -1789,14 +1706,7 @@ function LoanDocumentProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           <span className="font-medium">{payload.lenderName}</span>
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">
-              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
-            </span>
-            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
-          </div>
-        )}
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
           <div>
@@ -2037,12 +1947,7 @@ function LoanStatementProposalCard({ proposal, onDismiss }: { proposal: AiIntake
           </span>
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">No property matched:</span>
-            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
-          </div>
-        )}
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         {propertyId && !creatingLoan && (
           <div className="flex flex-wrap items-center gap-2">
@@ -2581,12 +2486,7 @@ function PropertySaleProposalCard({ proposal, onDismiss }: { proposal: AiIntakeP
           {proposal.rawPropertyAddress && <span className="text-xs text-muted-foreground">{proposal.rawPropertyAddress}</span>}
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">No property matched:</span>
-            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
-          </div>
-        )}
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         <div className="grid grid-cols-2 gap-1 rounded border p-2 text-xs sm:grid-cols-3">
           <div>
@@ -2681,14 +2581,7 @@ function AgencyAgreementProposalCard({ proposal, onDismiss }: { proposal: AiInta
           <span className="font-medium">{payload.agencyName || "Unknown agency"}</span>
         </div>
 
-        {!proposal.propertyId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-destructive">
-              No property matched{proposal.rawPropertyAddress ? ` — "${proposal.rawPropertyAddress}"` : ""}
-            </span>
-            <PropertyPicker propertyId={propertyId} onChange={setPropertyId} />
-          </div>
-        )}
+        <ProposalPropertyRow proposal={proposal} propertyId={propertyId} onChange={setPropertyId} />
 
         <AgreementFields form={form} setForm={setForm} />
 

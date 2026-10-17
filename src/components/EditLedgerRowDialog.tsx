@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { BillDocumentViewer } from "@/components/BillDocumentViewer";
 import { toast } from "sonner";
+import { documentLayout } from "@/lib/documentLayout";
 
 /** Edits a rent-payment (or other income) ledger row's date/amount/description — from the
  * Transactions table, the property's own Owner Ledger tab, or anywhere else a ledger row is
@@ -23,6 +24,7 @@ export function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId:
   const [sourceDoc, setSourceDoc] = useState<{ fileName?: string; fileData?: string } | null>(null);
   const [sourceDocRemoved, setSourceDocRemoved] = useState(false);
   const [docExpanded, setDocExpanded] = useState(false);
+  const layout = documentLayout(docExpanded, { dialog: "max-w-2xl", cols: "sm:grid-cols-[240px_1fr]", expandedCols: "sm:grid-cols-[minmax(0,1fr)_320px]" });
 
   const onOpenChange = (o: boolean) => {
     setOpen(o);
@@ -59,17 +61,13 @@ export function EditLedgerRowDialog({ ledgerEntryId, trigger }: { ledgerEntryId:
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent
-        className={
-          docExpanded
-            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
-            : "max-w-2xl"
-        }
+        className={layout.dialog}
       >
         <DialogHeader>
           <DialogTitle>{isRent ? "Edit rent payment" : `Edit ${entry.type.toLowerCase()}`}</DialogTitle>
         </DialogHeader>
-        <div className={"grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden sm:grid-cols-[minmax(0,1fr)_320px]" : "sm:grid-cols-[240px_1fr]")}>
-          <div className={docExpanded ? "overflow-y-auto pr-1" : ""}>
+        <div className={layout.grid}>
+          <div className={layout.left}>
             <BillDocumentViewer
               fileName={sourceDoc?.fileName}
               fileData={sourceDoc?.fileData}

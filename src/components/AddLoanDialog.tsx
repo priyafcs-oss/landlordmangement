@@ -27,6 +27,7 @@ import type { Loan } from "@/lib/types";
 import { useAiExtraction } from "@/lib/useAiExtraction";
 import { loanFieldsFromPayload, loanPayloadFromExtract, type LoanExtractResult } from "@/lib/extractMappers";
 import { DocumentDropzone } from "@/components/DocumentDropzone";
+import { documentLayout } from "@/lib/documentLayout";
 
 /**
  * Manual Add/Edit Loan — previously the only way a Loan record ever came into existence was an
@@ -73,6 +74,7 @@ export function AddLoanDialog({
   // replaced, since its terms are the sensible starting point for the new one.
   const prefill = loan ?? refinanceFrom;
   const [docExpanded, setDocExpanded] = useState(false);
+  const layout = documentLayout(docExpanded, isEdit ? { dialog: "max-h-[90vh] max-w-2xl overflow-y-auto" } : {});
   // Bumped on every reset so an extraction still in flight when the dialog is closed can tell
   // its own result is stale and skip applying it — same pattern as Add Bill/Transaction/
   // Depreciation Report.
@@ -213,13 +215,7 @@ export function AddLoanDialog({
         )}
       </DialogTrigger>
       <DialogContent
-        className={
-          docExpanded
-            ? "flex h-[95vh] max-h-[95vh] w-[95vw] max-w-[95vw] flex-col overflow-y-auto"
-            : isEdit
-              ? "max-h-[90vh] max-w-2xl overflow-y-auto"
-              : "max-h-[90vh] max-w-5xl overflow-y-auto"
-        }
+        className={layout.dialog}
       >
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit loan" : isRefinance ? `Refinance ${refinanceFrom!.bankName} loan` : "Add loan"}</DialogTitle>
@@ -236,11 +232,11 @@ export function AddLoanDialog({
           className={
             isEdit
               ? "space-y-4 text-sm"
-              : "grid gap-4 text-sm " + (docExpanded ? "flex-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[340px_1fr]")
+              : layout.grid
           }
         >
           {!isEdit && (
-            <div className={"space-y-3 " + (docExpanded ? "overflow-y-auto pr-1" : "")}>
+            <div className={"space-y-3 " + layout.left}>
               <DocumentDropzone
                 prompt="Drop the loan offer/contract here, or choose a file."
                 busy={reading.busy}
@@ -267,7 +263,7 @@ export function AddLoanDialog({
             </div>
           )}
 
-          <div className={!isEdit ? "space-y-4 " + (docExpanded ? "overflow-y-auto pl-1" : "") : ""}>
+          <div className={!isEdit ? "space-y-4 " + layout.right : ""}>
             {!lockedPropertyId && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="text-xs font-medium">Property</div>
