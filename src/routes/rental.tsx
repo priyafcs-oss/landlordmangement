@@ -395,9 +395,9 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
           {noticeOpen && (
             <TemplateModal
               tenant={tenant}
-              // What the tenant actually owes (rent arrears + unpaid invoices) — this was hard-coded
-              // to 0, so the 7-day arrears notice always said $0.00.
-              outstanding={buildTenantLedger(tenant, state.ledger, state.invoices, state.rentChanges).total}
+              // What the tenant actually owes today (rent + invoices, one account) — this was
+              // hard-coded to 0, so the 7-day arrears notice always said $0.00.
+              outstanding={buildTenantLedger(tenant, state.ledger, state.invoices, state.rentChanges).overdue}
               property={propertyAddress}
               defaultKey={noticeOpen}
             />
@@ -473,11 +473,9 @@ const SOURCE_LABELS: Record<string, string> = {
 function LedgerRowsTable({
   rows,
   onDelete,
-  onToggleInvoicePaid,
 }: {
   rows: LedgerRow[];
   onDelete: (row: LedgerRow) => void;
-  onToggleInvoicePaid: (row: LedgerRow) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded border">
@@ -525,10 +523,10 @@ function LedgerRowsTable({
               </td>
               <td className="px-3 py-2 text-right">
                 <div className="flex justify-end gap-1">
-                  {r.invoiceId && (
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onToggleInvoicePaid(r)}>
-                      Mark {r.invoiceStatus === "Paid" ? "Unpaid" : "Paid"}
-                    </Button>
+                  {r.invoiceStatus && (
+                    <Badge variant={r.invoiceStatus === "Paid" ? "secondary" : "outline"} className="text-[10px]">
+                      {r.invoiceStatus}
+                    </Badge>
                   )}
                   {r.canDelete && (r.entryId || r.invoiceId) && (
                     <Button size="icon" variant="ghost" onClick={() => onDelete(r)}>
@@ -549,12 +547,10 @@ function LedgerGroupSection({
   label,
   rows,
   onDelete,
-  onToggleInvoicePaid,
 }: {
   label: string;
   rows: LedgerRow[];
   onDelete: (row: LedgerRow) => void;
-  onToggleInvoicePaid: (row: LedgerRow) => void;
 }) {
   const [open, setOpen] = useState(false);
   const subtotal = rows.reduce(
@@ -576,7 +572,7 @@ function LedgerGroupSection({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="border-t p-2">
-        <LedgerRowsTable rows={rows} onDelete={onDelete} onToggleInvoicePaid={onToggleInvoicePaid} />
+        <LedgerRowsTable rows={rows} onDelete={onDelete} />
       </CollapsibleContent>
     </Collapsible>
   );
@@ -593,8 +589,8 @@ function LedgerTotalsFooter({ debit, credit }: { debit: number; credit: number }
 }
 
 function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
-  const { state, addLedger, deleteLedger, deleteInvoice, updateInvoice } = useStore();
-  const { rows, total, outstandingRent, outstandingInvoices } = buildTenantLedger(
+  const { state, addLedger, deleteLedger, deleteInvoice } = useStore();
+  const { rows, total, overdue, outstandingRent, outstandingInvoices, nextDue } = buildTenantLedger(
     tenant,
     state.ledger,
     state.invoices,
@@ -605,9 +601,9 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const [fy, setFy] = useState<string>("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("month");
 
-  const nextDue = addDays(tenant.paidUpToDate, 1);
   const propertyAddress = tenant.unitAddress || state.properties.find((p) => p.id === tenant.propertyId)?.address || "";
-  const paidUpTo = paidUpToDetails(tenant, state.ledger, state.rentChanges);
+  // Derived live from the whole account (payments less invoices/charges), not the persisted copy.
+  const paidUpTo = paidUpToDetails(tenant, state.ledger, state.rentChanges, state.invoices);
 
   const fyOptions = useMemo(() => buildFyOptions(5), []);
 
@@ -650,7 +646,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     const rate = dailyRentRate(tenant.rentAmount, tenant.rentFrequency);
     // 1 week (weekly rent) = 7 days; 9 weeks = 63 days. Never off-by-one.
     const daysCovered = Math.floor(val / rate);
-    // The store re-derives paidUpToDate from lease start + all rent credits.
+    // The store re-derives paidUpToDate from lease start + the whole account (credits less invoices/charges).
     addLedger({
       tenantId: tenant.id,
       date: paymentDate,
@@ -667,7 +663,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
 
   /** Emails a short "rent received" confirmation — the just-entered payment amount/date if the
    * landlord has typed one in, otherwise the most recent actual payment on this tenant's ledger.
-   * Always states the authoritative, store-recalculated paidUpToDate rather than anything
+   * Always states the paid-up-to date derived from the whole ledger rather than anything
    * computed locally, so it can never say something the ledger itself doesn't back up. */
   const emailRentReceived = () => {
     const typedAmount = parseFloat(amount);
@@ -682,7 +678,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
         propertyLabel: propertyAddress,
         amount: receivedAmount,
         date: receivedDate,
-        paidUpTo: tenant.paidUpToDate,
+        paidUpTo: paidUpTo.date,
         landlordName: state.landlordProfile.fullName,
       }),
     );
@@ -700,26 +696,23 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     }
   };
 
-  const toggleInvoicePaid = (row: LedgerRow) => {
-    if (!row.invoiceId) return;
-    updateInvoice(row.invoiceId, { status: row.invoiceStatus === "Paid" ? "Unpaid" : "Paid" });
-    toast.success(row.invoiceStatus === "Paid" ? "Marked unpaid" : "Marked paid");
-  };
-
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
           <span>Ledger — {fmtCurrency(tenant.rentAmount)}/{tenant.rentFrequency}</span>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={total > 0 ? "destructive" : "secondary"}>
-              {total > 0 ? `Owes ${fmtCurrency(total)}` : "Up to date"}
+            {/* Owing = overdue as of today. The closing balance also carries the rest of the current
+                rent cycle (charged in advance), which a tenant paid up to a future date doesn't owe yet. */}
+            <Badge variant={overdue > 0.01 ? "destructive" : "secondary"}>
+              {overdue > 0.01 ? `Owes ${fmtCurrency(overdue)}` : "Up to date"}
             </Badge>
             <LedgerExportButtons
               tenant={tenant}
               propertyAddress={propertyAddress}
               rows={filteredRows}
               total={total}
+              paidUpTo={paidUpTo.date}
             />
           </div>
         </CardTitle>
@@ -730,13 +723,13 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
             label="Paid up to"
             value={
               paidUpTo.extra > 0
-                ? `${tenant.paidUpToDate} + ${fmtCurrency(paidUpTo.extra)} extra`
-                : tenant.paidUpToDate
+                ? `${paidUpTo.date} + ${fmtCurrency(paidUpTo.extra)} extra`
+                : paidUpTo.date
             }
           />
           <Stat label="Next rent due" value={nextDue} />
-          <Stat label="Rent arrears" value={fmtCurrency(outstandingRent)} />
-          <Stat label="Invoices outstanding" value={fmtCurrency(outstandingInvoices)} />
+          <Stat label="Rent overdue" value={fmtCurrency(outstandingRent)} />
+          <Stat label="Invoices unpaid" value={fmtCurrency(outstandingInvoices)} />
         </div>
 
         <div className="flex flex-wrap items-end gap-2">
@@ -804,7 +797,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
         </div>
 
         {groupBy === "none" || !groups ? (
-          <LedgerRowsTable rows={filteredRows} onDelete={removeRow} onToggleInvoicePaid={toggleInvoicePaid} />
+          <LedgerRowsTable rows={filteredRows} onDelete={removeRow} />
         ) : (
           <div className="space-y-2">
             {groups.length === 0 && (
@@ -818,7 +811,6 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
                 label={groupBy === "month" ? formatMonthLabel(key) : `FY ${key}`}
                 rows={groupRows}
                 onDelete={removeRow}
-                onToggleInvoicePaid={toggleInvoicePaid}
               />
             ))}
           </div>
@@ -983,11 +975,13 @@ function LedgerExportButtons({
   propertyAddress,
   rows,
   total,
+  paidUpTo,
 }: {
   tenant: Tenant;
   propertyAddress: string;
   rows: LedgerRow[];
   total: number;
+  paidUpTo: string;
 }) {
   const { state } = useStore();
   const header = ["Date", "Description", "Debit", "Credit", "Balance", "Source"];
@@ -1024,7 +1018,7 @@ function LedgerExportButtons({
     doc.setTextColor(85);
     doc.text(
       pdfSafe(
-        `${propertyAddress} - Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} - Paid up to ${tenant.paidUpToDate} - Generated ${todayISO()}`,
+        `${propertyAddress} - Rent ${fmtCurrency(tenant.rentAmount)} / ${tenant.rentFrequency} - Paid up to ${paidUpTo} - Generated ${todayISO()}`,
       ),
       marginX,
       y,
@@ -1078,7 +1072,7 @@ function LedgerExportButtons({
     doc.text(pdfSafe(fmtCurrency(sumDebit)), col.debit, y);
     doc.text(pdfSafe(fmtCurrency(sumCredit)), col.credit, y);
     y += 7;
-    doc.text("Total outstanding", col.desc, y);
+    doc.text("Closing balance", col.desc, y);
     doc.text(pdfSafe(fmtCurrency(total)), col.balance, y);
 
     return doc;
@@ -1101,7 +1095,7 @@ function LedgerExportButtons({
         tenantName: tenant.name,
         propertyLabel: propertyAddress,
         totalOutstanding: total,
-        paidUpTo: tenant.paidUpToDate,
+        paidUpTo,
         landlordName: state.landlordProfile.fullName,
       }),
       { blob: buildPdf().output("blob"), fileName: ledgerFileName },

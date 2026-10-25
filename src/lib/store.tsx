@@ -516,7 +516,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       // paidUpToDate is persisted and was computed a day short before the addDays DST fix — see
       // healPaidUpDates.
-      const healed = new Map(healPaidUpDates(tenants, ledger, rentChanges).map((t) => [t.id, t]));
+      const healed = new Map(healPaidUpDates(tenants, ledger, rentChanges, invoices).map((t) => [t.id, t]));
       for (const t of healed.values()) void updateRow(TABLES.tenants, t.id, { paidUpToDate: t.paidUpToDate });
       const healedTenants = tenants.map((t) => healed.get(t.id) ?? t);
       const next: AppState = {
@@ -615,18 +615,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const set: StoreCtx["set"] = (updater) => setState((s) => updater(s));
 
   /**
-   * Single source of truth for `paidUpToDate`: always re-derived from the lease
-   * start date plus every Rent Payment credit in the ledger, then persisted.
+   * Single source of truth for `paidUpToDate`: always re-derived from the lease start date plus
+   * the tenant's whole account (every credit, less invoices and other charges), then persisted.
    */
   const recomputePaidUp = (
     tenantId: string,
     tenants: Tenant[],
     ledger: LedgerEntry[],
     rentChanges: RentChange[],
+    invoices: TenantInvoice[],
   ): Tenant[] =>
     tenants.map((t) => {
       if (t.id !== tenantId) return t;
-      const next = paidUpToDateFromPayments(t, ledger, rentChanges);
+      const next = paidUpToDateFromPayments(t, ledger, rentChanges, invoices);
       if (next === t.paidUpToDate) return t;
       void updateRow(TABLES.tenants, t.id, { paidUpToDate: next });
       return { ...t, paidUpToDate: next };
@@ -839,7 +840,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           patch.rentAmount !== undefined ||
           patch.rentFrequency !== undefined
         ) {
-          nextTenants = recomputePaidUp(id, nextTenants, s.ledger, rentChanges);
+          nextTenants = recomputePaidUp(id, nextTenants, s.ledger, rentChanges, s.invoices);
         }
         return { ...s, tenants: nextTenants, rentChanges };
       }),
@@ -907,6 +908,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           s.tenants.map((t) => (t.id === tenantId ? { ...t, ...patch } : t)),
           s.ledger,
           rentChanges,
+          s.invoices,
         );
         return { ...s, leaseHistory: [...s.leaseHistory, history], rentChanges, tenants };
       }),
@@ -943,7 +945,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const row: LedgerEntry = { ...e, id: uid("le"), created_at: e.created_at ?? new Date().toISOString() };
         void upsertRow(TABLES.ledger, row as unknown as Record<string, unknown>);
         const ledger = [...s.ledger, row];
-        return { ...s, ledger, tenants: recomputePaidUp(row.tenantId, s.tenants, ledger, s.rentChanges) };
+        return { ...s, ledger, tenants: recomputePaidUp(row.tenantId, s.tenants, ledger, s.rentChanges, s.invoices) };
       }),
     deleteLedger: (id) =>
       set((s) => {
@@ -953,7 +955,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return {
           ...s,
           ledger,
-          tenants: entry ? recomputePaidUp(entry.tenantId, s.tenants, ledger, s.rentChanges) : s.tenants,
+          tenants: entry ? recomputePaidUp(entry.tenantId, s.tenants, ledger, s.rentChanges, s.invoices) : s.tenants,
         };
       }),
     updateLedger: (id, patch) =>
@@ -968,22 +970,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ledger,
           // A date/amount edit shifts this tenant's paid-up-to date the same way adding/deleting
           // a payment does, so it has to be recomputed here too, not just on add/delete.
-          tenants: recomputePaidUp(patch.tenantId ?? existing.tenantId, s.tenants, ledger, s.rentChanges),
+          tenants: recomputePaidUp(patch.tenantId ?? existing.tenantId, s.tenants, ledger, s.rentChanges, s.invoices),
         };
       }),
 
     addInvoice: (i) => {
       const row: TenantInvoice = { ...i, id: uid("inv") };
       void upsertRow(TABLES.invoices, row as unknown as Record<string, unknown>);
-      set((s) => ({ ...s, invoices: [...s.invoices, row] }));
+      set((s) => {
+        const invoices = [...s.invoices, row];
+        return { ...s, invoices, tenants: recomputePaidUp(row.tenantId, s.tenants, s.ledger, s.rentChanges, invoices) };
+      });
     },
+    // An invoice is a charge on the tenant's one account, so adding/changing/removing one moves
+    // their paid-up-to date just like a payment does.
     updateInvoice: (id, i) => {
       void updateRow(TABLES.invoices, id, i as Record<string, unknown>);
-      set((s) => ({ ...s, invoices: s.invoices.map((x) => (x.id === id ? { ...x, ...i } : x)) }));
+      set((s) => {
+        const existing = s.invoices.find((x) => x.id === id);
+        const invoices = s.invoices.map((x) => (x.id === id ? { ...x, ...i } : x));
+        let tenants = s.tenants;
+        for (const tid of new Set([existing?.tenantId, i.tenantId])) {
+          if (tid) tenants = recomputePaidUp(tid, tenants, s.ledger, s.rentChanges, invoices);
+        }
+        return { ...s, invoices, tenants };
+      });
     },
     deleteInvoice: (id) => {
       void deleteRow(TABLES.invoices, id);
-      set((s) => ({ ...s, invoices: s.invoices.filter((x) => x.id !== id) }));
+      set((s) => {
+        const existing = s.invoices.find((x) => x.id === id);
+        const invoices = s.invoices.filter((x) => x.id !== id);
+        const tenants = existing ? recomputePaidUp(existing.tenantId, s.tenants, s.ledger, s.rentChanges, invoices) : s.tenants;
+        return { ...s, invoices, tenants };
+      });
     },
 
     addLoan: (l) => {
@@ -1061,7 +1081,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const rentChanges = s.rentChanges.map((r) => (r.id === id ? { ...r, ...patch } : r));
         const changed = rentChanges.find((r) => r.id === id);
         const tenants = changed
-          ? recomputePaidUp(changed.tenantId, s.tenants, s.ledger, rentChanges)
+          ? recomputePaidUp(changed.tenantId, s.tenants, s.ledger, rentChanges, s.invoices)
           : s.tenants;
         return { ...s, rentChanges, tenants };
       });
@@ -1072,7 +1092,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const removed = s.rentChanges.find((r) => r.id === id);
         const rentChanges = s.rentChanges.filter((r) => r.id !== id);
         const tenants = removed
-          ? recomputePaidUp(removed.tenantId, s.tenants, s.ledger, rentChanges)
+          ? recomputePaidUp(removed.tenantId, s.tenants, s.ledger, rentChanges, s.invoices)
           : s.tenants;
         return { ...s, rentChanges, tenants };
       });

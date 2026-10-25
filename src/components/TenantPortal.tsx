@@ -1,7 +1,7 @@
 import { useStore } from "@/lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { buildTenantLedger, fmtCurrency, addDays } from "@/lib/calculations";
+import { buildTenantLedger, fmtCurrency } from "@/lib/calculations";
 import { Home, Calendar, Receipt, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -11,8 +11,10 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
   const tenant = state.tenants.find((t) => t.id === tenantId);
   if (!tenant) return <div className="p-6">Tenant not found.</div>;
   const property = state.properties.find((p) => p.id === tenant.propertyId);
-  const { total, rows, outstandingInvoices } = buildTenantLedger(tenant, state.ledger, state.invoices, state.rentChanges);
-  const unpaidInvoices = state.invoices.filter((i) => i.tenantId === tenantId && i.status === "Unpaid");
+  const { overdue, rows, outstandingInvoices, nextDue } = buildTenantLedger(tenant, state.ledger, state.invoices, state.rentChanges);
+  // Invoices are settled by ordinary payments on the one account — status is derived, not stored.
+  const unpaidIds = new Set(rows.filter((r) => r.invoiceId && r.invoiceStatus !== "Paid").map((r) => r.invoiceId));
+  const unpaidInvoices = state.invoices.filter((i) => unpaidIds.has(i.id));
   const receipts = rows.filter((r) => r.credit > 0);
 
   return (
@@ -34,7 +36,7 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Next rent due</div>
-            <div className="font-medium">{addDays(tenant.paidUpToDate, 1)}</div>
+            <div className="font-medium">{nextDue}</div>
           </div>
           <div>
             <div className="text-xs text-muted-foreground">Lease expires</div>
@@ -51,13 +53,13 @@ export function TenantPortal({ tenantId }: { tenantId: string }) {
         <CardHeader>
           <CardTitle className="flex items-center justify-between text-base">
             <span>Account balance</span>
-            <Badge variant={total > 0 ? "destructive" : "secondary"}>
-              {total > 0 ? "In arrears" : "Up to date"}
+            <Badge variant={overdue > 0.01 ? "destructive" : "secondary"}>
+              {overdue > 0.01 ? "In arrears" : "Up to date"}
             </Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-semibold">{fmtCurrency(Math.max(0, total))}</div>
+          <div className="text-2xl font-semibold">{fmtCurrency(overdue)}</div>
           <div className="text-xs text-muted-foreground">Owing across rent + invoices</div>
         </CardContent>
       </Card>

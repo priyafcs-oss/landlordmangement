@@ -58,18 +58,18 @@ function CopilotPage() {
   const buildContext = () => {
     const tenantsSummary = state.tenants.map((t) => {
       const prop = state.properties.find((p) => p.id === t.propertyId);
-      const { total, outstandingRent, outstandingInvoices } = buildTenantLedger(t, state.ledger, state.invoices, state.rentChanges);
+      const { overdue, outstandingRent, outstandingInvoices, nextDue } = buildTenantLedger(t, state.ledger, state.invoices, state.rentChanges);
       return {
         name: t.name,
         property: prop?.address,
         rent: `${t.rentAmount} ${t.rentFrequency}`,
         leaseExpiry: t.leaseExpiry || "Periodic",
         daysUntilExpiry: t.leaseExpiry ? daysUntil(t.leaseExpiry) : null,
-        paidUpToDate: t.paidUpToDate,
-        totalOwing: total,
+        nextRentDue: nextDue,
+        totalOwing: overdue,
         rentArrears: outstandingRent,
         invoicesOutstanding: outstandingInvoices,
-        inArrears: total > 0.01,
+        inArrears: overdue > 0.01,
       };
     });
     const propertiesSummary = state.properties.map((p) => {

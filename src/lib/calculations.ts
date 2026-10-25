@@ -253,7 +253,9 @@ export interface LedgerRow {
   isDue?: boolean;
   entryId?: string; // if from ledger entry (payment)
   invoiceId?: string; // if from a tenant invoice (e.g. a recharged bill line item)
-  invoiceStatus?: TenantInvoice["status"];
+  /** Derived, never stored: whether the tenant's payments (applied to the oldest charge first)
+   * have covered this invoice yet — see buildTenantLedger. */
+  invoiceStatus?: "Paid" | "Part paid" | "Unpaid";
   canDelete?: boolean;
   source?: LedgerEntry["source"];
 }
@@ -280,8 +282,20 @@ function isNonRentRecharge(e: LedgerEntry): boolean {
   return e.type === "Water Invoice" || e.type === "Maintenance Charge";
 }
 
+/** What a ledger entry charges the tenant's account. A recharge line on an agent statement
+ * (water usage, ...) is the tenant paying a charge that was never itself posted here — on its own
+ * it read as pure credit, so every water payment made the tenant look that much ahead on rent.
+ * It's charged-and-paid on the one row, so it nets to zero. */
+function entryDebit(e: LedgerEntry): number {
+  return isNonRentRecharge(e) && e.credit > 0 && !e.debit ? e.credit : e.debit;
+}
+
 /**
- * Build the full running-balance ledger for a tenant.
+ * Build the full running-balance ledger for a tenant — one plain debit/credit account: rent
+ * cycles, invoices and debit entries are charges, and every payment is a credit against the whole
+ * balance. Invoices are always charges whatever their stored status (tenants pay them inside
+ * their normal rent transfers, so nobody has to "mark paid"); each invoice row's status is derived
+ * by applying all credits to the oldest charges first.
  * Weekly rent cycles are 7 days; a cycle spans cursor .. cursor+period-1 inclusive
  * (7 calendar days for weekly, 14 for fortnightly).
  */
@@ -290,12 +304,23 @@ export function buildTenantLedger(
   entries: LedgerEntry[],
   invoices: TenantInvoice[],
   rentChanges: RentChange[] = [],
-): { rows: LedgerRow[]; outstandingRent: number; outstandingInvoices: number; total: number; nextDue: string } {
+): {
+  rows: LedgerRow[];
+  /** Closing balance — includes the whole current rent cycle, charged in advance on its first day. */
+  total: number;
+  /** What's actually owed as of today: the closing balance less the part of the current cycle
+   * still to come. A tenant paid up to today or later never owes anything here. */
+  overdue: number;
+  outstandingRent: number;
+  outstandingInvoices: number;
+  nextDue: string;
+} {
   const period = periodDays(tenant.rentFrequency);
   const rows: LedgerRow[] = [];
 
   // Rent due milestones from lease start to today
   const today = todayISO();
+  let unaccrued = 0;
   if (tenant.leaseStart) {
     let cursor: string = tenant.leaseStart;
     const cap = tenant.leaseExpiry || "9999-12-31";
@@ -329,25 +354,20 @@ export function buildTenantLedger(
         balance: 0,
         isDue: true,
       });
+      // The not-yet-reached days of the cycle containing today (charged in advance, not owed yet).
+      unaccrued = cycleEnd > today ? (cycleAmount * daysBetween(today, cycleEnd)) / period : 0;
       cursor = addDays(cursor, period);
     }
   }
 
-  // Add credit payments (from ledger entries)
   entries
     .filter((e) => e.tenantId === tenant.id)
     .forEach((e) => {
-      // A recharge line on an agent statement (water usage, ...) is the tenant paying a charge
-      // that was never itself posted here — on its own it reads as pure credit, so every water
-      // payment made the tenant look that much ahead on rent, and the only way to square it was a
-      // manual Adjustment Debit, which paidUpToDetails then (correctly, for rent) subtracted from
-      // rent paid. Show it as charged-and-paid on the one row so it nets to zero.
-      const selfSettlingRecharge = isNonRentRecharge(e) && e.credit > 0 && !e.debit;
       rows.push({
         id: e.id,
         date: e.date,
         description: `${e.type}: ${e.description}`,
-        debit: selfSettlingRecharge ? e.credit : e.debit,
+        debit: entryDebit(e),
         credit: e.credit,
         balance: 0,
         entryId: e.id,
@@ -356,7 +376,6 @@ export function buildTenantLedger(
       });
     });
 
-  // Add invoice charges
   invoices
     .filter((i) => i.tenantId === tenant.id)
     .forEach((inv) => {
@@ -364,11 +383,10 @@ export function buildTenantLedger(
         id: `inv-${inv.id}`,
         date: inv.dateIssued,
         description: `${inv.chargeType} Invoice ${inv.description ? "- " + inv.description : ""}`,
-        debit: inv.status === "Unpaid" ? inv.amountDue : 0,
-        credit: inv.status === "Paid" ? inv.amountDue : 0,
+        debit: inv.amountDue,
+        credit: 0,
         balance: 0,
         invoiceId: inv.id,
-        invoiceStatus: inv.status,
         canDelete: true,
       });
     });
@@ -381,18 +399,26 @@ export function buildTenantLedger(
     r.balance = round2(running);
   }
 
-  const outstandingInvoices = unpaidInvoiceTotal(tenant.id, invoices);
-  const outstandingRent = Math.max(0, running - outstandingInvoices);
+  // Apply every credit to the charges oldest first — whatever isn't covered is still owed.
+  let pool = rows.reduce((s, r) => s + r.credit, 0);
+  let unpaidInvoices = 0;
+  for (const r of rows) {
+    if (!r.debit) continue;
+    const covered = Math.min(r.debit, Math.max(0, pool));
+    pool -= r.debit;
+    if (!r.invoiceId) continue;
+    const left = r.debit - covered;
+    r.invoiceStatus = left < 0.005 ? "Paid" : covered < 0.005 ? "Unpaid" : "Part paid";
+    unpaidInvoices += left;
+  }
+
   const total = round2(running);
-  const nextDue = addDays(tenant.paidUpToDate, 1);
+  const overdue = Math.max(0, round2(running - unaccrued));
+  const outstandingInvoices = round2(Math.min(unpaidInvoices, overdue));
+  const outstandingRent = round2(overdue - outstandingInvoices);
+  const nextDue = addDays(paidUpToDetails(tenant, entries, rentChanges, invoices).date, 1);
 
-  return { rows, outstandingRent, outstandingInvoices, total, nextDue };
-}
-
-function unpaidInvoiceTotal(tenantId: string, invoices: TenantInvoice[]) {
-  return invoices
-    .filter((i) => i.tenantId === tenantId && i.status === "Unpaid")
-    .reduce((s, i) => s + i.amountDue, 0);
+  return { rows, total, overdue, outstandingRent, outstandingInvoices, nextDue };
 }
 
 export function tenantArrearsStatus(
@@ -401,8 +427,8 @@ export function tenantArrearsStatus(
   invoices: TenantInvoice[],
   rentChanges: RentChange[] = [],
 ): { inArrears: boolean; amount: number } {
-  const { total } = buildTenantLedger(tenant, entries, invoices, rentChanges);
-  return { inArrears: total > 0.01, amount: total };
+  const { overdue } = buildTenantLedger(tenant, entries, invoices, rentChanges);
+  return { inArrears: overdue > 0.01, amount: overdue };
 }
 
 export interface PaidUpToInfo {
@@ -411,22 +437,19 @@ export interface PaidUpToInfo {
   extra: number;
 }
 
-export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[], rentChanges: RentChange[] = []): PaidUpToInfo {
+/** Paid-up-to date on the one overall account: every credit, less every non-rent charge
+ * (invoices, debit entries), is what's left to have paid rent with — so an invoice settled inside
+ * a normal rent transfer pulls the date back by exactly that much, with nothing to mark paid. */
+export function paidUpToDetails(
+  tenant: Tenant,
+  entries: LedgerEntry[],
+  rentChanges: RentChange[] = [],
+  invoices: TenantInvoice[] = [],
+): PaidUpToInfo {
   const start = tenant.leaseStart ?? tenant.paidUpToDate;
-  // Rent Payment and Adjustment/Manual credits all advance the paid-up date; an Adjustment
-  // Debit (e.g. a clawed-back shortfall) pulls it back — previously only "Rent Payment" counted,
-  // so adjustments silently had no effect on this date at all.
-  const totalPaid = entries
-    .filter((e) => e.tenantId === tenant.id)
-    .reduce((s, e) => {
-      if (e.type === "Rent Payment" || e.type === "Adjustment Credit" || e.type === "Manual Credit") {
-        return s + e.credit;
-      }
-      if (e.type === "Adjustment Debit") {
-        return s - e.debit;
-      }
-      return s;
-    }, 0);
+  const totalPaid =
+    entries.filter((e) => e.tenantId === tenant.id).reduce((s, e) => s + e.credit - entryDebit(e), 0) -
+    invoices.filter((i) => i.tenantId === tenant.id).reduce((s, i) => s + i.amountDue, 0);
 
   const EPS = 1e-8;
   // Walk forward day by day from lease start, consuming totalPaid against whatever rent was
@@ -459,20 +482,30 @@ export function paidUpToDetails(tenant: Tenant, entries: LedgerEntry[], rentChan
  * at all when `ledger` is empty: selectAll returns [] on a failed load, which would otherwise wind
  * every tenant back to their lease start.
  */
-export function healPaidUpDates(tenants: Tenant[], ledger: LedgerEntry[], rentChanges: RentChange[]): Tenant[] {
+export function healPaidUpDates(
+  tenants: Tenant[],
+  ledger: LedgerEntry[],
+  rentChanges: RentChange[],
+  invoices: TenantInvoice[] = [],
+): Tenant[] {
   if (ledger.length === 0) return [];
   const changed: Tenant[] = [];
   for (const t of tenants) {
     if (!t.paidUpToDate) continue;
-    const derived = paidUpToDateFromPayments(t, ledger, rentChanges);
+    const derived = paidUpToDateFromPayments(t, ledger, rentChanges, invoices);
     if (derived === t.paidUpToDate || Math.abs(daysBetween(t.paidUpToDate, derived)) > 3) continue;
     changed.push({ ...t, paidUpToDate: derived });
   }
   return changed;
 }
 
-export function paidUpToDateFromPayments(tenant: Tenant, entries: LedgerEntry[], rentChanges: RentChange[] = []): string {
-  return paidUpToDetails(tenant, entries, rentChanges).date;
+export function paidUpToDateFromPayments(
+  tenant: Tenant,
+  entries: LedgerEntry[],
+  rentChanges: RentChange[] = [],
+  invoices: TenantInvoice[] = [],
+): string {
+  return paidUpToDetails(tenant, entries, rentChanges, invoices).date;
 }
 
 export function daysUntil(dateISO: string): number {
