@@ -23,7 +23,6 @@ describe("planRecharge", () => {
       tenantId: "t1",
       amountDue: 261.59,
       chargeType: "Water Usage",
-      status: "Unpaid",
     });
     expect(r).toMatchObject({ rechargeToTenant: true, recharged: true });
   });

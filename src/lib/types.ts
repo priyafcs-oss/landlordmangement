@@ -1,4 +1,5 @@
 export type RentFrequency = "Weekly" | "Fortnightly" | "Monthly";
+export type Weekday = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 export type LeaseDuration = "6 Months" | "12 Months" | "Periodic";
 export type RepaymentFrequency = "Weekly" | "Fortnightly" | "Monthly";
 
@@ -344,6 +345,10 @@ export interface Tenant {
   unitId?: string;
   propertyId: string;
   leaseStart?: string;
+  rentCycleStartDay?: Weekday;
+  /** Date from which this weekly cycle day becomes effective — keeps a custom weekend/weekday
+   * pattern from the lease start without rewriting every earlier cycle in the ledger. */
+  rentCycleStartDayEffectiveFrom?: string;
   leaseExpiry?: string; // empty string / undefined = Periodic
   leaseDuration?: LeaseDuration;
   /** Set once the tenant has given notice — the date they're actually moving out, distinct from
@@ -424,7 +429,6 @@ export interface TenantInvoice {
   amountDue: number;
   dateIssued: string;
   dueDate: string;
-  status: "Unpaid" | "Paid";
   description?: string;
 }
 

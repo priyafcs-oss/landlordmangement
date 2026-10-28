@@ -24,7 +24,7 @@ const pay = (date: string, credit: number) =>
     credit,
   }) as LedgerEntry;
 
-const invoice = (amountDue: number, status: TenantInvoice["status"] = "Unpaid") =>
+const invoice = (amountDue: number) =>
   ({
     id: "i1",
     tenantId: "t1",
@@ -32,7 +32,6 @@ const invoice = (amountDue: number, status: TenantInvoice["status"] = "Unpaid") 
     amountDue,
     dateIssued: "2026-10-05",
     dueDate: "2026-10-19",
-    status,
     description: "",
   }) as TenantInvoice;
 
@@ -55,13 +54,13 @@ describe("one-account tenant ledger", () => {
     expect(ledger.nextDue).toBe("2026-11-01");
   });
 
-  it("ignores a stale stored invoice status — an invoice is always a charge", () => {
+  it("an invoice is always treated as an outstanding charge until the ledger covers it", () => {
     const entries = [pay("2026-10-03", 2800)];
-    const ledger = buildTenantLedger(tenant, [], [invoice(140, "Paid")]);
+    const ledger = buildTenantLedger(tenant, [], [invoice(140)]);
     expect(ledger.rows.find((r) => r.invoiceId)?.credit).toBe(0);
     expect(ledger.rows.find((r) => r.invoiceId)?.invoiceStatus).toBe("Unpaid");
     // Credits go to the oldest charge first: the 5 Oct invoice is covered before the 24 Oct rent.
-    const paid = buildTenantLedger(tenant, entries, [invoice(140, "Unpaid")]);
+    const paid = buildTenantLedger(tenant, entries, [invoice(140)]);
     expect(paid.total).toBeCloseTo(140, 2);
     expect(paid.rows.find((r) => r.invoiceId)?.invoiceStatus).toBe("Paid");
   });

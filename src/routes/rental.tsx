@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Trash2, Plus, Send, Upload, Copy, SlidersHorizontal, CalendarClock, FileSignature, Mail, Download, FileDown, TrendingUp, ChevronDown, ChevronUp, History, RefreshCw, IdCard, ShieldCheck, FileText, TriangleAlert, Pencil } from "lucide-react";
-import { buildTenantLedger, fmtCurrency, todayISO, addDays, dailyRentRate, paidUpToDetails, ausFinancialYear, fyRange, buildFyOptions, type LedgerRow } from "@/lib/calculations";
+import { buildTenantLedger, fmtCurrency, todayISO, addDays, dailyRentRate, paidUpToDetails, ausFinancialYear, fyRange, buildFyOptions, formatDateWithWeekday, tenantCycleLabel, type LedgerRow } from "@/lib/calculations";
 import { bucketBy } from "@/lib/group";
 import type { Tenant, Property } from "@/lib/types";
 
@@ -52,6 +52,7 @@ import { useAiExtraction } from "@/lib/useAiExtraction";
 import { emailTenant, rentReceivedEmail, ledgerEmail } from "@/lib/tenantEmails";
 import { formatMonthLabel } from "@/lib/format";
 import { PropertyOptions } from "@/components/PropertyOptions";
+import { getDashboardReminder, setDashboardReminderCompleted, upsertInvoiceReminder } from "@/lib/dashboardReminders";
 
 export const Route = createFileRoute("/rental")({
   head: () => ({
@@ -189,10 +190,17 @@ function TenantSummaryCard({ tenant, property }: { tenant: Tenant; property?: Pr
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
           <div>
             <div className="text-muted-foreground">Lease start</div>
-            <div className="mt-0.5 font-medium">{tenant.leaseStart || "—"}</div>
+            <div className="mt-0.5 font-medium">{tenant.leaseStart ? formatDateWithWeekday(tenant.leaseStart) : "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Rent cycle</div>
+            <div className="mt-0.5 font-medium">{tenant.rentFrequency === "Weekly" ? `${tenantCycleLabel(tenant)} cycle` : tenant.rentFrequency}</div>
+            {tenant.rentFrequency === "Weekly" && tenant.rentCycleStartDayEffectiveFrom && (
+              <div className="mt-0.5 text-[11px] text-muted-foreground">Effective from {formatDateWithWeekday(tenant.rentCycleStartDayEffectiveFrom)}</div>
+            )}
           </div>
           <div>
             <div className="text-muted-foreground">Lease end</div>
@@ -600,12 +608,33 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   const [paymentDate, setPaymentDate] = useState(todayISO());
   const [fy, setFy] = useState<string>("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("month");
+  const rechargeReminderState = useMemo(
+    () =>
+      state.invoices
+        .filter((invoice) => invoice.tenantId === tenant.id)
+        .map((invoice) => ({
+          invoice,
+          reminder: upsertInvoiceReminder(invoice, tenant, tenant.propertyId),
+        })),
+    [state.invoices, tenant.id, tenant.propertyId],
+  );
 
   const propertyAddress = tenant.unitAddress || state.properties.find((p) => p.id === tenant.propertyId)?.address || "";
   // Derived live from the whole account (payments less invoices/charges), not the persisted copy.
   const paidUpTo = paidUpToDetails(tenant, state.ledger, state.rentChanges, state.invoices);
+  const lastPayment = [...rows]
+    .filter((r) => r.credit > 0)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
 
   const fyOptions = useMemo(() => buildFyOptions(5), []);
+  const rechargeReminders = useMemo(
+    () =>
+      rechargeReminderState
+        .filter(({ reminder }) => !reminder.completed)
+        .map(({ invoice }) => invoice)
+        .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
+    [rechargeReminderState],
+  );
 
   // Filtering/grouping only affects what's displayed/exported — arrears Stats above always
   // reflect the tenant's full unfiltered history.
@@ -719,18 +748,62 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-4">
-          <Stat
-            label="Paid up to"
-            value={
-              paidUpTo.extra > 0
-                ? `${paidUpTo.date} + ${fmtCurrency(paidUpTo.extra)} extra`
-                : paidUpTo.date
-            }
-          />
-          <Stat label="Next rent due" value={nextDue} />
+          <div className="rounded-md bg-muted p-3">
+            <div className="text-xs text-muted-foreground">Paid up to / cycle</div>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">
+                  {paidUpTo.extra > 0
+                    ? `${formatDateWithWeekday(paidUpTo.date)} + ${fmtCurrency(paidUpTo.extra)} extra`
+                    : formatDateWithWeekday(paidUpTo.date)}
+                </div>
+                {tenant.rentFrequency === "Weekly" && (
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    {tenantCycleLabel(tenant)}
+                    {tenant.rentCycleStartDayEffectiveFrom && (
+                      <span className="ml-1">· effective from {formatDateWithWeekday(tenant.rentCycleStartDayEffectiveFrom)}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <TenantDialog propertyId={tenant.propertyId} tenant={tenant}>
+                <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" title="Edit rent cycle and effective date">
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </TenantDialog>
+            </div>
+          </div>
+          <Stat label="Next rent due" value={formatDateWithWeekday(nextDue)} />
+          <Stat label="Last payment" value={lastPayment ? `${fmtCurrency(lastPayment.credit)} · ${formatDateWithWeekday(lastPayment.date)}` : "—"} />
           <Stat label="Rent overdue" value={fmtCurrency(outstandingRent)} />
-          <Stat label="Invoices unpaid" value={fmtCurrency(outstandingInvoices)} />
         </div>
+
+        {rechargeReminders.length > 0 && (
+          <div className="rounded border bg-muted/40 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">Recharge reminders</div>
+              <Badge variant="outline" className="text-[10px]">No financial entry</Badge>
+            </div>
+            <div className="space-y-2">
+              {rechargeReminders.map((invoice) => (
+                <div key={invoice.id} className="flex items-center justify-between gap-3 rounded border bg-background px-2 py-1.5 text-xs">
+                  <div>
+                    <div className="font-medium">{invoice.chargeType} — {fmtCurrency(invoice.amountDue)}</div>
+                    <div className="text-muted-foreground">Due {formatDateWithWeekday(invoice.dueDate)} · {invoice.description || "Recharge"}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2"
+                    onClick={() => setDashboardReminderCompleted(invoice.id, true)}
+                  >
+                    Mark done
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-1">

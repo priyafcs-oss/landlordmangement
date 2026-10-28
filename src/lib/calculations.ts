@@ -192,6 +192,56 @@ export function todayISO(): string {
   return localISO(new Date());
 }
 
+export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+export function weekdayName(iso: string): string {
+  if (!iso) return "Mon";
+  const d = new Date(`${iso}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "Mon";
+  return WEEKDAY_LABELS[(d.getUTCDay() + 6) % 7];
+}
+
+export function formatDateWithWeekday(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(`${iso}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${weekdayName(iso)}, ${d.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+export function activeRentCycleStartDay(tenant: Tenant, referenceDate: string = todayISO()): Weekday {
+  const selected = (tenant.rentCycleStartDay ?? "Mon") as Weekday;
+  const leaseDefault = (tenant.leaseStart ? weekdayName(tenant.leaseStart) : "Mon") as Weekday;
+  if (tenant.rentFrequency !== "Weekly") return selected;
+
+  // Before the effective date, the cycle follows the original lease-start weekday (or Monday if
+  // nothing was ever set). After the effective date, the custom cycle selection takes over.
+  const effectiveFrom = tenant.rentCycleStartDayEffectiveFrom;
+  if (!effectiveFrom) return selected;
+
+  const ref = new Date(`${referenceDate}T12:00:00Z`);
+  const effective = new Date(`${effectiveFrom}T12:00:00Z`);
+  return ref >= effective ? selected : leaseDefault;
+}
+
+export function tenantCycleLabel(tenant: Tenant): string {
+  const start = activeRentCycleStartDay(tenant) as (typeof WEEKDAY_LABELS)[number];
+  const index = WEEKDAY_LABELS.indexOf(start);
+  const end = WEEKDAY_LABELS[(index + 6) % WEEKDAY_LABELS.length];
+  return `${start}–${end}`;
+}
+
+export function tenantCycleStartDate(tenant: Tenant, referenceDate: string = todayISO()): string {
+  const anchor = tenant.leaseStart || referenceDate;
+  if (tenant.rentFrequency !== "Weekly" || !tenant.rentCycleStartDay) return anchor;
+  const startDay = activeRentCycleStartDay(tenant, referenceDate) as (typeof WEEKDAY_LABELS)[number];
+  const dayIndex = WEEKDAY_LABELS.indexOf(startDay);
+  const ref = new Date(`${referenceDate}T12:00:00Z`);
+  const diff = (ref.getUTCDay() + 6) % 7 - dayIndex;
+  const start = new Date(ref);
+  start.setUTCDate(ref.getUTCDate() - diff);
+  return localISO(start);
+}
+
 /** A Date's LOCAL calendar date as YYYY-MM-DD — use instead of toISOString().slice(0, 10) for a
  * Date built from local fields (new Date(y, m, d), setMonth, ...), which would read back as UTC. */
 export function localISO(d: Date): string {

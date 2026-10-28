@@ -63,7 +63,6 @@ export function buildRechargeInvoice(input: {
     amountDue: input.amount,
     dateIssued: input.date,
     dueDate: addDays(input.date, 14),
-    status: "Unpaid",
     description: input.description,
   };
 }

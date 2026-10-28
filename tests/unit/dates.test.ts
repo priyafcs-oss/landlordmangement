@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  activeRentCycleStartDay,
   addDays,
   addMonths,
   buildTenantLedger,
   healPaidUpDates,
   leaseEndDate,
   localISO,
+  tenantCycleLabel,
   todayISO,
 } from "@/lib/calculations";
 import { computeUpcomingRepayments } from "@/lib/overview";
@@ -80,6 +82,18 @@ describe("tenant ledger Rent Due cycles", () => {
       "Rent Due: 2026-10-03 → 2026-10-09",
       "Rent Due: 2026-10-10 → 2026-10-16",
     ]);
+  });
+
+  it("switches to the selected weekly cycle only after its effective date", () => {
+    const t = tenant({
+      leaseStart: "2026-09-26",
+      rentCycleStartDay: "Fri",
+      rentCycleStartDayEffectiveFrom: "2026-10-10",
+    });
+
+    expect(activeRentCycleStartDay(t, "2026-10-09")).toBe("Sat");
+    expect(activeRentCycleStartDay(t, "2026-10-10")).toBe("Fri");
+    expect(tenantCycleLabel(t)).toBe("Fri–Thu");
   });
 
   it("fortnightly cycles stay 14 days long across DST start", () => {

@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Building2, Pencil, Plus, Trash2, RefreshCw, FileText, History, Receipt, ExternalLink, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, X, Video as VideoIcon, Sparkles, TrendingUp, TriangleAlert, ArrowRight, Search, Calculator, Eye, Landmark, Info, Download, Lock } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf, defaultMethodForDivision, methodAfterDivisionChange, daysBetween } from "@/lib/calculations";
+import { fmtCurrency, todayISO, addDays, addMonths, leaseEndDate, ausFinancialYear, fyRange, buildDepreciationSchedule, itemAnnualClaims, buildFyOptions, expenseCategoryToTaxCategory, fmtModified, likelyRentTenantId, RENT_INCOME_CATEGORY, estimateLoanInterest, annualInterestOf, defaultMethodForDivision, methodAfterDivisionChange, daysBetween, weekdayName } from "@/lib/calculations";
 import { SortableTh, toggleSort, type SortState } from "@/components/SortableTh";
 import { lookupAtoEffectiveLife, ATO_EFFECTIVE_LIFE_LABELS } from "@/lib/atoEffectiveLife";
 import { findMatchingUnpaidBill, findDuplicateLedgerEntry, findDuplicateRecord, findDuplicateDepreciationReport } from "@/lib/billMatch";
@@ -37,8 +37,9 @@ import {
   type FeeCheckResult,
   type AgreementFeeTerms,
 } from "@/lib/feeVerification";
-import type { Property, Tenant, RentFrequency, LeaseDuration, RepaymentFrequency, AiIntakeProposal, TenantLeaseProposalPayload, RentLedgerProposalPayload, PropertyDetailProposalPayload, BillProposalPayload, ExpenseProposalPayload, RentChange, LeaseHistory, ContactPerson, Provider, ProviderAgreement, ProviderRole, FeeFrequency, DepreciationItem, DepreciationReportProposalPayload, UnclassifiedProposalPayload, LoanDocumentProposalPayload, LoanStatementProposalPayload, LoanStatementLineItem, BankStatementProposalPayload, PropertySaleProposalPayload, AgencyAgreementProposalPayload, Loan, Expense, LedgerEntry, PropertyUnit, Entity, ExpenseCategory } from "@/lib/types";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/lib/types";
+import type { Property, Tenant, RentFrequency, LeaseDuration, RepaymentFrequency, AiIntakeProposal, TenantLeaseProposalPayload, RentLedgerProposalPayload, PropertyDetailProposalPayload, BillProposalPayload, ExpenseProposalPayload, RentChange, LeaseHistory, ContactPerson, Provider, ProviderAgreement, ProviderRole, FeeFrequency, DepreciationItem, DepreciationReportProposalPayload, UnclassifiedProposalPayload, LoanDocumentProposalPayload, LoanStatementProposalPayload, LoanStatementLineItem, BankStatementProposalPayload, PropertySaleProposalPayload, AgencyAgreementProposalPayload, Loan, Expense, LedgerEntry, PropertyUnit, Entity, ExpenseCategory,
+Weekday,
+} from "@/lib/types";import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, PROVIDER_ROLE_LABELS } from "@/lib/types";
 import { toast } from "sonner";
 import { BillsBoard } from "@/components/BillsBoard";
 import { AddBillDialog } from "@/components/AddBillDialog";
@@ -5481,6 +5482,7 @@ export function LeaseAgreementWizard({
     phone: tenant?.phone ?? "",
     rentAmount: tenant?.rentAmount?.toString() ?? "",
     rentFrequency: (tenant?.rentFrequency ?? "Weekly") as RentFrequency,
+    rentCycleStartDay: (tenant?.rentCycleStartDay ?? (tenant?.leaseStart ? weekdayName(tenant.leaseStart) : "Mon")) as Weekday,
     bondAmount: tenant?.bondAmount?.toString() ?? "",
     bondPaidTo: (tenant?.bondPaidTo ?? "NSW Fair Trading") as NonNullable<Tenant["bondPaidTo"]>,
     leaseStart: tenant?.leaseStart ?? todayISO(),
@@ -5573,6 +5575,7 @@ export function LeaseAgreementWizard({
       phone: leaseForm.phone || undefined,
       rentAmount: parseFloat(leaseForm.rentAmount) || 0,
       rentFrequency: leaseForm.rentFrequency,
+      rentCycleStartDay: leaseForm.rentCycleStartDay,
       bondAmount: leaseForm.bondAmount ? parseFloat(leaseForm.bondAmount) : undefined,
       bondPaidTo: leaseForm.bondAmount ? leaseForm.bondPaidTo : undefined,
       leaseStart: leaseForm.leaseStart || undefined,
@@ -8781,6 +8784,8 @@ export interface TenantInitialValues {
   phone?: string;
   rentAmount?: number;
   rentFrequency?: RentFrequency;
+  rentCycleStartDay?: Weekday;
+  rentCycleStartDayEffectiveFrom?: string;
   leaseStart?: string;
   leaseExpiry?: string;
   leaseDuration?: LeaseDuration;
@@ -8826,6 +8831,12 @@ export function TenantDialog({
     lastRentIncreaseDate: tenant?.lastRentIncreaseDate ?? "",
     rentAmount: tenant?.rentAmount?.toString() ?? initialValues?.rentAmount?.toString() ?? "",
     rentFrequency: (tenant?.rentFrequency ?? initialValues?.rentFrequency ?? "Weekly") as RentFrequency,
+    rentCycleStartDay: (tenant?.rentCycleStartDay ?? initialValues?.rentCycleStartDay ?? (tenant?.leaseStart ? weekdayName(tenant.leaseStart) : "Mon")) as Weekday,
+    rentCycleStartDayEffectiveFrom:
+      tenant?.rentCycleStartDayEffectiveFrom ??
+      initialValues?.rentCycleStartDayEffectiveFrom ??
+      tenant?.leaseStart ??
+      todayISO(),
     bankReference: tenant?.bankReference ?? "",
     bankAccountHolder: tenant?.bankAccountHolder ?? "",
     bondAmount: tenant?.bondAmount?.toString() ?? initialValues?.bondAmount?.toString() ?? "",
@@ -8914,6 +8925,37 @@ export function TenantDialog({
                 <SelectItem value="Monthly">Monthly</SelectItem>
               </SelectContent>
             </Select>
+          </Field>
+          <Field label="Rent cycle start">
+            <Select
+              value={form.rentCycleStartDay}
+              onValueChange={(v) => {
+                const nextDay = v as Weekday;
+                setForm({
+                  ...form,
+                  rentCycleStartDay: nextDay,
+                  rentCycleStartDayEffectiveFrom:
+                    form.rentCycleStartDayEffectiveFrom || todayISO(),
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as Weekday[]).map((day) => (
+                  <SelectItem key={day} value={day}>{day}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Cycle effective from">
+            <Input
+              type="date"
+              value={form.rentCycleStartDayEffectiveFrom || todayISO()}
+              onChange={(e) => setForm({ ...form, rentCycleStartDayEffectiveFrom: e.target.value || todayISO() })}
+              className={form.rentCycleStartDayEffectiveFrom ? "text-foreground" : "text-muted-foreground"}
+            />
           </Field>
           <Field label="Email">
             <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
@@ -9087,6 +9129,12 @@ export function TenantDialog({
             onClick={() => {
               if (!form.name) return toast.error("Name is required");
               if (!form.rentAmount) return toast.error("Rent amount is required");
+              if (form.rentFrequency === "Weekly" && !form.rentCycleStartDay) return toast.error("Rent cycle start is required");
+              const effectiveFrom = form.rentCycleStartDayEffectiveFrom || todayISO();
+              if (form.rentFrequency === "Weekly" && !form.rentCycleStartDayEffectiveFrom) {
+                setForm({ ...form, rentCycleStartDayEffectiveFrom: effectiveFrom });
+                return toast.error("Cycle effective date is required");
+              }
               if (!check12Months()) return;
               const rentAmount = parseFloat(form.rentAmount) || 0;
               const defaultPaid = form.leaseStart
@@ -9111,6 +9159,8 @@ export function TenantDialog({
                 lastRentIncreaseDate: form.lastRentIncreaseDate || undefined,
                 rentAmount,
                 rentFrequency: form.rentFrequency,
+                rentCycleStartDay: form.rentCycleStartDay || undefined,
+                rentCycleStartDayEffectiveFrom: effectiveFrom,
                 bankReference: form.bankReference || undefined,
                 bankAccountHolder: form.bankAccountHolder || undefined,
                 bondAmount: form.bondAmount ? parseFloat(form.bondAmount) : undefined,

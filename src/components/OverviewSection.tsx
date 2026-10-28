@@ -1,5 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { loadDashboardReminders, saveDashboardReminders, type DashboardReminder } from "@/lib/dashboardReminders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -27,7 +29,8 @@ import {
   Activity as ActivityIcon,
   ShieldCheck,
 } from "lucide-react";
-import { buildActivityFeed, daysUntil, fmtCurrency, billOwed } from "@/lib/calculations";
+import { BillDetailDialog } from "@/components/BillDetailDialog";
+import { buildActivityFeed, daysUntil, fmtCurrency, billOwed, formatDateWithWeekday, todayISO } from "@/lib/calculations";
 import {
   computeOverviewMetrics,
   computeCashflowSeries,
@@ -154,6 +157,7 @@ export function OverviewSection({
     .map((b) => ({ bill: b, days: daysUntil(b.dueDate) }))
     .sort((a, b) => a.days - b.days)
     .slice(0, 10);
+  const propertyLookup = new Map(properties.map((p) => [p.id, p]));
 
   const chartData = valueDebtPoints.map((p, i) => {
     const lastActualIndex = valueDebtPoints.reduce(
@@ -204,6 +208,8 @@ export function OverviewSection({
             </CardContent>
           </Card>
 
+          <ReminderBoard properties={properties} tenants={tenants} />
+
           <Card>
             <CardHeader className="pb-0">
               <Tabs defaultValue="activity">
@@ -250,17 +256,30 @@ export function OverviewSection({
                     {upcomingBills.length === 0 && (
                       <div className="text-xs text-muted-foreground">No unpaid bills on file.</div>
                     )}
-                    {upcomingBills.map(({ bill, days }) => (
-                      <div
-                        key={bill.id}
-                        className="flex items-center justify-between gap-2 text-xs"
-                      >
-                        <span className="min-w-0 flex-1 truncate">
-                          {bill.billType} — {fmtCurrency(billOwed(bill))}
-                        </span>
-                        <DueInBadge days={days} compact className="shrink-0" />
-                      </div>
-                    ))}
+                    {upcomingBills.map(({ bill }) => {
+                      const property = propertyLookup.get(bill.propertyId ?? "");
+                      return (
+                        <BillDetailDialog
+                          key={bill.id}
+                          bill={bill}
+                          propertyLabel={property?.address ?? "Property"}
+                          trigger={
+                            <button
+                              type="button"
+                              className="flex w-full items-center justify-between gap-2 rounded border p-2 text-left text-xs transition-colors hover:bg-muted/50"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium">{bill.billType} — {fmtCurrency(billOwed(bill))}</span>
+                                <span className="text-muted-foreground">{property?.address ?? "Property"}</span>
+                              </span>
+                              <Badge variant="outline" className="shrink-0">
+                                Due {formatDateWithWeekday(bill.dueDate)}
+                              </Badge>
+                            </button>
+                          }
+                        />
+                      );
+                    })}
                   </div>
                 </TabsContent>
               </Tabs>
@@ -638,6 +657,172 @@ export function OverviewSection({
 
       <RentReceivedHeatmap cells={heatmap} />
     </div>
+  );
+}
+
+type DashboardReminder = {
+  id: string;
+  title: string;
+  propertyId?: string;
+  tenantId?: string;
+  dueDate?: string;
+  completed: boolean;
+  createdAt: string;
+};
+
+function ReminderBoard({ properties, tenants }: { properties: Property[]; tenants: Tenant[] }) {
+  const [filter, setFilter] = useState<"open" | "completed" | "all">("open");
+  const [draft, setDraft] = useState({ title: "", propertyId: "", tenantId: "", dueDate: todayISO() });
+  const [items, setItems] = useState<DashboardReminder[]>(() => loadDashboardReminders());
+
+  useEffect(() => {
+    saveDashboardReminders(items);
+  }, [items]);
+
+  const propertyLabelMap = useMemo(() => new Map(properties.map((p) => [p.id, p.address])), [properties]);
+  const tenantLabelMap = useMemo(() => new Map(tenants.map((t) => [t.id, t.name])), [tenants]);
+
+  useEffect(() => {
+    const nextItems = loadDashboardReminders();
+    if (nextItems.length !== items.length || nextItems.some((item, idx) => item.id !== items[idx]?.id)) {
+      setItems(nextItems);
+    }
+  }, [items]);
+
+  const visibleItems = useMemo(
+    () =>
+      [...items]
+        .filter((item) => (filter === "open" ? !item.completed : filter === "completed" ? item.completed : true))
+        .sort((a, b) => {
+          const aDate = a.dueDate ?? "9999-12-31";
+          const bDate = b.dueDate ?? "9999-12-31";
+          if (a.completed !== b.completed) return Number(a.completed) - Number(b.completed);
+          return aDate.localeCompare(bDate);
+        }),
+    [filter, items],
+  );
+
+  const addReminder = () => {
+    if (!draft.title.trim()) return;
+    const next: DashboardReminder = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      title: draft.title.trim(),
+      propertyId: draft.propertyId || undefined,
+      tenantId: draft.tenantId || undefined,
+      dueDate: draft.dueDate || undefined,
+      completed: false,
+      createdAt: new Date().toISOString(),
+    };
+    setItems((prev) => [next, ...prev]);
+    setDraft({ title: "", propertyId: "", tenantId: "", dueDate: todayISO() });
+  };
+
+  const toggleReminder = (id: string) => {
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item)));
+  };
+
+  const deleteReminder = (id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">Reminders</CardTitle>
+          <div className="flex gap-1">
+            {(["open", "completed", "all"] as const).map((option) => (
+              <Button
+                key={option}
+                size="sm"
+                variant={filter === option ? "secondary" : "ghost"}
+                className="h-7 px-2 text-[11px]"
+                onClick={() => setFilter(option)}
+              >
+                {option === "open" ? "Open" : option === "completed" ? "Completed" : "All"}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-2 rounded-md border p-2 text-xs">
+          <input
+            className="rounded border bg-background px-2 py-1.5"
+            value={draft.title}
+            onChange={(e) => setDraft((prev) => ({ ...prev, title: e.target.value }))}
+            placeholder="Add a manual reminder"
+          />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <select
+              value={draft.propertyId}
+              onChange={(e) => setDraft((prev) => ({ ...prev, propertyId: e.target.value, tenantId: "" }))}
+              className="rounded border bg-background px-2 py-1.5"
+            >
+              <option value="">Property</option>
+              {properties.map((property) => (
+                <option key={property.id} value={property.id}>{property.address}</option>
+              ))}
+            </select>
+            <select
+              value={draft.tenantId}
+              onChange={(e) => setDraft((prev) => ({ ...prev, tenantId: e.target.value }))}
+              className="rounded border bg-background px-2 py-1.5"
+              disabled={!draft.propertyId}
+            >
+              <option value="">Tenant</option>
+              {tenants
+                .filter((tenant) => !draft.propertyId || tenant.propertyId === draft.propertyId)
+                .map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+                ))}
+            </select>
+            <input
+              type="date"
+              value={draft.dueDate}
+              onChange={(e) => setDraft((prev) => ({ ...prev, dueDate: e.target.value || todayISO() }))}
+              className="rounded border bg-background px-2 py-1.5"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" onClick={addReminder}>Add reminder</Button>
+          </div>
+        </div>
+
+        {visibleItems.length === 0 ? (
+          <div className="text-xs text-muted-foreground">No reminders in this view.</div>
+        ) : (
+          <div className="space-y-2">
+            {visibleItems.map((item) => (
+              <div
+                key={item.id}
+                className={`flex items-start justify-between gap-2 rounded border p-2 text-xs ${item.completed ? "bg-muted/50 opacity-70" : "bg-background"}`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-medium ${item.completed ? "line-through" : ""}`}>{item.title}</span>
+                    {item.completed ? <Badge variant="secondary">Done</Badge> : <Badge variant="outline">Open</Badge>}
+                  </div>
+                  <div className="mt-1 text-muted-foreground">
+                    {item.propertyId ? propertyLabelMap.get(item.propertyId) ?? "Property" : "No property"}
+                    {item.tenantId && <span> · {tenantLabelMap.get(item.tenantId) ?? "Tenant"}</span>}
+                  </div>
+                  {item.dueDate && <div className="mt-1 text-muted-foreground">Due {formatDateWithWeekday(item.dueDate)}</div>}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => toggleReminder(item.id)}>
+                    {item.completed ? "Re-open" : "Done"}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => deleteReminder(item.id)}>
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
