@@ -210,7 +210,12 @@ export function formatDateWithWeekday(iso?: string): string {
 
 export function activeRentCycleStartDay(tenant: Tenant, referenceDate: string = todayISO()): Weekday {
   const leaseDefault = (tenant.leaseStart ? weekdayName(tenant.leaseStart) : "Mon") as Weekday;
-  const selected = (tenant.rentCycleStartDay ?? leaseDefault) as Weekday;
+  const legacyDefaultMon =
+    tenant.rentCycleStartDay === "Mon" &&
+    !tenant.rentCycleStartDayEffectiveFrom &&
+    tenant.leaseStart &&
+    weekdayName(tenant.leaseStart) !== "Mon";
+  const selected = (legacyDefaultMon ? leaseDefault : (tenant.rentCycleStartDay ?? leaseDefault)) as Weekday;
   if (tenant.rentFrequency !== "Weekly") return selected;
 
   // If a tenant never had a custom rent-cycle override, the visible cycle follows the lease-start

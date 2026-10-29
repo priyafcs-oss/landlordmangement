@@ -90,6 +90,12 @@ describe("tenant ledger Rent Due cycles", () => {
     expect(tenantCycleLabel(t)).toBe("Sat–Fri");
   });
 
+  it("treats a stored legacy default of Mon as unset when the lease starts on another weekday", () => {
+    const t = tenant({ leaseStart: "2026-09-26", rentCycleStartDay: "Mon" });
+    expect(activeRentCycleStartDay(t)).toBe("Sat");
+    expect(tenantCycleLabel(t)).toBe("Sat–Fri");
+  });
+
   it("switches to the selected weekly cycle only after its effective date", () => {
     const t = tenant({
       leaseStart: "2026-09-26",
