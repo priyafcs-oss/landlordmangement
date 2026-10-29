@@ -108,6 +108,32 @@ describe("tenant ledger Rent Due cycles", () => {
     expect(tenantCycleLabel(t)).toBe("Fri–Thu");
   });
 
+  it("ledger rent cycles realign to a changed cycle day, pro-rating the cut-short week", () => {
+    const t = tenant({
+      leaseStart: "2026-09-26",
+      rentAmount: 700,
+      rentCycleStartDay: "Fri",
+      rentCycleStartDayEffectiveFrom: "2026-10-10",
+    });
+    const due = buildTenantLedger(t, [], []).rows.filter((r) => r.isDue);
+    expect(due.slice(0, 4).map((r) => r.description)).toEqual([
+      "Rent Due: 2026-09-26 → 2026-10-02",
+      "Rent Due: 2026-10-03 → 2026-10-09",
+      "Rent Due: 2026-10-10 → 2026-10-15",
+      "Rent Due: 2026-10-16 → 2026-10-22",
+    ]);
+    expect(due.slice(0, 4).map((r) => r.debit)).toEqual([700, 700, 600, 700]);
+  });
+
+  it("ledger cycles are unchanged when the cycle day matches the lease-start weekday", () => {
+    const t = tenant({ leaseStart: "2026-09-26", rentCycleStartDay: "Sat", rentCycleStartDayEffectiveFrom: "2026-10-10" });
+    expect(dueRows(t).slice(0, 3)).toEqual([
+      "Rent Due: 2026-09-26 → 2026-10-02",
+      "Rent Due: 2026-10-03 → 2026-10-09",
+      "Rent Due: 2026-10-10 → 2026-10-16",
+    ]);
+  });
+
   it("fortnightly cycles stay 14 days long across DST start", () => {
     expect(
       dueRows(tenant({ leaseStart: "2026-09-19", rentFrequency: "Fortnightly" })).slice(0, 2),

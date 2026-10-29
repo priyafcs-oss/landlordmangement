@@ -16,6 +16,7 @@ import type {
   ExpenseCategory,
   IncomeCategory,
   LeaseDuration,
+  Weekday,
 } from "./types";
 import { categoryGroupOf } from "./types";
 import { propertyLabel } from "@/lib/format";
@@ -229,6 +230,19 @@ export function activeRentCycleStartDay(tenant: Tenant, referenceDate: string = 
   return ref >= effective ? selected : leaseDefault;
 }
 
+/** First day of the first cycle on the tenant's newly selected weekly start day (the first such
+ * weekday on/after the change's effective date), or null when the cycle never moved off the
+ * lease-start weekday. buildTenantLedger cuts the cycle before it short so cycles realign here. */
+export function rentCycleRealignDate(tenant: Tenant): string | null {
+  if (tenant.rentFrequency !== "Weekly" || !tenant.leaseStart) return null;
+  const from = tenant.rentCycleStartDayEffectiveFrom ?? tenant.leaseStart;
+  const newDay = activeRentCycleStartDay(tenant, from);
+  if (newDay === weekdayName(tenant.leaseStart)) return null;
+  const offset = (WEEKDAY_LABELS.indexOf(newDay) - WEEKDAY_LABELS.indexOf(weekdayName(from) as Weekday) + 7) % 7;
+  const start = addDays(from, offset);
+  return start > tenant.leaseStart ? start : null;
+}
+
 export function tenantCycleLabel(tenant: Tenant): string {
   const start = activeRentCycleStartDay(tenant) as (typeof WEEKDAY_LABELS)[number];
   const index = WEEKDAY_LABELS.indexOf(start);
@@ -380,9 +394,15 @@ export function buildTenantLedger(
   if (tenant.leaseStart) {
     let cursor: string = tenant.leaseStart;
     const cap = tenant.leaseExpiry || "9999-12-31";
+    // A weekly cycle-day change realigns the cycles from its effective date: the cycle it lands
+    // in is cut short (pro-rated) so the next one starts on the newly selected weekday.
+    const realignAt = rentCycleRealignDate(tenant);
     while (cursor <= today && cursor <= cap) {
       // Cycle spans `period` calendar days: cursor (day 1) ... cursor+period-1 (day 7 for weekly).
-      const cycleEnd = addDays(cursor, period - 1);
+      let cycleEnd = addDays(cursor, period - 1);
+      const isStub = !!realignAt && cursor < realignAt && cycleEnd >= realignAt;
+      if (isStub) cycleEnd = addDays(realignAt, -1);
+      const cycleDays = daysBetween(cursor, cycleEnd) + 1;
       // Charge the rent actually in effect during this cycle — not today's rate applied
       // retroactively to every past cycle. Most cycles have one constant rate throughout, so
       // charge the flat nominal amount (avoids float drift from daily-rate rounding); only when
@@ -392,7 +412,7 @@ export function buildTenantLedger(
       const rateAtStart = rentAmountOnDate(tenant, rentChanges, cursor);
       const rateAtEnd = rentAmountOnDate(tenant, rentChanges, cycleEnd);
       let cycleAmount: number;
-      if (rateAtStart === rateAtEnd) {
+      if (rateAtStart === rateAtEnd && !isStub) {
         cycleAmount = rateAtStart;
       } else {
         let sum = 0;
@@ -411,8 +431,8 @@ export function buildTenantLedger(
         isDue: true,
       });
       // The not-yet-reached days of the cycle containing today (charged in advance, not owed yet).
-      unaccrued = cycleEnd > today ? (cycleAmount * daysBetween(today, cycleEnd)) / period : 0;
-      cursor = addDays(cursor, period);
+      unaccrued = cycleEnd > today ? (cycleAmount * daysBetween(today, cycleEnd)) / cycleDays : 0;
+      cursor = addDays(cycleEnd, 1);
     }
   }
 
