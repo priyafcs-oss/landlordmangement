@@ -8934,8 +8934,7 @@ export function TenantDialog({
                 setForm({
                   ...form,
                   rentCycleStartDay: nextDay,
-                  rentCycleStartDayEffectiveFrom:
-                    form.rentCycleStartDayEffectiveFrom || todayISO(),
+                  rentCycleStartDayEffectiveFrom: todayISO(),
                 });
               }}
             >
