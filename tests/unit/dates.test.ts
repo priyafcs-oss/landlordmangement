@@ -84,6 +84,12 @@ describe("tenant ledger Rent Due cycles", () => {
     ]);
   });
 
+  it("defaults to the lease-start weekday when no cycle override has been set", () => {
+    const t = tenant({ leaseStart: "2026-09-26" });
+    expect(activeRentCycleStartDay(t)).toBe("Sat");
+    expect(tenantCycleLabel(t)).toBe("Sat–Fri");
+  });
+
   it("switches to the selected weekly cycle only after its effective date", () => {
     const t = tenant({
       leaseStart: "2026-09-26",
