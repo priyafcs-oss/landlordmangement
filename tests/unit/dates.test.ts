@@ -7,6 +7,7 @@ import {
   healPaidUpDates,
   leaseEndDate,
   localISO,
+  round2,
   tenantCycleLabel,
   todayISO,
 } from "@/lib/calculations";
@@ -200,5 +201,25 @@ describe("healPaidUpDates", () => {
 
   it("doesn't 'heal' a big difference — that isn't the DST bug", () => {
     expect(healPaidUpDates([{ ...tenant, paidUpToDate: "2026-12-01" }], paid, [])).toEqual([]);
+  });
+});
+
+describe("tenant ledger payment descriptions", () => {
+  const t = { id: "t1", leaseStart: "2026-09-26", rentAmount: 700, rentFrequency: "Weekly" } as unknown as Tenant;
+  const payment = (overrides: Partial<LedgerEntry>) =>
+    ({ id: "p1", tenantId: "t1", date: "2026-09-27", type: "Rent Payment", debit: 0, credit: 120, ...overrides }) as LedgerEntry;
+  const label = (e: LedgerEntry) => buildTenantLedger(t, [e], []).rows.find((r) => r.entryId === e.id)?.description;
+
+  it("a custom payment description replaces the default Rent Payment label", () => {
+    expect(label(payment({ description: "Water usage payment", manual: true }))).toBe("Water usage payment");
+  });
+
+  it("a payment without one keeps the default label", () => {
+    expect(label(payment({ description: "Payment received (1 days)" }))).toBe("Rent Payment: Payment received (1 days)");
+  });
+
+  it("a custom-described payment still credits the account", () => {
+    const { total } = buildTenantLedger(t, [payment({ description: "Paid council rates for me", manual: true })], []);
+    expect(total).toBe(round2(buildTenantLedger(t, [], []).total - 120));
   });
 });

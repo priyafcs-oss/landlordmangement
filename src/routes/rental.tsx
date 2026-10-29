@@ -606,6 +606,7 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
   );
   const [amount, setAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayISO());
+  const [paymentDescription, setPaymentDescription] = useState("");
   const [fy, setFy] = useState<string>("all");
   const [groupBy, setGroupBy] = useState<"none" | "month" | "fy">("month");
   const rechargeReminderState = useMemo(
@@ -676,16 +677,19 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
     // 1 week (weekly rent) = 7 days; 9 weeks = 63 days. Never off-by-one.
     const daysCovered = Math.floor(val / rate);
     // The store re-derives paidUpToDate from lease start + the whole account (credits less invoices/charges).
+    const customDescription = paymentDescription.trim();
     addLedger({
       tenantId: tenant.id,
       date: paymentDate,
       type: "Rent Payment",
-      description: `Payment received (${daysCovered} days)`,
+      description: customDescription || `Payment received (${daysCovered} days)`,
       debit: 0,
       credit: val,
+      ...(customDescription ? { manual: true } : {}),
       source: "manual",
     });
     setAmount("");
+    setPaymentDescription("");
     setPaymentDate(todayISO());
     toast.success(`Posted ${fmtCurrency(val)} — paid-up date recalculated (${daysCovered} days).`);
   };
@@ -823,6 +827,15 @@ function TenantLedgerCard({ tenant }: { tenant: Tenant }) {
               value={paymentDate}
               onChange={(e) => setPaymentDate(e.target.value)}
               className="max-w-[180px]"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Description (optional)</Label>
+            <Input
+              placeholder="e.g. Water usage payment"
+              value={paymentDescription}
+              onChange={(e) => setPaymentDescription(e.target.value)}
+              className="w-[220px]"
             />
           </div>
           <Button onClick={() => postPayment()}>Post Payment</Button>

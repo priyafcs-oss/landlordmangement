@@ -346,6 +346,13 @@ export function likelyRentTenantId(tenants: Tenant[], ledger: LedgerEntry[], pro
     .sort((a, b) => (lastPaid.get(b.id) ?? "").localeCompare(lastPaid.get(a.id) ?? ""))[0]?.id;
 }
 
+/** A payment posted with the landlord's own description ("Water usage payment", "Paid council
+ * rates for me", ...) shows that text alone — it replaces the default "Rent Payment: Payment
+ * received (N days)" label rather than being tacked onto it. */
+export function ledgerEntryLabel(e: LedgerEntry): string {
+  return e.type === "Rent Payment" && e.manual ? e.description : `${e.type}: ${e.description}`;
+}
+
 /** A ledger entry for something the tenant is recharged for (not rent) — it never advances the
  * paid-up-to date, see paidUpToDetails. */
 function isNonRentRecharge(e: LedgerEntry): boolean {
@@ -442,7 +449,7 @@ export function buildTenantLedger(
       rows.push({
         id: e.id,
         date: e.date,
-        description: `${e.type}: ${e.description}`,
+        description: ledgerEntryLabel(e),
         debit: entryDebit(e),
         credit: e.credit,
         balance: 0,
