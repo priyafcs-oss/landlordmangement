@@ -23,6 +23,7 @@ import { CollapsibleGroupSection } from "@/components/CollapsibleGroupSection";
 import { usePersistedToggle } from "@/lib/hooks";
 import { BILL_TYPES } from "@/lib/constants";
 import { propertyLabel } from "@/lib/format";
+import { instalmentGroupSummary } from "@/lib/instalments";
 import { ExpenseCategoryOptions } from "@/components/ExpenseCategoryOptions";
 
 const STATUS_OPTIONS = ["__all__", "Unpaid", "Overdue", "Paid"] as const;
@@ -35,6 +36,8 @@ interface RowHelpers {
   isOverdue: (b: PropertyBill) => boolean;
   propertyLabelOf: (b: PropertyBill) => string | undefined;
   tenantLabelOf: (b: PropertyBill) => string | undefined;
+  /** Every bill in scope, before filters — an instalment group always shows its whole schedule. */
+  allBills: PropertyBill[];
 }
 
 /**
@@ -154,7 +157,7 @@ export function BillsBoard({
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered, groupBy]);
 
-  const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf };
+  const helpers: RowHelpers = { showPropertyFilter, isOverdue, propertyLabelOf, tenantLabelOf, allBills: scopedBills };
   const handleSort = (f: SortField) => setSort((s) => toggleSort(s, f));
 
   const outstanding = scopedBills.filter((b) => b.status !== "Paid");
@@ -434,6 +437,7 @@ function BillsTableBody({
   isOverdue,
   propertyLabelOf,
   tenantLabelOf,
+  allBills,
 }: RowHelpers & {
   rows: PropertyBill[];
   sort: SortState<SortField> | null;
@@ -443,16 +447,17 @@ function BillsTableBody({
 }) {
   // Instalments created from one Add Bill submission share a billGroupId — grouped into a single
   // collapsible row here instead of showing each one flat, so a 3-instalment council notice reads
-  // as one line item until expanded. Grouping runs after filtering/sorting (rows arrives already
-  // sorted from the caller), so a filter that only matches one instalment (e.g. status=Overdue)
-  // still degrades gracefully to a singleton "group".
+  // as one line item until expanded. A filter decides WHICH schedules are listed (rows arrives
+  // already filtered/sorted), but a listed schedule always shows every instalment from allBills —
+  // grouping only the filtered rows made e.g. "Paid" show 7 of 9 instalments and date the group
+  // by its first instalment.
   const groupedRows = useMemo(() => {
     const seen = new Set<string>();
     const out: { key: string; group: PropertyBill[] }[] = [];
     for (const b of rows) {
       if (seen.has(b.id)) continue;
       if (b.billGroupId) {
-        const group = rows
+        const group = allBills
           .filter((x) => x.billGroupId === b.billGroupId)
           .sort((a, c) => (a.dueDate < c.dueDate ? -1 : a.dueDate > c.dueDate ? 1 : 0));
         group.forEach((g) => seen.add(g.id));
@@ -463,7 +468,7 @@ function BillsTableBody({
       }
     }
     return out;
-  }, [rows]);
+  }, [rows, allBills]);
 
   if (rows.length === 0) {
     return (
@@ -506,15 +511,12 @@ function BillsTableBody({
               );
             }
             const isOpen = expanded.has(key);
-            const total = group.reduce((s, b) => s + b.amount, 0);
-            // What's still owed across the whole instalment schedule, not just this row's own
-            // billed amount — a landlord glancing at the Bills list wants to know how much of a
-            // multi-instalment bill is left to pay, not the full original total every time.
-            const pending = group.reduce((s, b) => s + billOwed(b), 0);
-            const paidCount = group.filter((b) => b.status === "Paid").length;
-            const allPaid = paidCount === group.length;
+            // Collapsed, the row shows the next unpaid instalment — its date and what's due on it —
+            // with what's left across the whole schedule underneath.
+            const { next, nextOwed, pending, total, paidCount } = instalmentGroupSummary(group);
+            const allPaid = !next;
             const anyOverdue = group.some(isOverdue);
-            const nextDue = group.find((b) => b.status !== "Paid")?.dueDate ?? group[0].dueDate;
+            const nextDue = next?.dueDate ?? group[group.length - 1].dueDate;
             const primary = group[0];
             return (
               <Fragment key={key}>
@@ -548,8 +550,10 @@ function BillsTableBody({
                       fmtCurrency(total)
                     ) : (
                       <>
-                        <div>{fmtCurrency(pending)} pending</div>
-                        <div className="text-xs font-normal text-muted-foreground">of {fmtCurrency(total)}</div>
+                        <div>{fmtCurrency(nextOwed)} due</div>
+                        <div className="text-xs font-normal text-muted-foreground">
+                          {fmtCurrency(pending)} left of {fmtCurrency(total)}
+                        </div>
                       </>
                     )}
                   </td>

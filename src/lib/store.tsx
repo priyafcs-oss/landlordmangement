@@ -1599,7 +1599,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
         const billPatches = new Map<string, Partial<PropertyBill>>();
         const newExpenses: Expense[] = [];
-        const expenseCostUpdates = new Map<string, number>();
+        const expensePatches = new Map<string, Partial<Expense>>();
 
         if (freshGroup.length > 0) {
           const anchor = freshGroup[0].bill;
@@ -1625,6 +1625,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             bpayReference: anchor.bpayReference,
             paidDate,
             paymentMethod,
+            // The mark-paid comment travels with the payment, so it shows on Transactions too.
+            notes,
             providerName: anchor.providerName,
             providerId: anchor.providerId,
             invoiceFileName: anchor.sourceFileName,
@@ -1654,8 +1656,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // Expense from that first payment already exists and needs its cost brought up to the
           // new total.
           const linkedExpenseId = a.bill.linkedExpenseId!;
-          expenseCostUpdates.set(linkedExpenseId, a.cumulativePaid);
-          void updateRow(TABLES.expenses, linkedExpenseId, { cost: a.cumulativePaid, paidDate, paymentMethod });
+          const patch: Partial<Expense> = { cost: a.cumulativePaid, paidDate, paymentMethod, ...(a.bill.id === id && notes ? { notes } : {}) };
+          expensePatches.set(linkedExpenseId, patch);
+          void updateRow(TABLES.expenses, linkedExpenseId, patch as Record<string, unknown>);
           billPatches.set(a.bill.id, {
             status: a.status,
             paidDate,
@@ -1680,9 +1683,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
         const updated = Array.from(billsById.values());
         const expenses =
-          expenseCostUpdates.size === 0
+          expensePatches.size === 0
             ? s.expenses
-            : s.expenses.map((e) => (expenseCostUpdates.has(e.id) ? { ...e, cost: expenseCostUpdates.get(e.id)! } : e));
+            : s.expenses.map((e) => (expensePatches.has(e.id) ? { ...e, ...expensePatches.get(e.id) } : e));
 
         const firstStatus = affected[0].status;
 

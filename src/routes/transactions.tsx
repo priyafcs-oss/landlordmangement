@@ -130,6 +130,9 @@ interface TxRow {
    * falling back to createdAt when a row has never been edited since it was added. */
   createdAt?: string;
   updatedAt?: string;
+  /** Free-text comment on an expense — including the one typed when marking a bill paid, which
+   * markBillPaid copies onto the Expense it posts. Shown under the description. */
+  notes?: string;
 }
 
 type TxSortField = "date" | "description" | "provider" | "property" | "tenant" | "category" | "taxTreatment" | "source" | "amount" | "modified";
@@ -315,6 +318,7 @@ export function LedgerTab({
         invoiceFileData: e.invoiceFileData ?? e.additionalFiles?.[0]?.fileData ?? undefined,
         createdAt: e.created_at,
         updatedAt: e.updatedAt,
+        notes: e.notes?.trim() || undefined,
       };
     }),
   ];
@@ -343,7 +347,7 @@ export function LedgerTab({
     .filter(
       (r) =>
         !query ||
-        `${r.description} ${r.category} ${r.tenantName ?? ""} ${r.providerName ?? ""}`.toLowerCase().includes(query.toLowerCase()),
+        `${r.description} ${r.category} ${r.tenantName ?? ""} ${r.providerName ?? ""} ${r.notes ?? ""}`.toLowerCase().includes(query.toLowerCase()),
     )
     .filter((r) => !needsAttentionOnly || r.needsAttention)
     .filter((r) => !anyTypeFilter || (typeFilter.income && r.amount > 0) || (typeFilter.expense && r.amount < 0))
@@ -721,9 +725,12 @@ function txCell(key: TxColumnKey, r: TxRow, propertyLabel: string | undefined): 
       return r.category;
     case "description":
       return (
-        <div className="flex items-center gap-1.5 font-medium">
-          {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
-          {r.description}
+        <div>
+          <div className="flex items-center gap-1.5 font-medium">
+            {r.needsAttention && <TriangleAlert className="h-3 w-3 shrink-0 text-amber-600" />}
+            {r.description}
+          </div>
+          {r.notes && <div className="mt-0.5 text-xs font-normal text-muted-foreground">{r.notes}</div>}
         </div>
       );
     case "amount":

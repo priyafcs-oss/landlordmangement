@@ -1,5 +1,6 @@
 import { uid } from "@/lib/constants";
 import type { PropertyBill } from "@/lib/types";
+import { billOwed } from "@/lib/calculations";
 
 /** One editable row of a bill's payment schedule. `id` is set for an instalment already saved. */
 export interface InstalmentRow {
@@ -85,4 +86,30 @@ export function instalmentBills(
     dueDate: r.dueDate,
     amount: parseFloat(r.amount) || 0,
   }));
+}
+
+export interface InstalmentGroupSummary {
+  /** The earliest instalment not yet fully paid (a part-paid one counts), else undefined. */
+  next?: PropertyBill;
+  /** What's still owed on `next` alone — the amount actually due on its due date. */
+  nextOwed: number;
+  /** Still owed across the whole schedule. */
+  pending: number;
+  total: number;
+  paidCount: number;
+}
+
+/** The collapsed Bills-board row for an instalment schedule: next unpaid instalment and its own
+ * amount, plus schedule-wide totals. Pass the WHOLE group, not a filtered slice of it — a status
+ * filter hiding the paid instalments must not change what the schedule says is next or owed. */
+export function instalmentGroupSummary(group: PropertyBill[]): InstalmentGroupSummary {
+  const sorted = [...group].sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
+  const next = sorted.find((b) => b.status !== "Paid");
+  return {
+    next,
+    nextOwed: next ? billOwed(next) : 0,
+    pending: sorted.reduce((s, b) => s + billOwed(b), 0),
+    total: sorted.reduce((s, b) => s + b.amount, 0),
+    paidCount: sorted.filter((b) => b.status === "Paid").length,
+  };
 }
